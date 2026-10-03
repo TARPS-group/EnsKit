@@ -39,7 +39,7 @@ Conventions shared by everything in the module:
   are arrays whose shapes coincide whenever :math:`P = N`, so a positional
   protocol would let ``ensemble`` and ``predictions`` be transposed with no
   error at all. Implementations **should** also accept and ignore ``**_``,
-  which is the layer's forwards-compatibility seam.
+  which is the layer's forward-compatibility seam.
 - **Policies are pure and stateless.** A policy must be a pure function of
   its arguments and its own frozen fields, and must not carry step
   state — which is what makes a run resumable from an
@@ -874,7 +874,7 @@ class AdditiveInflation:
     def __post_init__(self) -> None:
         if not isinstance(self.cov, PSDLinOp):
             raise TypeError(
-                f"AdditiveInflation.cov: must be a enskit.linalg.PSDLinOp, got "
+                f"AdditiveInflation.cov: must be an enskit.linalg.PSDLinOp, got "
                 f"{type(self.cov).__name__}"
             )
         if self.cov.batch_shape != ():

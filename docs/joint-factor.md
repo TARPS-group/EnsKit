@@ -211,7 +211,7 @@ Column $j$ of the conditioned factor is updated sample $j$.
 Two consequences for the API.
 
 **The projection from samples to a joint loses nothing.** Running the
-equivalence backwards, $u_j = \bar u + \sqrt{J-1}(F_u)_{\cdot j}$, so
+equivalence backward, $u_j = \bar u + \sqrt{J-1}(F_u)_{\cdot j}$, so
 {meth}`~enskit.gauss.EmpiricalJoint.to_gaussian_joint` is a bijection onto
 (mean, centered width-$J$ factor) pairs. Neither update needs its samples
 supplied a second time: everything they use is in the joint. What the

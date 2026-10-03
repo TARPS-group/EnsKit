@@ -22,7 +22,7 @@ Importing this package enables JAX float64. JAX defaults to float32, which is
 not accurate enough for the conditioning arithmetic: ensemble anomalies are
 formed by subtraction, and the resulting cancellation loses several digits.
 Import EnsKit before creating any array, since arrays made beforehand stay
-float32 and are not promoted afterwards.
+float32 and are not promoted afterward.
 
 Notes
 -----

@@ -100,7 +100,7 @@ def misfits(y, predictions, noise_cov) -> Array:
     """
     if not isinstance(noise_cov, PSDLinOp):
         raise TypeError(
-            f"misfits: noise_cov must be a enskit.linalg.PSDLinOp, got "
+            f"misfits: noise_cov must be an enskit.linalg.PSDLinOp, got "
             f"{type(noise_cov).__name__}"
         )
     v_dim = noise_cov.shape[0]

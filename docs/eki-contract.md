@@ -4,7 +4,7 @@ This page specifies `enskit.eki`: the objects it provides, the contract of every
 method, and the step that all of them serve. It is normative — an
 implementation that violates a rule here is defective even if its tests pass —
 and it is the reference for two audiences: contributors implementing or
-reviewing the layer, and users who want a more precise account of what a EnsKit
+reviewing the layer, and users who want a more precise account of what an EnsKit
 run actually computes than the user guide gives.
 
 Throughout, *must* and *never* state requirements, *should* states a strong
@@ -795,7 +795,7 @@ see, and in the degeneracy cases the conformance suite is required to run.
 Keyword-only makes that swap unrepresentable.
 
 Implementations **should** accept and ignore `**_`. The argument list is the
-layer's forwards-compatibility seam: a future rule may need something not
+layer's forward-compatibility seam: a future rule may need something not
 listed here, and a signature that tolerates unknown keywords keeps existing
 rules working when it is added.
 
@@ -1526,7 +1526,7 @@ unreachable from a run.
 
 Promotion is not, however, a fix; the warning is what the rule is for. Most of the loss happens before the array arrives: a model whose
 predictions are single precision has already lost the digits, and no dtype the
-driver chooses afterwards recovers them. On an eight-step ladder with $J =
+driver chooses afterward recovers them. On an eight-step ladder with $J =
 64$ and predictions whose mean exceeds their spread by $10^4$ — the
 cancellation regime `float64` is enabled for — a `float32` return costs about
 $7 \times 10^{-5}$ relative error in the posterior mean, and promoting on
@@ -1754,7 +1754,7 @@ transient: it exists for the duration of one step, carries the members, their
 predictions and the whitened residual matrix, and is what a schedule and a
 stopping rule are shown. A **`HistoryRecord`** is kept for the whole run: it
 carries scalars only, so a history of hundreds of steps costs nothing, and it is
-what a caller reads afterwards.
+what a caller reads afterward.
 
 The driver builds the record from the evaluation and the chosen increment, so
 the evaluation is the single source of truth for everything both describe — a

@@ -962,7 +962,7 @@ def _check_problem(where: str, y, noise_cov):
     """Validate the problem's shapes once, and ``y``'s finiteness."""
     if not isinstance(noise_cov, PSDLinOp):
         raise TypeError(
-            f"{where}: noise_cov must be a enskit.linalg.PSDLinOp, got "
+            f"{where}: noise_cov must be an enskit.linalg.PSDLinOp, got "
             f"{type(noise_cov).__name__}"
         )
     if noise_cov.batch_shape != ():

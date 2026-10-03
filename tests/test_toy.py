@@ -696,7 +696,7 @@ def test_10_the_factories_and_classes_validate_as_documented():
     with pytest.raises(ValueError, match="outside the valid domain"):
         toy.restricted_decay(rate_floor=2.0)  # above the true rate of 1.5
 
-    with pytest.raises(TypeError, match="must be a enskit.linalg.LinOp"):
+    with pytest.raises(TypeError, match="must be an enskit.linalg.LinOp"):
         dataclasses.replace(problem, G=np.zeros((8, 4)))
     with pytest.raises(ValueError, match=r"LinearGaussian.y: expected an array"):
         dataclasses.replace(problem, y=jnp.zeros(3))

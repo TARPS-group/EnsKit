@@ -227,7 +227,7 @@ class LinearGaussian:
     def __post_init__(self) -> None:
         if not isinstance(self.G, LinOp):
             raise TypeError(
-                f"LinearGaussian.G: must be a enskit.linalg.LinOp, got "
+                f"LinearGaussian.G: must be an enskit.linalg.LinOp, got "
                 f"{type(self.G).__name__}. Wrap a dense matrix as "
                 f"enskit.linalg.Dense(G); the closed-form posterior needs an "
                 f"operator."
@@ -834,13 +834,13 @@ def _check_problem(
     """Validate the four fields every problem carries against its sizes."""
     if not isinstance(prior, Gaussian):
         raise TypeError(
-            f"{cls_name}.prior: must be a enskit.gauss.Gaussian, got "
+            f"{cls_name}.prior: must be an enskit.gauss.Gaussian, got "
             f"{type(prior).__name__}. Build one as "
             f"Gaussian(mean, PSDDiagonal(variances))."
         )
     if not isinstance(noise_cov, PSDLinOp):
         raise TypeError(
-            f"{cls_name}.noise_cov: must be a enskit.linalg.PSDLinOp, got "
+            f"{cls_name}.noise_cov: must be an enskit.linalg.PSDLinOp, got "
             f"{type(noise_cov).__name__}. Wrap a dense matrix as "
             f"enskit.linalg.DensePSD(matrix)."
         )

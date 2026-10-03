@@ -56,7 +56,7 @@ uv sync --group dev
 Calibrating a two-parameter decay model against three noisy observations:
 
 ```python
-import enskit                      # enables float64; import before creating arrays
+import enskit                     # enables float64; import before creating arrays
 import jax, jax.numpy as jnp
 from enskit.linalg import PSDDiagonal
 from enskit.gauss import Gaussian

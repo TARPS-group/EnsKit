@@ -171,7 +171,7 @@ class Gaussian:
         _check_field_rank("Gaussian", "mean", self.mean, 1)
         if not isinstance(self.cov, PSDLinOp):
             raise TypeError(
-                f"Gaussian.cov: must be a enskit.linalg.PSDLinOp, got "
+                f"Gaussian.cov: must be an enskit.linalg.PSDLinOp, got "
                 f"{type(self.cov).__name__}"
             )
         if self.cov.batch_shape != ():
@@ -1639,7 +1639,7 @@ def _check_factor_field(
     """
     if not isinstance(value, LinOp):
         raise TypeError(
-            f"{cls_name}.{field_name}: must be a enskit.linalg.LinOp, got "
+            f"{cls_name}.{field_name}: must be an enskit.linalg.LinOp, got "
             f"{type(value).__name__}. Wrap an array with enskit.linalg.Dense, or "
             f"use {cls_name}.from_factors, which wraps it for you."
         )
@@ -1685,7 +1685,7 @@ def _as_factor(where: str, name: str, value) -> LinOp:
         # the diagnosis. The base class of the category always accepts a string.
         kind = ValueError if isinstance(e, ValueError) else TypeError
         raise kind(
-            f"{where}: {name} must be a enskit.linalg.LinOp of shape (n, k), "
+            f"{where}: {name} must be an enskit.linalg.LinOp of shape (n, k), "
             f"or an array of that shape"
         ) from e
 
@@ -1731,7 +1731,7 @@ def _validate_conditioning_call(where: str, y, noise_cov, v_dim: int) -> Array:
     """
     if not isinstance(noise_cov, PSDLinOp):
         raise TypeError(
-            f"{where}: noise_cov must be a enskit.linalg.PSDLinOp, got "
+            f"{where}: noise_cov must be an enskit.linalg.PSDLinOp, got "
             f"{type(noise_cov).__name__}"
         )
     if noise_cov.batch_shape != ():

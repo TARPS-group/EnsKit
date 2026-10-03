@@ -19,7 +19,7 @@ codebases toward dense linear algebra.
 Two consequences shape the library.
 
 **The prior is off the hot path.** In tempered EKI the prior covariance is used
-exactly once, to draw the initial ensemble; everything afterwards runs on
+exactly once, to draw the initial ensemble; everything afterward runs on
 empirical moments. A prior with no cheap inverse at all is therefore perfectly
 usable. Cheap `solve` and `logdet` become load-bearing only when estimating
 hyperparameters, running variants whose drift term involves the prior

@@ -47,7 +47,7 @@ formed by subtraction, and the resulting cancellation costs several digits.
 Two consequences:
 
 - **Import `enskit` before creating any array.** Arrays built beforehand stay
-  float32 and are not promoted afterwards.
+  float32 and are not promoted afterward.
 - **Worker processes do not inherit the setting.** If forward-model evaluations
   run in a process pool, set `JAX_ENABLE_X64=1` in the environment instead of
   relying on the import.

@@ -799,7 +799,7 @@ explicitly separated data and metadata:
 
 A constructor may compute from its arguments — `DensePSD(A)` runs the
 Cholesky, `DenseSquare(A)` the LU — but it computes **once, eagerly**, and
-everything the operator needs afterwards lands in its fields. A
+everything the operator needs afterward lands in its fields. A
 factorization the caller already has is passed by keyword instead
 (`DensePSD(L=L)`, `DenseSquare(A, lu=lu, piv=piv)`) and stored as given.
 Both classes do this in a hand-written `__init__`, which `@linop` keeps in
@@ -965,7 +965,7 @@ right-hand side) and the batch convention. The reasoning:
   two shape-identical operations they mean.
 
 Restricting `@` to operator–operator composition is also the convention of
-the closest analogue among JAX operator libraries (lineax): the collision
+the closest analog among JAX operator libraries (lineax): the collision
 above is a property of leading-batch layouts, not of this package.
 
 For the guided errors to be *reachable*, the left operand must defer to

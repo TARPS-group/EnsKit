@@ -1247,7 +1247,7 @@ def test_12_the_pinned_prng_draws_are_snapshotted():
     than silently absorbed into every downstream result.
 
     Captured under JAX 0.10.2 with x64 enabled and default PRNG settings. A
-    failure here is not necessarily a EnsKit bug — check JAX's version and the
+    failure here is not necessarily an EnsKit bug — check JAX's version and the
     jax_threefry_partitionable / x64 flags first — but it does mean every
     stochastic output of this layer changed.
     """
