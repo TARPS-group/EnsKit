@@ -1,97 +1,102 @@
-# CLAUDE.md — pyEKI
+# CLAUDE.md — EnsKit (formerly pyEKI)
 
 ## What this project is
 
-pyEKI is a small, robust, efficient implementation of Ensemble Kalman Inversion
-(EKI) and its common variants, for derivative-free Bayesian calibration of
-expensive forward models.
+EnsKit (package `enskit`) is a small, robust, efficient toolkit of building
+blocks for ensemble Kalman methods: distributions over named blocks, maps
+that push them forward, and ensemble Kalman updates, with Ensemble Kalman
+Inversion (EKI) and the ensemble Kalman filter (EnKF) shipped as algorithms
+built from those blocks. It serves two audiences: people who want EKI or an
+EnKF to work, and people who build their own algorithms from the pieces.
 
 It is a **library**, not a research repository. The deliverable is a
 well-documented, well-tested package that colleagues can depend on. Prefer
 clarity and correctness over cleverness, and keep the public surface small.
 
-Four layers, each building on the one below:
+**The redesign is in progress.** `docs/redesign/index.md` records the design
+and the plan, a sequence of pull requests numbered 0 to 12; the full design
+document is `docs/redesign/design.html`, and `docs/redesign/stubs/` holds the
+docstrings each layer starts from. Until PR 1, the package is still named
+`pyeki`. Until PR 7, the old `gauss` and `eki` modules exist beside the new
+layers and keep their own contracts (`docs/gaussian-contract.md`,
+`docs/eki-contract.md`); do not extend them, and do not make the new layers
+depend on them.
 
-1. `pyeki.linalg` — a lean structured linear operator layer, scoped to what EKI
-   needs rather than to general-purpose linear algebra.
-2. `pyeki.gauss` — joint Gaussian distributions and conditioning. *(planned)*
-3. `pyeki.localize` — distance-based localization. *(planned)*
-4. `pyeki.eki` — tempering schedules, ensemble updates, inflation, the driver
-   loop, and variants. *(planned)*
+The layers, each building on the ones above it in this list:
 
-Beside them, `pyeki.toy` holds three toy problems — a forward model with a
-prior, a noise covariance and synthetic data — for this package's own tests
-and its documentation. It depends on the layers below; **nothing in
-`pyeki.linalg`, `pyeki.gauss` or `pyeki.eki` may import it**, which is what
+1. `enskit.linalg` — structured linear operators, scoped to what ensemble
+   Kalman methods need rather than to general-purpose linear algebra.
+   `IdentityPlusGram` is the conditioning core.
+2. `enskit.distribution` — `Ensemble`, `Gaussian`, `EnsembleGaussian`, the
+   conditional maps `MatheronMap` and `SquareRootMap`, and weights.
+3. `enskit.maps` and `enskit.kalman`, siblings that never import each other:
+   pushing distributions through maps, and ensemble Kalman updates.
+4. `enskit.algorithms` — the EKI and EnKF drivers and their policies.
+
+Beside them, `enskit.toy` holds toy problems for this package's own tests and
+its documentation, and `enskit.testing` holds conformance checks. Both may
+import any layer; **nothing in the layers may import either**, which is what
 keeps toy problems from becoming load-bearing.
 
 ## What this project is NOT
 
 Out of scope, deliberately and permanently:
 
-- **Forward models.** The forward model is any callable from parameters to
-  predicted observations. pyEKI ships toy models for testing and documentation
-  only, in `pyeki.toy`, and defines no base class, protocol or registry for
-  one. A toy model that wants a domain-specific name belongs in a calling
-  repository.
+- **Forward models.** A simulator is any callable from a batch of inputs to
+  a batch of outputs. EnsKit ships toy models for testing and documentation
+  only, in `enskit.toy`. The optional wrappers in `enskit.maps` (`Linear`,
+  `AdditiveNoise`, `BlackBox`) carry structure, not behavior. A toy model that
+  wants a domain-specific name belongs in a calling repository.
 - **Priors, Gaussian process kernels, coregionalization.** A prior is any
   operator satisfying the covariance interface. Constructing covariances from
   kernels belongs to the caller.
 - **Domain-specific anything.** No knowledge of the systems being calibrated
-  should appear in this package, including in docstrings and examples.
-- **A general-purpose linear algebra library.** `pyeki.linalg` exists because
-  EKI needs structured operators. Add a structure when EKI needs it, not
-  because it would be nice to have.
+  or filtered should appear in this package, including in docstrings and
+  examples.
+- **A general-purpose linear algebra library.** `enskit.linalg` exists because
+  ensemble Kalman methods need structured operators. Add a structure when a
+  method needs it, not because it would be nice to have.
+- **A probabilistic programming language, distributed computing, MCMC
+  kernels or an SMC driver.** EnsKit supplies the machinery of ensemble Kalman
+  methods and interfaces with outside code through plain arrays, operators
+  and distributions.
 
 ## Layer boundaries and vocabulary
 
-The four layers are a hierarchy, and **vocabulary flows downward only**. A
-layer may name a layer above it to justify its own scope; it may not borrow
-that layer's concepts to define its own behaviour.
+Imports go **down only**: `distribution` imports `linalg`; `maps` and `kalman`
+import `distribution` and `linalg`; `algorithms` imports all of them. An
+import-linter contract in `pyproject.toml` enforces this in CI (from PR 2), and
+`tests/test_toy.py` checks in a fresh interpreter that no layer loads
+`enskit.toy`. Cross-layer chaining in user code goes through `pipe`
+(`g.pipe(maps.pushforward, ...)`), never through an upward import. An
+underscore module is imported only from inside its own package.
+
+**Vocabulary flows downward only**, as imports do. A layer may name a layer
+above it to justify its own scope; it may not borrow that layer's concepts to
+define its own behavior.
 
 | layer | speaks of | must not speak of |
 | ----- | --------- | ----------------- |
-| `pyeki.linalg` | operators, batches, rows, factors, whiteners | Gaussians, conditioning, priors, posteriors, samples, ensembles, members, steps |
-| `pyeki.gauss` | Gaussians, conditioning, samples, the `u` and `v` blocks | ensembles, members, steps, tempering, forward models, EKI |
-| `pyeki.eki` | runs, steps, ensembles, members, tempering, forward models | — |
-| `pyeki.toy` | forward models, ensembles, members, predictions, priors, observations, true parameters, the closed-form posterior at a tempering level | — but it may not *define* a schedule, an update, an inflation or a stopping rule, and no layer may import it |
+| `linalg` | operators, batches, rows, factors, whiteners | distributions, blocks, particles, conditioning, anything above |
+| `distribution` | distributions, blocks, particles, samples, weights, the latent space, means, covariances, sampling, marginals, conditioning, projection, realizing, conditional maps | maps, simulators, updates, observations, forecasts, steps, time, tempering |
+| `maps` | maps, simulators, inputs, outputs, pushforward, noise | updates, gains, observations, steps, time, tempering |
+| `kalman` | updates, update rules, given and target blocks, gains, transforms, localization, inflation | observations, forecasts, steps, runs, schedules, levels, time |
+| `algorithms` | runs, steps, phases, levels, schedules, tempering, forecasts, analyses, observations, time | — |
+| `toy` | anything above, to describe a problem | it may not *define* a schedule, an update rule, an inflation or a stopping rule |
 
-`pyeki.toy` is the one module that sits at `pyeki.eki`'s vocabulary level
-while importing nothing from it, and its row is deliberately the loose one. It
-defines *problems*, not *runs* — but its problems exist to be driven by runs
-and to be the subject of the documentation about them, so naming a step, a
-ladder or a tempering level to justify a default is legitimate rather than
-leakage. The boundary that carries the weight here is the **import
-direction**, not the vocabulary: nothing in the three layers may import
-`pyeki.toy`, and `tests/test_toy.py` asserts it in a fresh interpreter.
+"Observation operator" appears nowhere; below `algorithms`, a block becomes
+a *given* block only at the moment it is conditioned on.
 
-The one constraint on its vocabulary is that it must not *define* the things
-the layer below owns. A toy module that shipped a schedule, an update rule, an
-inflation or a stopping rule would be `pyeki.eki` with a different name.
-
-The one permitted upward reference is **naming a consumer to justify scope**:
-"a square variant will be added when an EKI consumer needs `solve`" is fine,
-because this package scopes the lower layers by what EKI needs. Using the
-consumer's *time or domain vocabulary* to define lower-layer semantics is not:
-write "a scale that may itself be traced", never "the per-step noise
-covariance". A lower layer must read correctly to someone who has never heard
-of EKI.
-
-The boundary is crossed in exactly one place, where `pyeki.eki` builds an
-`EmpiricalJoint` from its ensemble: members go in, samples come out.
-
-**Names for sizes.** `n_<plural noun>` counts things — `n_members` (EKI),
-`n_samples` (gauss), `n_valid`, `n_steps`, `n_evaluations`, `n_in`/`n_out`
-(linalg). `<block>_dim` is the dimension of a named vector block — `u_dim`,
-`v_dim`. There is exactly one name per quantity: $N$ is `v_dim`, never also
-`n_obs`.
-
-**Names for the parts of an EKI run** are normative and specified in
-`docs/eki-contract.md` under *Terminology*: a **run** contains **steps**, each
-step has two **phases** (`evaluate` and `assimilate`) made of numbered
-**operations**, and each step is preceded by one **evaluation** of the forward
-model. "Rung" and "iteration" as a countable noun are retired; do not
-reintroduce them.
+**One word per concept.** A *sample* is a draw from any distribution. A
+*particle* is an element of an `Ensemble`; where samples are expected, an
+ensemble's particles are those samples. Sizes are `n_particles`, `n_steps`,
+`n_evaluations`, `latent_dim` and `dims[name]`. Blocks are named, so there are
+no `u_dim`/`v_dim` in the layers (the toy problems take `parameter_dim` and
+`data_dim`). EKI's terms are normative and specified in its contract under
+*Terminology*: a **run** contains **steps**, each with two **phases**
+(`evaluate` and `assimilate`) made of numbered **operations**, and each step
+is preceded by one **evaluation** of the forward model. "Rung" and
+"iteration" as a countable noun are retired.
 
 ## Package management
 
@@ -104,17 +109,22 @@ These apply to all docstrings, and strictly to module-, class-, and
 public-function-level ones.
 
 **Write for the person calling the code.** Lead with what the thing is and how
-to use it. Explain behaviour, arguments, return values, and errors — not the
+to use it. Explain behavior, arguments, return values, and errors, not the
 reasoning that led to the implementation.
+
+**State the mathematics.** When a function or class implements a
+mathematical object or operation, its docstring states it precisely in a
+`.. math::` block of LaTeX, defining every symbol. A prose description of a
+formula is not a substitute for the formula.
 
 **Use clear, precise language and no unnecessary jargon.** Prefer a plain
 description over a compressed technical phrase. Do not editorialize about the
 design: sentences like "the split is load-bearing rather than cosmetic" state a
-low-level design judgement and do not belong at the top of an API.
+low-level design judgment and do not belong at the top of an API.
 
-**Organize with sections.** Use numpydoc headings — `Parameters`, `Returns`,
-`Raises`, `Notes` — and tables when listing several classes or functions. A
-reader should be able to skim the structure.
+**Organize with sections.** Use numpydoc headings (`Parameters`, `Returns`,
+`Raises`, `Notes`, `References`) and tables when listing several classes or
+functions. A reader should be able to skim the structure.
 
 **Put design rationale in a `Notes` section, or leave it out.** Consequential
 lower-level decisions are worth recording when they are non-obvious or easy to
@@ -129,10 +139,17 @@ description. Extended rationale belongs in `docs/design.md`.
 - *Method/function*: what this call does, its arguments and return value. Do
   not restate class-level context.
 
-**Keep docstrings self-contained.** Do not reference anything outside the
-repository. A reader with only the source must be able to follow them.
-Cross-reference other modules and classes within the package freely, using
-Sphinx roles (`:class:`, `:mod:`, `:meth:`, `:func:`).
+**Keep docstrings self-contained, and cite the literature.** A reader with only
+the source must be able to follow a docstring; do not depend on anything
+outside the repository to explain behavior. When a function or class
+implements a method from a paper, cite the paper in a numpydoc `References`
+section with the full reference. The citation records where the method comes
+from; the docstring must still be complete without it. Cross-reference other
+modules and classes within the package freely, using Sphinx roles
+(`:class:`, `:mod:`, `:meth:`, `:func:`).
+
+**American English** in code, docstrings and documentation: "centering",
+"behavior", "neighbor", "modeling".
 
 ## Documentation
 
@@ -140,61 +157,94 @@ Sphinx with the furo theme, `myst-parser` for Markdown pages, and `napoleon`
 for numpydoc-style docstring sections. Build with:
 
 ```bash
-uv run sphinx-build -b html docs docs/_build/html
+uv run sphinx-build -b html -W docs docs/_build/html
 ```
 
 Every user-facing feature needs a place in the user guide, not only an API
 entry. The user guide explains *when and why*; the API reference explains
-*what*.
+*what*. The user guide is organized by level of abstraction: running an
+algorithm, one update, forecast and update separately, probabilistic
+operations, operators.
+
+Examples are notebooks: each states its setup precisely, says when the method
+it illustrates is the right tool, shows the mathematics alongside the code,
+and cites the papers its methods come from. Wherever documentation or an
+example describes a method from a paper, it cites the paper.
 
 ## Code conventions
 
+**Public API first.** In every module the public classes and functions come
+first, in the order of the module's index table; private helpers follow below
+them.
+
 **Array shapes: leading batch axes, core operand shape trailing.** This is the
 NumPy generalized-ufunc rule and what `vmap` produces. It applies everywhere,
-not only in `linalg`.
+not only in `linalg`. A block value is `(d,)`; an ensemble block is
+`(n_particles, d)`, and the particle axis is a batch axis to `linalg`.
+Distributions are unbatched pytrees; a family of them comes from `jax.vmap`.
+
+**Block values may be passed as keywords** wherever a function takes a set of
+them (`g.condition(y=y_obs)`, `Ensemble(x=x, theta=theta)`); the positional
+mapping form is always available as well.
 
 **Contract the trailing axis.** Never write `M @ x` in an operator
-implementation — for arrays of two or more dimensions it contracts the
+implementation: for arrays of two or more dimensions it contracts the
 second-to-last axis, which silently returns a wrong answer when the operator is
-square. Use `pyeki.linalg.dense_matvec`.
+square. Use `enskit.linalg.dense_matvec`.
 
 **Fail loudly.** Unsupported operations raise rather than falling back to dense
-linear algebra. Size guards raise before allocating.
+linear algebra. Size guards raise before allocating. The only dense fallback
+is the explicit, off-by-default `linalg.dense_fallback` context.
 
 **Return JAX scalars, not Python floats.** Converting fails on a tracer under
 `jit`, and on any complex intermediate.
 
 **Factorize eagerly, at construction, and store the result.** A constructor
-may compute from its arguments — `DensePSD(A)` runs the Cholesky — but
+may compute from its arguments (`DensePSD(A)` runs the Cholesky), but
 everything the operator needs must end up in its fields: pytree reconstruction
 rebuilds operators from their stored fields alone, bypassing the constructor.
 A factorization the caller already has is passed by keyword instead
-(`DensePSD(L=L)`). Never cache a factorization lazily — a cache written inside
+(`DensePSD(L=L)`). Never cache a factorization lazily: a cache written inside
 a traced function is discarded, so the operator silently re-factorizes on
 every call.
 
-**Every new operator gets `check_operator`.** The conformance suite in
-`pyeki.linalg.testing` catches the batch-rank and square-root bugs that
-otherwise produce wrong numbers without raising.
+**Randomness enters through typed keys.** Always-random functions take the key
+first; sometimes-random ones take a keyword-only `key=`. A key is consumed
+whole; callers split it.
+
+**Every new operator gets `check_operator`.** The conformance suite catches the
+batch-rank and square-root bugs that otherwise produce wrong numbers without
+raising.
 
 ## JAX notes
 
-- Float64 is enabled in `pyeki/__init__.py`. Worker processes do not inherit
-  it; that needs `JAX_ENABLE_X64=1` in the environment.
-- Operators are pytrees via the `@linop` decorator, with data and metadata
-  fields declared explicitly; its unflatten bypasses the constructor, so
-  validation runs only at genuine construction.
-- Operators compare by identity and are never `static_argnums`.
+- Float64 is enabled in the package's `__init__.py`. Worker processes do not
+  inherit it; that needs `JAX_ENABLE_X64=1` in the environment.
+- Operators and distributions are pytrees with data and metadata fields
+  declared explicitly; unflatten bypasses the constructor, so validation runs
+  only at genuine construction.
+- Operators and distributions compare by identity and are never
+  `static_argnums`.
 - `shape` is a property, not a stored field, so it stays concrete under `jit`.
 - JAX has no generalized `eigh`; use a Cholesky whitening reformulation.
+- A plain SVD's derivative is `nan` at exactly repeated or exactly zero
+  singular values. Conditioning goes through `IdentityPlusGram`, whose custom
+  derivative rules stay finite there; do not differentiate through
+  `jnp.linalg.svd` in new conditioning code.
 
 ## Testing
 
-`pytest`, in `tests/`. Three kinds:
+`pytest`, in `tests/`. Five kinds:
 
-1. **Conformance** — every operator instance through `check_operator`.
-2. **Targeted regression** — one test per bug class that produces wrong numbers
+1. **Conformance**: every operator instance through `check_operator`; from
+   PR 6, every update rule through `check_update_rule` and every conditional
+   map through `check_conditional_map`.
+2. **Targeted regression**: one test per bug class that produces wrong numbers
    without raising. These are the valuable ones; do not delete them as
-   redundant.
-3. **Exactness** — where a closed form exists, check against it rather than
+   redundant. When a layer is reimplemented, its regression tests are ported,
+   with a record of which old test became which new one.
+3. **Exactness**: where a closed form exists, check against it rather than
    against a tolerance chosen to make the test pass.
+4. **Counts**: whitenings per update, compilations per run. A cost regression
+   passes every numerical test, so only a count catches it.
+5. **Examples**: every example notebook executes, and its final checks pass.

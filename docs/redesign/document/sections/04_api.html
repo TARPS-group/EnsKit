@@ -1,0 +1,50 @@
+<h2 id="api"><span class="num">6</span>API reference</h2>
+
+<p>Signatures and docstrings as they would ship, following the conventions in <code>CLAUDE.md</code>: numpydoc sections, written for the caller, with rationale under <code>Notes</code>. Bodies are omitted. Each stub file was syntax-checked. Most of <code>distribution</code>, <code>maps</code> and <code>kalman</code> is <span class="tag ok">verified</span> in the prototype. Where an item goes beyond the prototype it says so below.</p>
+
+<div class="tablewrap"><table>
+<tr><th>Module</th><th>Prototype status</th></tr>
+<tr><td><code>enskit.linalg</code></td><td><span class="tag ok">verified</span> today's operators unchanged (the prototype imports <code>pyeki.linalg</code>), and <code>IdentityPlusGram</code>'s three operations with their custom derivatives. <span class="tag spec">specified</span> <code>IdentityPlusGram</code> as a full <code>PSDLinOp</code> (the prototype is a plain object returning a dense inverse square root; the thin derivative formula was checked numerically against the dense one), <code>Zero</code>, <code>LowRankUpdate</code>, <code>Kronecker</code>, <code>dense_fallback</code>, rename <code>n</code> → <code>dim</code>.</td></tr>
+<tr><td><code>enskit.distribution</code></td><td><span class="tag ok">verified</span> <code>Ensemble</code>, <code>Gaussian</code>, <code>EnsembleGaussian</code> (returned by <code>project</code>, kept by latent-preserving operations, dropped by <code>absorb</code>/<code>compress</code>), <code>MatheronMap</code>, <code>SquareRootMap</code>, weights. <span class="tag spec">specified</span> <code>rename</code>, <code>compress(max_dim=)</code>'s guard, the <code>LowRankUpdate</code> return of <code>cov</code>, <code>SquareRootMap</code> caching its transform at build (the prototype recomputes it per call), multinomial resampling, debug-mode checks.</td></tr>
+<tr><td><code>enskit.maps</code></td><td><span class="tag ok">verified</span> single-input <code>Linear</code>, <code>AdditiveNoise</code>, <code>BlackBox</code> (under <code>jit</code>, <code>grad</code> and <code>vmap</code>), ensemble pushforward of any callable. <span class="tag spec">specified</span> multi-input <code>Linear</code>, multiple outputs, the <code>StructuredMap</code> dispatch, dtype promotion rules.</td></tr>
+<tr><td><code>enskit.kalman</code></td><td><span class="tag ok">verified</span> the approximate / build / call structure: <code>update</code> with the <code>approximation=</code> hook, <code>gaussian_approximation</code>, <code>SymmetricSquareRoot</code>, <code>Matheron</code> (aligned and general paths agreeing to \(10^{-15}\)), <code>LocalizedUpdateRule</code> with plain and scaled diagonal noise, a user rule (Example 14), <code>inflate_multiplicative</code>, <code>relax_to_prior_spread</code>. <span class="tag spec">specified</span> <code>LocalizedUpdateRule</code> caching its local transforms at build, <code>inflate_additive</code>, <code>relax_to_prior_perturbations</code>.</td></tr>
+<tr><td><code>enskit.algorithms</code></td><td><span class="tag ok">verified</span> <code>eki.run</code>/<code>evaluate</code>/<code>assimilate</code>/<code>advance</code> with the stubs' protocols: evaluation-based schedules and stops, fixed and ESS schedules, the discrepancy stop, the 3-way key split, exhaustion before evaluation, <code>max_steps</code> raising <code>EKIError</code>, <code>MultiplicativeInflation</code>. <code>enkf.forecast</code>/<code>analysis</code>/<code>filter</code> with the 4-way split and the <code>approximation=</code> hook. <span class="tag spec">specified</span> semantics ported from the current EKI contract that already exist and are tested in pyEKI: failure repair, history record fields, <code>iterate</code>, the misfit schedule, <code>AdditiveInflation</code>, the relaxation policies inside a run.</td></tr>
+</table></div>
+
+<h3 id="api-dist"><span class="num">6.1</span><code>enskit.distribution</code></h3>
+{{STUB:distribution_module.py}}
+<h4 id="api-ensemble">Ensemble</h4>
+{{STUB:distribution_ensemble.py}}
+<h4 id="api-gaussian">Gaussian</h4>
+{{STUB:distribution_gaussian.py}}
+<h4 id="api-ensemble-gaussian">EnsembleGaussian and SquareRootMap</h4>
+{{STUB:distribution_ensemble_gaussian.py}}
+<h4 id="api-condmap">Conditional maps, weights, construction</h4>
+{{STUB:distribution_maps_and_weights.py}}
+
+<h3 id="api-maps"><span class="num">6.2</span><code>enskit.maps</code></h3>
+{{STUB:maps.py}}
+
+<h3 id="api-kalman"><span class="num">6.3</span><code>enskit.kalman</code></h3>
+{{STUB:kalman.py}}
+
+<h3 id="api-eki"><span class="num">6.4</span><code>enskit.algorithms.eki</code></h3>
+<p>The current EKI contract (<code>docs/eki-contract.md</code>) carries over almost entirely, including the step's operations, the driver order, the key-split arity, history records, the status constants and <code>EKIError</code>. What changes:</p>
+<ul>
+  <li>the state holds an <code>Ensemble</code>, so parameters can be several named blocks;</li>
+  <li>the update is any <code>kalman.UpdateRule</code>, which is required, and an <code>approximation=</code> hook selects the covariance estimator;</li>
+  <li>localization is a method wrapper rather than a separate policy;</li>
+  <li>inflation and relaxation policies are shared with the EnKF (§6.6);</li>
+  <li><code>u_dim</code> and <code>v_dim</code> give way to block names.</li>
+</ul>
+{{STUB:eki.py}}
+
+<h3 id="api-enkf"><span class="num">6.5</span><code>enskit.algorithms.enkf</code></h3>
+{{STUB:enkf.py}}
+
+<h3 id="api-policies"><span class="num">6.6</span><code>enskit.algorithms</code>: shared policies</h3>
+{{STUB:algorithms_policies.py}}
+
+<h3 id="api-rest"><span class="num">6.7</span><code>linalg</code> additions, <code>testing</code>, <code>toy</code></h3>
+{{STUB:linalg_identity_plus_gram.py}}
+{{STUB:linalg_testing_toy.py}}

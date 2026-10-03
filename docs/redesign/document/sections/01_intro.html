@@ -1,0 +1,74 @@
+<header class="masthead">
+  <div class="eyebrow">Design proposal · pyEKI, generalized</div>
+  <h1>EnsKit</h1>
+  <p class="lede">A redesign of pyEKI as EnsKit (<code>enskit</code>): from a package that ships Ensemble Kalman Inversion into a set of building blocks for ensemble Kalman methods in general. EKI and the EnKF are shipped as algorithms assembled from those blocks, and the same blocks are exposed at every level for people building their own.</p>
+  <p class="byline">Prepared 2 October 2026 for Andrew Roberts; revised 3 October after four rounds of review; the design is settled. Every worked example and every API marked <span class="tag ok">verified</span> was run against a throwaway prototype of this design (JAX 0.10.2, float64), with closed-form checks where one exists. Items marked <span class="tag spec">specified</span> are designed but not prototyped.</p>
+</header>
+
+<h2 id="summary"><span class="num">1</span>Summary</h2>
+
+<p>The proposal rests on five decisions. Each one is tested by the worked examples.</p>
+
+<ol>
+  <li><strong>Two distributions, both over named blocks.</strong> An <code>Ensemble</code> is an empirical distribution (optionally weighted). A <code>Gaussian</code> is a joint Gaussian held as a <em>shared factor</em> plus an <em>independent term</em> per block. Blocks are named vectors (<code>"u"</code>, <code>"g"</code>, <code>"x_prev"</code>, <code>"forcing"</code>), so code says what it means and there is no index arithmetic. The Gaussian handles any number of blocks; the two-block form is the special case conditioning reduces to.</li>
+  <li><strong>The bridge between the two is <em>particle alignment</em>.</strong> <code>Ensemble.project()</code> returns an <code>EnsembleGaussian</code>, a <code>Gaussian</code> subclass whose latent coordinates are the particles. It can be conditioned exactly, and its particles can be read back out (<code>realize_particles</code>). This replaces the current <code>GaussianJoint</code>/<code>EmpiricalJoint</code> split, and the ensemble-only operations are scoped to the subclass.</li>
+  <li><strong>The two classic updates differ only in the order of two operations.</strong> The square-root update is <em>realize after condition</em>. The stochastic update is <em>transport after realize</em>: it moves the particles, which are the joint's realization. Switching is one argument, <code>update_rule=SymmetricSquareRoot()</code> or <code>update_rule=Matheron()</code>. Each rule is a factory: it builds an update from the particles, a joint Gaussian approximation and the <em>names</em> of the given blocks; the given <em>values</em> arrive when the update is called. A user-written rule is about ten lines (Example 14).</li>
+  <li><strong>Structure is exploited through the order of operations, not through special cases.</strong> Known additive noise, a linear map and a static background covariance each enter as an exact operation on the joint Gaussian, not as a flag on an update. An <code>approximation=</code> hook carries a modified joint into every update and driver (Example 11). Localization wraps an update rule. Pushing an ensemble's projection through <code>AdditiveNoise</code> gives a lower-variance estimate than pushing the ensemble itself. Example 6 measures the difference (mean squared error 6.0 against 14.0).</li>
+  <li><strong>Strict layers with imports that only go down.</strong> The layers are <code>linalg</code> → <code>distribution</code> → (<code>maps</code>, <code>kalman</code>) → <code>algorithms</code>. Vocabulary goes down only, so observations, time and tempering appear only in <code>algorithms</code>. The rule is enforced in CI.</li>
+</ol>
+
+<p>The design also settles the questions you raised:</p>
+
+<div class="tablewrap"><table>
+<tr><th>Question</th><th>Answer in this design</th></tr>
+<tr><td>Is a 2-block joint Gaussian enough?</td><td>No. The public <code>Gaussian</code> has any number of named blocks; <code>condition(y=...)</code> splits them into given and target, and the kernel underneath is the existing two-block whitened SVD. Smoothers, joint state and parameter estimation, and keeping <code>(u, g, y)</code> together all need more than two blocks (Example 13).</td></tr>
+<tr><td>Wrap the simulator in a class?</td><td>No wrapper is required. A simulator is any callable taking <code>(n_particles, d_in)</code> arrays to <code>(n_particles, d_out)</code>. Optional classes (<code>Linear</code>, <code>AdditiveNoise</code>) carry structure, and <code>BlackBox</code> makes a host-side code traceable with a zero derivative.</td></tr>
+<tr><td>Transport maps as an abstraction?</td><td>Yes. <code>ConditionalMap</code> takes joint particles and a value to conditional particles. The Gaussian's affine conditional map is the first implementation; nonlinear triangular maps plug into the same protocol later.</td></tr>
+<tr><td>An <code>EmpiricalDistribution</code>?</td><td>Yes: <code>Ensemble</code>. <code>pushforward(ensemble, f, ...)</code> returns an ensemble with the output block added.</td></tr>
+<tr><td>Matheron vs transform as a computational detail?</td><td>A one-argument switch everywhere. They are different estimators that agree only in the linear-Gaussian case, so <code>update_rule</code> is required, with no default (issue #29).</td></tr>
+<tr><td>Weighted ensembles?</td><td>Minimal support in the core (log weights, reweight, ESS, resample, weighted projection). SMC and MCMC drivers stay outside. Kalman updates refuse weighted input (Example 10, §10).</td></tr>
+<tr><td>Interfacing with outside code?</td><td>Every piece is a plain function or pytree that takes and returns arrays, operators and distributions, so a user loop can interleave package steps with its own. Example 9 alternates a package update with a user-written inverse-Wishart draw.</td></tr>
+<tr><td>Differentiability?</td><td>Everything except simulator calls is differentiable. Simulator outputs are constants unless the simulator is traceable. Custom JVPs keep gradients finite at the degenerate spectra that make a plain SVD return <code>nan</code> (§9).</td></tr>
+</table></div>
+
+<div class="callout decision"><span class="label">Status</span>
+<p>Revision 5. The design is settled: <a href="#open">§13</a> records every decision. <a href="#plan">§14</a> is the implementation plan, thirteen pull requests from adopting the design to the 0.1.0 release, and lists the three things needed from you before the first code change.</p></div>
+
+<h2 id="levels"><span class="num">2</span>Audiences and levels</h2>
+
+<p>The same building blocks are exposed at five levels. Each level is written using the one below it, and the drivers' own source reads like a level-3 user's code. That is the test that the lower levels are sufficient.</p>
+
+<figure>
+<div class="fig">
+<svg viewBox="0 0 760 330" role="img" aria-labelledby="ladder-title">
+  <title id="ladder-title">Five levels of abstraction, from running an algorithm down to operators</title>
+  <g>
+    <rect class="box accent" x="10" y="10" width="740" height="52" rx="6"/>
+    <text class="t strong" x="26" y="33">Level 4 · run an algorithm</text>
+    <text class="t code" x="26" y="52">eki.run(state, forward, y, R, update_rule=..., schedule=...)   enkf.filter(...)</text>
+    <rect class="box" x="10" y="74" width="740" height="52" rx="6"/>
+    <text class="t strong" x="26" y="97">Level 3 · one update</text>
+    <text class="t code" x="26" y="116">kalman.update(ens, {"g": y}, noise={"g": R}, update_rule=...)   eki.advance   enkf.analysis</text>
+    <rect class="box" x="10" y="138" width="740" height="52" rx="6"/>
+    <text class="t strong" x="26" y="161">Level 2 · forecast and update separately</text>
+    <text class="t code" x="26" y="180">maps.pushforward(ens, f, ...)   kalman.gaussian_approximation(ens, noise)   method(joint, given, key=...)</text>
+    <rect class="box" x="10" y="202" width="740" height="52" rx="6"/>
+    <text class="t strong" x="26" y="225">Level 1 · probabilistic operations</text>
+    <text class="t code" x="26" y="244">project  marginal  condition  add_noise  conditional_map  realize  log_density  sample</text>
+    <rect class="box ochre" x="10" y="266" width="740" height="52" rx="6"/>
+    <text class="t strong" x="26" y="289">Level 0 · structured operators</text>
+    <text class="t code" x="26" y="308">LinOp  PSDLinOp  whiten  factor  solve  logdet  Kronecker  LowRankUpdate</text>
+  </g>
+</svg>
+</div>
+<figcaption>Each band is implemented with the band below it. A user can drop to any level without losing the structure-exploiting machinery underneath.</figcaption>
+</figure>
+
+<div class="tablewrap"><table>
+<tr><th>Level</th><th>Who</th><th>Calls</th><th>Example</th></tr>
+<tr><td>4</td><td>Wants EKI or an EnKF to work</td><td><code>eki.run</code>, <code>enkf.filter</code></td><td>1, 2</td></tr>
+<tr><td>3</td><td>Writing their own loop, schedule or diagnostics</td><td><code>kalman.update</code>, <code>eki.advance</code>, <code>enkf.forecast</code>/<code>analysis</code></td><td>3, 4, 9, 13</td></tr>
+<tr><td>2</td><td>Changing what the update conditions</td><td><code>kalman.gaussian_approximation</code>, an <code>UpdateRule</code>, <code>LocalizedUpdateRule</code></td><td>11, 12, 14</td></tr>
+<tr><td>1</td><td>Thinking in distributions</td><td><code>Ensemble</code>, <code>Gaussian</code>, <code>pushforward</code></td><td>5, 6, 7, 8, 10</td></tr>
+<tr><td>0</td><td>Bringing new covariance structure</td><td><code>enskit.linalg</code></td><td>8 (a GP prior)</td></tr>
+</table></div>

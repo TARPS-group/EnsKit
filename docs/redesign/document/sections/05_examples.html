@@ -1,0 +1,38 @@
+<h2 id="examples"><span class="num">7</span>Worked examples</h2>
+
+<p>Fifteen examples, written as notebooks so that the mathematics, a short explanation and the code sit together. Each one states its setup precisely, says when the method or API level it illustrates is the right tool, and cites the papers its methods come from. Every notebook was executed against the prototype exactly as shown, and the output under each code cell is that run's real output. The last cell of each notebook holds its checks, compared against a closed form where one exists. The notebooks ship in the documentation's examples gallery, built with <code>nbsphinx</code>, which is already a development dependency.</p>
+
+<div class="tablewrap"><table>
+<tr><th>#</th><th>Example</th><th>Level</th><th>What it shows</th></tr>
+<tr><td>1</td><td><a href="#ex01">Ensemble Kalman inversion</a></td><td>4</td><td>sampling and optimization forms of EKI from one driver</td></tr>
+<tr><td>2</td><td><a href="#ex02">Ensemble Kalman filter</a></td><td>4</td><td>a stochastic EnKF on Lorenz-96</td></tr>
+<tr><td>3</td><td><a href="#ex03">One update, one call</a></td><td>3</td><td><code>kalman.update</code>; the square-root update is exact on exact-moment particles</td></tr>
+<tr><td>4</td><td><a href="#ex04">EKI by hand</a></td><td>3</td><td>forecast and update written out; identical to the driver to \(10^{-12}\)</td></tr>
+<tr><td>5</td><td><a href="#ex05">The two updates as compositions</a></td><td>1</td><td>Matheron's rule; realize after condition versus transport after realize; build, then call</td></tr>
+<tr><td>6</td><td><a href="#ex06">Two estimators of one joint</a></td><td>1</td><td>known noise added exactly beats noise sampled (MSE 6.0 vs 14.0)</td></tr>
+<tr><td>7</td><td><a href="#ex07">A Kalman filter from the algebra</a></td><td>1</td><td>exact Kalman filter and log likelihood from <code>pushforward</code>/<code>condition</code>, to \(10^{-10}\)</td></tr>
+<tr><td>8</td><td><a href="#ex08">Hyperparameters by gradient</a></td><td>1, 0</td><td>GP prior lengthscale and noise by evidence maximization; ensemble evidence</td></tr>
+<tr><td>9</td><td><a href="#ex09">Gibbs with outside code</a></td><td>3</td><td>inverse-Wishart noise covariance updated by user code</td></tr>
+<tr><td>10</td><td><a href="#ex10">EKI, then importance sampling</a></td><td>1, 4</td><td>weights, ESS, resampling; error 0.0093 → 0.0020</td></tr>
+<tr><td>11</td><td><a href="#ex11">Hybrid EnKF</a></td><td>2</td><td>a static covariance carried exactly through a linear map, via <code>approximation=</code></td></tr>
+<tr><td>12</td><td><a href="#ex12">Localized ETKF</a></td><td>2</td><td>domain localization with 10 particles in 40 dimensions</td></tr>
+<tr><td>13</td><td><a href="#ex13">Named blocks</a></td><td>3</td><td>joint state and parameter estimation and lag-1 smoothing in one update</td></tr>
+<tr><td>14</td><td><a href="#ex14">A new update rule</a></td><td>2</td><td>the deterministic EnKF in a few lines, plugged into both drivers</td></tr>
+<tr><td>15</td><td><a href="#ex15">Gradients</a></td><td>1</td><td>finite gradients where a plain SVD gives <code>nan</code>; a whole run differentiated; a NumPy simulator under <code>jit</code>, <code>grad</code> and <code>vmap</code></td></tr>
+</table></div>
+
+{{NB:ex01_eki}}
+{{NB:ex02_enkf}}
+{{NB:ex03_one_update}}
+{{NB:ex04_hand_loop}}
+{{NB:ex05_probabilistic_ops}}
+{{NB:ex06_two_estimators}}
+{{NB:ex07_kalman_filter}}
+{{NB:ex08_hyperparameters}}
+{{NB:ex09_gibbs}}
+{{NB:ex10_importance}}
+{{NB:ex11_hybrid}}
+{{NB:ex12_localization}}
+{{NB:ex13_named_blocks}}
+{{NB:ex14_custom_rule}}
+{{NB:ex15_differentiability}}

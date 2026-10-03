@@ -59,6 +59,9 @@ packages = ["pyeki"]
 [tool.ruff]
 target-version = "py311"
 line-length = 90
+# The redesign's working material is a record, not package code: API stubs
+# that reference undefined names, and a throwaway prototype.
+extend-exclude = ["docs/redesign"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "N"]

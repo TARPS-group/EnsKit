@@ -1,0 +1,91 @@
+<h3 id="ex01">Ensemble Kalman inversion</h3>
+<p>Calibrate the two parameters of a decay model from noisy data, running the
+same driver first in its sampling form and then in its optimization form.</p>
+<h4>When to use this</h4>
+<p>Ensemble Kalman inversion (EKI) estimates the parameters of a forward model
+using only evaluations of the model, never its derivatives, and evaluates
+the whole ensemble at once. That suits expensive or black-box simulators.
+Run to tempering level \(\beta = 1\) it approximates the Bayesian posterior;
+the approximation is exact for a linear model with a Gaussian prior and
+biased otherwise (Iglesias, Law &amp; Stuart, 2013; Ernst, Sprungk &amp; Starkloff, 2015). Iterated with unit steps and
+stopped by the discrepancy principle it becomes a derivative-free,
+regularized optimizer (Iglesias, 2016).</p>
+<h4>Setup</h4>
+<p>The forward model maps parameters \(u = (a, r)\) to an exponential decay
+observed at ten times \(t_i\) equally spaced on \([0.1, 2]\):</p>
+<p>\[
+G(u)_i = a\, e^{-r t_i}, \qquad
+y = G(u^\dagger) + e, \quad e \sim \mathcal N(0, R), \quad R = 0.05^2 I_{10},
+\]</p>
+<p>with \(u^\dagger = (1.5, 1.2)\) and prior
+\(u \sim \mathcal N\big((1, 0.5),\ \operatorname{diag}(0.5, 0.5)\big)\).
+EKI moves an ensemble through the tempered targets</p>
+<p>\[
+\pi_\beta(u) \propto \pi_0(u)\, e^{-\beta \Phi(u)}, \qquad
+\Phi(u) = \tfrac12 \lVert R^{-1/2}(y - G(u)) \rVert^2 ,
+\]</p>
+<p>and a step from \(\beta\) to \(\beta + \delta\) is one ensemble Kalman update
+with noise covariance \(R/\delta\).</p>
+
+<pre><code class="language-python">import jax
+import jax.numpy as jnp
+
+import enskit
+from enskit import kalman, toy
+from enskit.algorithms import eki
+
+problem = toy.exponential_decay()   # prior over &quot;u&quot;, forward model, noise_cov, y</code></pre>
+<h4>Sampling form</h4>
+<p>The schedule picks each increment \(\delta\) so that the importance weights
+\(w_j \propto e^{-\delta \Phi(u_j)}\) keep an effective sample size of half the
+ensemble (Jasra et al., 2011), and stops at \(\beta = 1\). The update rule is
+Matheron's: each particle moves by \(K(y - g_j - e_j)\) with a fresh noise draw
+\(e_j\) (Burgers, van Leeuwen &amp; Evensen, 1998).</p>
+
+<pre><code class="language-python">state = eki.EKIState.from_prior(jax.random.key(0), problem.prior, n_particles=64)
+result = eki.run(
+    state, problem.forward, problem.y, problem.noise_cov,
+    update_rule=kalman.Matheron(),
+    schedule=eki.AdaptiveESSSchedule(ess_fraction=0.5),
+)
+print(result.status, result.n_evaluations, &quot;evaluations&quot;)
+print(&quot;posterior mean&quot;, result.ensemble.mean(&quot;u&quot;), &quot;truth&quot;, problem.u_true)</code></pre>
+<pre class="output"><code class="language-plaintext">schedule_exhausted 6 evaluations
+posterior mean [1.47542747 1.15540647] truth [1.5 1.2]</code></pre>
+<h4>Optimization form</h4>
+<p>Unit increments, repeated, drive the ensemble toward minimizers of
+\(\Phi\). The run stops by the discrepancy principle, at the first step where
+\(2\Phi(\bar g) \le \tau^2 N\), with \(\bar g\) the mean prediction and \(N = 10\)
+the data dimension (Iglesias, 2016). The deterministic square-root rule is
+used here (Bishop, Etherton &amp; Majumdar, 2001).</p>
+
+<pre><code class="language-python">fit = eki.run(
+    state, problem.forward, problem.y, problem.noise_cov,
+    update_rule=kalman.SymmetricSquareRoot(),
+    schedule=eki.FixedSchedule.constant(1.0, n_steps=50),
+    stop=eki.DiscrepancyStop(tau=1.0),
+)
+print(fit.status, &quot;after&quot;, fit.n_evaluations, &quot;evaluations:&quot;, fit.ensemble.mean(&quot;u&quot;))</code></pre>
+<pre class="output"><code class="language-plaintext">stopping_rule after 3 evaluations: [1.46251858 1.11982496]</code></pre>
+<h4>What to notice</h4>
+<p>The two forms differ only in the schedule and the stopping rule, not in the
+driver. The sampling run spends its six evaluations reaching \(\beta = 1\),
+and its ensemble approximates the posterior. The optimization run stops as
+soon as the fit is as good as the noise allows, with an ensemble mean close
+to the parameters that generated the data.</p>
+
+<pre><code class="language-python"># checks
+assert result.status == &quot;schedule_exhausted&quot;
+assert abs(float(result.state.beta) - 1.0) &lt; 1e-12
+assert fit.status == &quot;stopping_rule&quot;
+assert jnp.allclose(fit.ensemble.mean(&quot;u&quot;), problem.u_true, atol=0.2)</code></pre>
+<div class="refs"><h4>References</h4>
+<ul>
+<li>Bishop, C. H., Etherton, B. J. &amp; Majumdar, S. J. (2001). Adaptive sampling with the ensemble transform Kalman filter. Part I: Theoretical aspects. <em>Monthly Weather Review</em>, 129(3), 420–436.</li>
+<li>Burgers, G., van Leeuwen, P. J. &amp; Evensen, G. (1998). Analysis scheme in the ensemble Kalman filter. <em>Monthly Weather Review</em>, 126(6), 1719–1724.</li>
+<li>Ernst, O. G., Sprungk, B. &amp; Starkloff, H.-J. (2015). Analysis of the ensemble and polynomial chaos Kalman filters in Bayesian inverse problems. <em>SIAM/ASA Journal on Uncertainty Quantification</em>, 3(1), 823–851.</li>
+<li>Iglesias, M. A. (2016). A regularizing iterative ensemble Kalman method for PDE-constrained inverse problems. <em>Inverse Problems</em>, 32(2), 025002.</li>
+<li>Iglesias, M. A., Law, K. J. H. &amp; Stuart, A. M. (2013). Ensemble Kalman methods for inverse problems. <em>Inverse Problems</em>, 29(4), 045001.</li>
+<li>Jasra, A., Stephens, D. A., Doucet, A. &amp; Tsagaris, T. (2011). Inference for Lévy-driven stochastic volatility models via adaptive sequential Monte Carlo. <em>Scandinavian Journal of Statistics</em>, 38(1), 1–22.</li>
+</ul>
+</div>

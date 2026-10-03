@@ -1,0 +1,110 @@
+<h3 id="ex05">The two updates as probabilistic operations</h3>
+<p>Build Matheron's update and the square-root update from Gaussian
+operations, first on an exact Gaussian and then on the Gaussian fitted to
+an ensemble.</p>
+<h4>When to use this</h4>
+<p>This level of the API is for reading, checking or extending an update rule.
+Each rule is a composition of a few operations on Gaussians and ensembles:
+pushforward, conditioning, a conditional map, and realizing particles from
+a fitted Gaussian. Matheron's rule turns joint samples into conditional
+samples by a linear transport (Journel &amp; Huijbregts, 1978; Wilson et al., 2021), and the
+square-root update replaces the particles with ones whose sample moments
+equal those of the conditioned fit (Bishop, Etherton &amp; Majumdar, 2001; Tippett et al., 2003).</p>
+<h4>Setup</h4>
+<p>The problem is the linear-Gaussian one of the previous example:
+\(u \in \mathbb R^4\) with prior \(\mathcal N(0, C)\), \(g = A u\) with
+\(A \in \mathbb R^{6 \times 4}\), and \(y = g + e\) with
+\(e \sim \mathcal N(0, R)\), \(R = 0.3^2 I_6\), observed at the value \(y^*\).
+Write \(x = (u, g)\) for the blocks to be updated. For any jointly Gaussian
+\((x, y)\), Matheron's rule states that</p>
+<p>\[
+x + C_{xy} C_{yy}^{-1} (y^* - y) \sim p(x \mid y = y^*)
+\quad \text{when} \quad (x, y) \sim p(x, y),
+\]</p>
+<p>so the conditional is reached by moving joint samples with the gain
+\(K = C_{xy} C_{yy}^{-1}\), here with \(C_{xy} = (C A^\top,\ A C A^\top)\) and
+\(C_{yy} = A C A^\top + R\).</p>
+
+<pre><code class="language-python">import jax
+import jax.numpy as jnp
+
+import enskit
+from enskit import maps, toy
+
+problem = toy.linear_gaussian(parameter_dim=4, data_dim=6)</code></pre>
+<h4>Exact Gaussian algebra</h4>
+<p>The joint over \((u, g, y)\) is built by two pushforwards of the prior.
+<code>condition</code> gives the exact posterior over \((u, g)\), and
+<code>conditional_map(&quot;y&quot;)</code> gives the transport \(x \mapsto x + K(y^* - y)\). The
+map is built from the block name alone; the value \(y^*\) is passed when it is
+called on 200,000 joint samples.</p>
+
+<pre><code class="language-python">joint = (problem.prior
+         .pipe(maps.pushforward, problem.forward, inputs=&quot;u&quot;, output=&quot;g&quot;)
+         .pipe(maps.pushforward, maps.AdditiveNoise(problem.noise_cov), inputs=&quot;g&quot;, output=&quot;y&quot;))
+posterior = joint.condition(y=problem.y)                    # Gaussian over u, g
+transport = joint.conditional_map(&quot;y&quot;)                           # x -&gt; x + K (y* - y)
+samples = transport(joint.sample(jax.random.key(0), 200_000), y=problem.y)</code></pre>
+<h4>The fitted Gaussian</h4>
+<p>An ensemble of \(J = 32\) prior samples, with \(g_j = A u_j\), is replaced by its
+moment-matched Gaussian with <code>project</code>. That Gaussian is member-aligned: its
+covariance factor has one column per particle, \((x_j - \bar x)/\sqrt{J-1}\).
+Pushing \(g\) through the noise adds \(y\) with covariance \(\hat C_{gg} + R\),
+where hats denote sample moments.</p>
+
+<pre><code class="language-python">ens = problem.prior.sample(jax.random.key(1), n_particles=32)
+ens = maps.pushforward(ens, problem.forward, inputs=&quot;u&quot;, output=&quot;g&quot;)
+ens_joint = (ens.project()                                       # member-aligned
+             .pipe(maps.pushforward, maps.AdditiveNoise(problem.noise_cov),
+                   inputs=&quot;g&quot;, output=&quot;y&quot;))</code></pre>
+<h4>Square root: condition, then realize</h4>
+<p>Conditioning the fit on \(y = y^*\) shifts its mean by \(\hat K(y^* - \bar g)\)
+and multiplies its factor on the right by \(T = (I_J + S S^\top)^{-1/2}\),
+where row \(j\) of \(S\) is \(R^{-1/2}(g_j - \bar g)/\sqrt{J-1}\). Realizing reads
+one particle off each column:</p>
+<p>\[
+x_j^{a} = \bar x + \hat K (y^* - \bar g) + \sum_{i=1}^{J} (x_i - \bar x)\, T_{ij} .
+\]</p>
+<p><code>square_root_map(&quot;y&quot;)</code> packages these two operations as a map that is built
+from the block name and called with the value.</p>
+
+<pre><code class="language-python"># square root: realize after condition, built once as a map and called with the value
+sqrt_map = ens_joint.square_root_map(&quot;y&quot;)
+sqrt_particles = sqrt_map(y=problem.y)
+assert jnp.allclose(sqrt_particles[&quot;u&quot;],
+                    ens_joint.condition(y=problem.y).realize_particles()[&quot;u&quot;])</code></pre>
+<h4>Matheron: realize, then transport</h4>
+<p>Realizing the fit without the noise term on \(y\) returns the original
+particles, with \(y_j = g_j\). The conditional map then moves each one by
+\(\hat K(y^* - g_j - e_j)\), drawing \(e_j \sim \mathcal N(0, R)\) as a standard
+normal in whitened coordinates.</p>
+
+<pre><code class="language-python"># Matheron: transport after realize (the map draws the noise, whitened)
+particles = ens_joint.realize_particles(exclude_block_covs=(&quot;y&quot;,))   # y_j = g_j here
+pert_particles = ens_joint.conditional_map(&quot;y&quot;)(particles, y=problem.y,
+                                                key=jax.random.key(2))</code></pre>
+<h4>What to notice</h4>
+<p>The checks below confirm three things. The 200,000 transported samples
+match the exact posterior mean and covariance of \(u\) to within \(10^{-2}\).
+The square-root particles reproduce the conditioned fit's mean and
+covariance to within \(10^{-12}\), because realizing preserves the moments of
+a member-aligned Gaussian. The Matheron particles carry the blocks <code>u</code> and
+<code>g</code>, with the conditioned block <code>y</code> dropped.</p>
+
+<pre><code class="language-python"># checks
+assert jnp.allclose(samples.mean(&quot;u&quot;), posterior.mean(&quot;u&quot;), atol=1e-2)
+assert jnp.allclose(samples.cov(&quot;u&quot;).to_dense(), posterior.cov(&quot;u&quot;).to_dense(), atol=1e-2)
+fit = ens_joint.condition(y=problem.y)
+assert jnp.allclose(sqrt_particles.mean(&quot;u&quot;), fit.mean(&quot;u&quot;), atol=1e-12)
+assert jnp.allclose(sqrt_particles.cov(&quot;u&quot;).to_dense(), fit.cov(&quot;u&quot;).to_dense(), atol=1e-12)
+assert pert_particles.names == (&quot;u&quot;, &quot;g&quot;)
+print(&quot;Matheron samples match the exact conditional; realize . condition is exact on the fit&quot;)</code></pre>
+<pre class="output"><code class="language-plaintext">Matheron samples match the exact conditional; realize . condition is exact on the fit</code></pre>
+<div class="refs"><h4>References</h4>
+<ul>
+<li>Bishop, C. H., Etherton, B. J. &amp; Majumdar, S. J. (2001). Adaptive sampling with the ensemble transform Kalman filter. Part I: Theoretical aspects. <em>Monthly Weather Review</em>, 129(3), 420–436.</li>
+<li>Journel, A. G. &amp; Huijbregts, C. J. (1978). <em>Mining Geostatistics</em>. Academic Press.</li>
+<li>Tippett, M. K., Anderson, J. L., Bishop, C. H., Hamill, T. M. &amp; Whitaker, J. S. (2003). Ensemble square root filters. <em>Monthly Weather Review</em>, 131(7), 1485–1490.</li>
+<li>Wilson, J. T., Borovitskiy, V., Terenin, A., Mostowsky, P. &amp; Deisenroth, M. P. (2021). Pathwise conditioning of Gaussian processes. <em>Journal of Machine Learning Research</em>, 22(105), 1–47.</li>
+</ul>
+</div>

@@ -1,0 +1,90 @@
+<h3 id="ex03">One update, one call</h3>
+<p>Apply a single ensemble Kalman update to a linear-Gaussian problem with
+<code>kalman.update</code>, and compare the result with the exact posterior.</p>
+<h4>When to use this</h4>
+<p><code>kalman.update</code> performs one analysis on an ensemble that already carries
+both the quantity to be updated and its prediction of the data. It is the
+right tool when you control the surrounding loop yourself, or when there is
+only one batch of data to assimilate. The update rule is an argument. The
+symmetric square-root rule is deterministic (Bishop, Etherton &amp; Majumdar, 2001; Tippett et al., 2003),
+and Matheron's rule perturbs each particle's predicted data with a fresh
+noise draw (Burgers, van Leeuwen &amp; Evensen, 1998).</p>
+<h4>Setup</h4>
+<p>The parameter \(u \in \mathbb R^4\) has prior \(\mathcal N(0, C)\) with
+\(C = B B^\top / 4 + \tfrac12 I_4\), where \(B\) is a fixed \(4 \times 4\) matrix
+of standard normal entries. The data are</p>
+<p>\[
+y = A u^\dagger + \varepsilon, \qquad
+\varepsilon \sim \mathcal N(0, R), \quad R = 0.3^2 I_6,
+\]</p>
+<p>with \(A \in \mathbb R^{6 \times 4}\) a fixed matrix of entries drawn from
+\(\mathcal N(0, 1/4)\) and \(u^\dagger\) a draw from the prior. The posterior is
+Gaussian, with</p>
+<p>\[
+m_{\mathrm{post}} = K y, \qquad
+C_{\mathrm{post}} = C - K A C, \qquad
+K = C A^\top (A C A^\top + R)^{-1} .
+\]</p>
+
+<pre><code class="language-python">import jax
+import jax.numpy as jnp
+
+import enskit
+from enskit import kalman, maps, toy
+from enskit.distribution import exact_moment_ensemble
+
+problem = toy.linear_gaussian(parameter_dim=4, data_dim=6)</code></pre>
+<h4>The ensemble</h4>
+<p><code>exact_moment_ensemble</code> draws \(J = 32\) particles \(u_j\) whose sample mean is
+exactly \(0\) and whose sample covariance, normalized by \(J - 1\), is exactly
+\(C\) (Pham, 2001). Pushing them through the forward model adds the block
+\(g_j = A u_j\).</p>
+
+<pre><code class="language-python">ens = exact_moment_ensemble(jax.random.key(0), problem.prior, n_particles=32)
+ens = maps.pushforward(ens, problem.forward, inputs=&quot;u&quot;, output=&quot;g&quot;)   # blocks: u, g</code></pre>
+<h4>Two updates</h4>
+<p>Each call conditions on \(g = y\), with \(g\) observed through additive noise
+of covariance \(R\). Both rules use the ensemble's sample moments in place of
+\(C\) in the formulas above. The square-root rule moves the ensemble mean by
+\(K(y - \bar g)\) and transforms the anomalies so that their sample covariance
+equals \(C - KAC\). Matheron's rule moves each particle by
+\(K(y - g_j - e_j)\) with \(e_j \sim \mathcal N(0, R)\), so it needs a key.</p>
+
+<pre><code class="language-python"># Condition on g, observed through additive noise with covariance noise_cov.
+sqrt_post = kalman.update(ens, g=problem.y, noise={&quot;g&quot;: problem.noise_cov},
+                          update_rule=kalman.SymmetricSquareRoot())
+pert_post = kalman.update(ens, g=problem.y, noise={&quot;g&quot;: problem.noise_cov},
+                          update_rule=kalman.Matheron(), key=jax.random.key(1))
+print(sqrt_post)          # Ensemble(n_particles=32, blocks={&#x27;u&#x27;: 4}, weighted=False)</code></pre>
+<pre class="output"><code class="language-plaintext">Ensemble(n_particles=32, blocks={&#x27;u&#x27;: 4}, weighted=False)</code></pre>
+<h4>The exact answer</h4>
+<p>The same operations applied to the prior itself, rather than to an
+ensemble, give the exact Gaussian posterior.</p>
+
+<pre><code class="language-python"># The exact answer, from the same building blocks applied to the prior itself.
+exact = (problem.prior
+         .pipe(maps.pushforward, problem.forward, inputs=&quot;u&quot;, output=&quot;g&quot;)
+         .add_noise(g=problem.noise_cov)
+         .condition(g=problem.y))</code></pre>
+<h4>What to notice</h4>
+<p>The update returns an ensemble over <code>u</code> alone; the conditioned block <code>g</code> is
+dropped. Because the particles reproduce the prior's mean and covariance
+exactly and the model is linear, the square-root update matches the exact
+posterior mean and covariance to \(10^{-12}\). Matheron's update matches the
+exact posterior only in expectation over the noise draws, so its mean is
+checked to a tolerance of 0.3.</p>
+
+<pre><code class="language-python"># checks: the square-root update of an exact-moment ensemble is exact
+assert jnp.allclose(sqrt_post.mean(&quot;u&quot;), exact.mean(&quot;u&quot;), atol=1e-12)
+assert jnp.allclose(sqrt_post.cov(&quot;u&quot;).to_dense(), exact.cov(&quot;u&quot;).to_dense(), atol=1e-12)
+assert jnp.allclose(pert_post.mean(&quot;u&quot;), exact.mean(&quot;u&quot;), atol=0.3)
+print(&quot;square-root update matches the exact posterior&quot;)</code></pre>
+<pre class="output"><code class="language-plaintext">square-root update matches the exact posterior</code></pre>
+<div class="refs"><h4>References</h4>
+<ul>
+<li>Bishop, C. H., Etherton, B. J. &amp; Majumdar, S. J. (2001). Adaptive sampling with the ensemble transform Kalman filter. Part I: Theoretical aspects. <em>Monthly Weather Review</em>, 129(3), 420–436.</li>
+<li>Burgers, G., van Leeuwen, P. J. &amp; Evensen, G. (1998). Analysis scheme in the ensemble Kalman filter. <em>Monthly Weather Review</em>, 126(6), 1719–1724.</li>
+<li>Pham, D. T. (2001). Stochastic methods for sequential data assimilation in strongly nonlinear systems. <em>Monthly Weather Review</em>, 129(5), 1194–1207.</li>
+<li>Tippett, M. K., Anderson, J. L., Bishop, C. H., Hamill, T. M. &amp; Whitaker, J. S. (2003). Ensemble square root filters. <em>Monthly Weather Review</em>, 131(7), 1485–1490.</li>
+</ul>
+</div>

@@ -1,0 +1,95 @@
+<h3 id="ex04">Ensemble Kalman inversion written by hand</h3>
+<p>Write the EKI loop as explicit calls, one evaluation of the forward model
+and one update per step, and check that it reproduces the driver.</p>
+<h4>When to use this</h4>
+<p>The driver <code>eki.run</code> covers the common schedules and stopping rules. A
+hand-written loop is the right tool when a step needs something the driver
+does not offer, such as logging intermediate ensembles, changing the data
+between steps, or inserting a custom operation between the evaluation and
+the update. Each step is one ensemble Kalman update with a scaled noise
+covariance (Iglesias, Law &amp; Stuart, 2013). The ensemble smoother with multiple data
+assimilation (ES-MDA) has the same structure with a fixed schedule
+(Emerick &amp; Reynolds, 2013).</p>
+<h4>Setup</h4>
+<p>The problem is the decay model of the first example. Parameters
+\(u = (a, r)\) map to \(G(u)_i = a\, e^{-r t_i}\) at ten times \(t_i\) equally
+spaced on \([0.1, 2]\), the data are \(y = G(u^\dagger) + e\) with
+\(e \sim \mathcal N(0, R)\), \(R = 0.05^2 I_{10}\) and \(u^\dagger = (1.5, 1.2)\),
+and the prior is \(\mathcal N\big((1, 0.5),\ \operatorname{diag}(0.5, 0.5)\big)\).
+The loop moves \(J = 64\) particles through the tempered targets</p>
+<p>\[
+\pi_{\beta}(u) \propto \pi_0(u)\, e^{-\beta \Phi(u)}, \qquad
+\Phi(u) = \tfrac12 \lVert R^{-1/2}(y - G(u)) \rVert^2 ,
+\]</p>
+<p>at levels \(\beta_0 = 0\) and \(\beta_{k+1} = \beta_k + \delta_k\), with the
+increments</p>
+<p>\[
+(\delta_0, \dots, \delta_4) = \big(\tfrac1{16}, \tfrac1{16}, \tfrac18, \tfrac14, \tfrac12\big),
+\qquad \textstyle\sum_k \delta_k = 1 .
+\]</p>
+<p>The increments are powers of two, so their floating-point sum is exactly 1
+and the last step ends at \(\beta = 1\).</p>
+
+<pre><code class="language-python">import jax
+import jax.numpy as jnp
+
+import enskit
+from enskit import kalman, maps, toy
+from enskit.algorithms import eki
+
+problem = toy.exponential_decay()
+increments = (1 / 16, 1 / 16, 1 / 8, 1 / 4, 1 / 2)      # binary-exact: sums to exactly 1</code></pre>
+<h4>The initial ensemble</h4>
+<p>The particles are drawn from the prior, with the key split the same way
+the driver's state is built below.</p>
+
+<pre><code class="language-python">key = jax.random.key(0)
+key, sub = jax.random.split(key)
+ens = problem.prior.sample(sub, n_particles=64)            # Ensemble over &quot;u&quot;</code></pre>
+<h4>The loop</h4>
+<p>Since \(e^{-\delta \Phi(u)}\) is, up to a constant, a Gaussian likelihood
+for \(y\) with covariance \(R/\delta\), the step from \(\beta\) to \(\beta + \delta\)
+conditions on \(g = y\) with noise covariance \(R/\delta\). Each step evaluates
+\(g_j = G(u_j)\) for all particles at once, prints the mean of \(\Phi(u_j)\) and
+the standard deviation of each parameter across the particles, and then
+applies the symmetric square-root update.</p>
+
+<pre><code class="language-python">for step, dbeta in enumerate(increments):
+    # forecast: one evaluation of the forward model for the whole ensemble
+    ens = maps.pushforward(ens, problem.forward, inputs=&quot;u&quot;, output=&quot;g&quot;)
+    misfit = 0.5 * jnp.sum(problem.noise_cov.whiten(problem.y - ens[&quot;g&quot;]) ** 2, axis=1)
+    print(f&quot;step {step}: increment {dbeta:.4f}, mean misfit {misfit.mean():8.2f}, &quot;
+          f&quot;spread {jnp.std(ens[&#x27;u&#x27;], axis=0)}&quot;)
+    # update: condition on g with the tempered noise covariance R / dbeta
+    ens = kalman.update(ens, g=problem.y, noise={&quot;g&quot;: problem.noise_cov / dbeta},
+                        update_rule=kalman.SymmetricSquareRoot())   # returns an Ensemble over &quot;u&quot; only
+
+print(&quot;hand-written loop:&quot;, ens.mean(&quot;u&quot;))</code></pre>
+<pre class="output"><code class="language-plaintext">step 0: increment 0.0625, mean misfit  1826.37, spread [0.67074507 0.63266263]
+step 1: increment 0.0625, mean misfit   107.49, spread [0.17523301 0.38821765]
+step 2: increment 0.1250, mean misfit    15.27, spread [0.13286014 0.21719647]
+step 3: increment 0.2500, mean misfit     7.67, spread [0.09786108 0.13694974]
+step 4: increment 0.5000, mean misfit     5.14, spread [0.07119151 0.09331804]
+hand-written loop: [1.47994971 1.1550591 ]</code></pre>
+<h4>What to notice</h4>
+<p>The mean misfit falls from 1826 at the prior to 5.1 before the last step,
+and the spread of \((a, r)\) shrinks from about \((0.67, 0.63)\) to
+\((0.071, 0.093)\). The final mean is \((1.480, 1.155)\), close to
+\(u^\dagger = (1.5, 1.2)\). The check below runs <code>eki.run</code> with
+<code>eki.FixedSchedule(increments)</code> on the same initial particles and finds the
+same final ensemble to within \(10^{-12}\).</p>
+
+<pre><code class="language-python"># checks: identical to the driver with the same fixed schedule
+state = eki.EKIState(problem.prior.sample(jax.random.split(jax.random.key(0))[1], 64),
+                     key=jax.random.key(1))
+result = eki.run(state, problem.forward, problem.y, problem.noise_cov,
+                 update_rule=kalman.SymmetricSquareRoot(), schedule=eki.FixedSchedule(increments))
+assert jnp.allclose(result.ensemble[&quot;u&quot;], ens[&quot;u&quot;], atol=1e-12)
+print(&quot;driver agrees:&quot;, result.ensemble.mean(&quot;u&quot;))</code></pre>
+<pre class="output"><code class="language-plaintext">driver agrees: [1.47994971 1.1550591 ]</code></pre>
+<div class="refs"><h4>References</h4>
+<ul>
+<li>Emerick, A. A. &amp; Reynolds, A. C. (2013). Ensemble smoother with multiple data assimilation. <em>Computers &amp; Geosciences</em>, 55, 3–15.</li>
+<li>Iglesias, M. A., Law, K. J. H. &amp; Stuart, A. M. (2013). Ensemble Kalman methods for inverse problems. <em>Inverse Problems</em>, 29(4), 045001.</li>
+</ul>
+</div>
