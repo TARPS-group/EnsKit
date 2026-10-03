@@ -28,7 +28,16 @@ extensions = [
 
 source_suffix = {".rst": "restructuredtext", ".md": "markdown"}
 master_doc = "index"
-exclude_patterns = ["_build", "_generated", "**.ipynb_checkpoints"]
+exclude_patterns = [
+    "_build",
+    "_generated",
+    "**.ipynb_checkpoints",
+    # the redesign's working material; only redesign/index.md is a page
+    "redesign/document",
+    "redesign/notebooks",
+    "redesign/prototype",
+    "redesign/stubs",
+]
 
 myst_enable_extensions = ["colon_fence", "deflist", "dollarmath", "amsmath"]
 myst_heading_anchors = 3

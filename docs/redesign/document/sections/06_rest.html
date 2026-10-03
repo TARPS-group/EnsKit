@@ -1,0 +1,274 @@
+<h2 id="lessons"><span class="num">8</span>What the prototype changed</h2>
+
+<p>The prototype was written to find seams before they reached the real package. These are the design changes it forced, each of which is now part of the specification above.</p>
+
+<div class="tablewrap"><table>
+<tr><th>Found</th><th>Consequence in the design</th></tr>
+<tr><td>An exact Kalman filter's latent width grew by the state dimension every step, because each transition-noise term was absorbed into the factor.</td><td><code>Gaussian.compress()</code>, with a size guard. Example 7 ends at width 3 after 20 steps.</td></tr>
+<tr><td>The density of an EKI ensemble's moment match (the IS proposal in Example 10) had no route: no block has an independent term to whiten.</td><td>Noise-free conditioning and density via thin QR of \(F_c^\top\) when \(k\ge N\) and \(F_c\) has full row rank. Mixed noisy and noise-free given sets raise.</td></tr>
+<tr><td>The first stochastic update sampled the given block's noise in data space through <code>R.factor()</code>, breaking the rule that noise needs only <code>whiten</code>.</td><td>The conditional map draws the given blocks' noise itself in whitened coordinates (<code>key=</code>), and <code>realize_particles(exclude_block_covs=...)</code> returns the noise-free particles it acts on.</td></tr>
+<tr><td>A plain SVD's gradient is <code>nan</code> at exactly repeated and exactly zero singular values (zero-padded localization neighborhoods, constant predicted coordinates), but finite at the float-generic near-zeros of a centered ensemble.</td><td>Custom JVPs on the three operations of <code>IdentityPlusGram</code> (§9.2), with the measured cases as regression tests.</td></tr>
+<tr><td>Chaining a <code>maps</code> operation onto a <code>Gaussian</code> needed either a method (an upward import) or nested calls.</td><td><code>pipe()</code> on both distributions.</td></tr>
+<tr><td>Localizing inside <code>enkf.filter</code> required naming the driver's internal block.</td><td><code>DomainLocalization(given_coords=...)</code> accepts a bare array when one block is given.</td></tr>
+<tr><td><code>jax.scipy.optimize.minimize</code> (BFGS) stopped on a failed line search at a non-optimum while the gradient was correct.</td><td>The package ships no optimizer; the docs show SciPy or optax.</td></tr>
+<tr><td>The exact-noise estimator's advantage depends on the noise-to-signal ratio: 6.5 against 6.0 at noise sd 0.3, and 14.0 against 6.0 at sd 1.0.</td><td>The user guide should say when the structured route matters, not just that it is better.</td></tr>
+<tr><td>EKI's <code>step</code> is static (it indexes a fixed schedule), so <code>lax.scan</code> over driver steps cannot carry it.</td><td>Differentiable or scanned loops are written over <code>kalman.update</code> at level 3 (Example 15b unrolls <code>advance</code>). See §13 for whether to make <code>step</code> data.</td></tr>
+</table></div>
+
+<p>An independent adversarial review of the first draft found more. Each item below was fixed and has a regression check in the prototype.</p>
+<div class="tablewrap"><table>
+<tr><th>Found in review</th><th>Fix</th></tr>
+<tr><td>A hybrid or otherwise modified joint could not reach <code>kalman.update</code> or the drivers, because update rules required an aligned joint.</td><td>Update rules build from the particles <em>and</em> an approximation, and <code>update</code> and both drivers take an <code>approximation=</code> builder. <code>Matheron</code> works with any joint; Example 11 is now one <code>enkf.filter</code> call.</td></tr>
+<tr><td>The first <code>Matheron</code> dropped independent terms on target blocks, giving a variance of 0.044 where the exact posterior has 4.04.</td><td>Target independent terms are sampled. Measured 4.07–4.29 against exact 4.05–4.34 over 20 draws.</td></tr>
+<tr><td><code>LocalizedUpdateRule</code> rejected the scaled noise <code>R / Δβ</code> that every EKI step uses. Its stochastic form gave unlocated blocks no perturbation.</td><td>Any scaled diagonal is accepted. One whitened draw is shared by local and global analyses.</td></tr>
+<tr><td>Exact-value conditioning on a particle-aligned Gaussian with \(J = N\) passed the size check (rank is at most \(J-1\)), and under <code>jit</code> returned a log density of \(-3\times10^{31}\).</td><td>An aligned joint requires \(J &gt; N\), as a shape check that always runs.</td></tr>
+<tr><td><code>sqrt_transform</code> returned a dense \(k\times k\) matrix, which densifies a structured prior's factor in exact conditioning.</td><td>Returned as a thin operator, with a thin-basis JVP (checked against the full rule to \(10^{-15}\)).</td></tr>
+<tr><td>A stochastic update through a general conditional map costs \(2J\) whitenings, against the \(J{+}1\) rule.</td><td>Aligned fast path in <code>Matheron</code>; it agrees with the general path to \(9\times10^{-16}\).</td></tr>
+<tr><td>Weighted projection gave silent <code>nan</code> when one weight dominated.</td><td>Stable divisor; raises when the weights are concentrated on one particle to working precision.</td></tr>
+<tr><td><code>exact_moment_ensemble</code> matched moments per block but not across blocks (cross-covariance up to 0.61).</td><td>One joint draw, QR-orthonormalized: cross-covariance \(2\times10^{-16}\).</td></tr>
+<tr><td><code>latent_dim</code> was inferred from the factors present, so some marginals changed it.</td><td>Static metadata.</td></tr>
+<tr><td><code>BlackBox</code> failed under <code>vmap</code>.</td><td><code>vmap_method="sequential"</code>; the simulator still sees 2-D arrays (Example 15c).</td></tr>
+<tr><td>The EKI stubs and the prototype disagreed on protocols (schedule and stop arguments, key split, <code>max_steps</code>).</td><td>The prototype now implements the stubs' protocols, and the examples use them.</td></tr>
+<tr><td>The EnKF inflation hook could not express RTPS/RTPP, and its signature differed from EKI's.</td><td>Shared <code>Inflation</code> and <code>Relaxation</code> protocols and policies (§6.6), with a 4-way key split.</td></tr>
+<tr><td>The differentiability contract claimed more than the code delivered; the ALDI and design-gain formulas were off by constant factors; several core docstrings used words their layer may not use.</td><td>§9.1 narrowed; formulas corrected; docstrings reworded.</td></tr>
+</table></div>
+
+<h2 id="autodiff"><span class="num">9</span>The differentiability contract</h2>
+
+<h3 id="ad-statement"><span class="num">9.1</span>The contract</h3>
+
+<ol>
+  <li><strong>Every operation below the algorithm layer is differentiable</strong> with respect to every array leaf it reads. That covers operator parameters (a covariance's entries, a lengthscale inside a kernel matrix, a scale on <code>PSDScaled</code>), means, factor rows, particle arrays, given values and log weights. "Differentiable" means <code>jax.grad</code>, <code>jax.jvp</code> and <code>jax.vjp</code> return finite, correct derivatives wherever the function is smooth.
+    <ul>
+      <li><strong>Degenerate-safe</strong> (finite and correct even at exactly repeated or zero singular values): <code>IdentityPlusGram</code>'s <code>solve_factor</code>, <code>inverse_sqrt</code> and <code>logdet</code>, and so everything built on them. That is <code>condition</code> and <code>log_density</code> on noisy blocks, conditional maps, every update rule, <code>LocalizedUpdateRule</code>, and <code>LowRankUpdate.solve</code>/<code>logdet</code>.</li>
+      <li><strong>Full-rank only</strong> (finite where the factorization is nonsingular, which is also where the function is defined or unique): exact-value conditioning and its density (QR), <code>compress</code> (QR), and <code>LowRankUpdate.whiten</code> (SVD).</li>
+    </ul></li>
+  <li><strong>Simulators are differentiated only if they are traceable.</strong> A pure-JAX callable is differentiated by JAX like any other function. A host-side callable cannot run under a trace at all. Wrapped in <code>maps.BlackBox</code>, it runs under a trace and its outputs are <em>constants</em>: its derivative is zero by declaration. Outside a trace, a simulator's outputs are just arrays, so they are constants for any gradient computed afterwards.</li>
+  <li><strong>Stochastic operations are reparameterized.</strong> For a fixed key, <code>sample</code>, <code>realize_particles(key)</code>, <code>pushforward(·, AdditiveNoise)</code> and the stochastic update are deterministic functions of their parameters. Their gradient is the pathwise derivative of that realization. Because the update draws noise in whitened coordinates, the dependence on \(R\) enters through \(W\) and is differentiated exactly.</li>
+  <li><strong>Discrete choices have zero derivative, explicitly.</strong> This covers keys, resampling indices, the neighbor sets chosen by localization (the taper weights inside a set are differentiable), the failure mask, and an adaptive schedule's increment, which is computed under <code>stop_gradient</code> because the derivative of a bisection is meaningless. The docstring of each such function says so.</li>
+  <li><strong>Drivers are Python loops.</strong> They are differentiable end to end when the simulator is traceable and the schedule is fixed (Example 15b). They are not <code>jit</code>-compiled as a whole, because stopping and exhaustion are host decisions.</li>
+</ol>
+
+<h3 id="ad-kernel"><span class="num">9.2</span>Why <code>IdentityPlusGram</code> needs custom derivatives</h3>
+
+<p>JAX's SVD derivative divides by \(\sigma_i^2-\sigma_j^2\). The outputs of <code>IdentityPlusGram</code> are smooth functions of \(S\) even where that gap is zero, but autodiff through the decomposition does not know that. Its three operations therefore carry custom JVP rules written in closed form:</p>
+
+\[
+w=(I+SS^\top)^{-1}Sb:\qquad dw = M(dS\,b + S\,db) - M(dS\,S^\top + S\,dS^\top)\,w,\quad M=(I+SS^\top)^{-1},
+\]
+\[
+T=(I+SS^\top)^{-1/2}:\qquad dT = U\big(\Gamma\circ(U^\top dA\,U)\big)U^\top,\quad dA = dS\,S^\top+S\,dS^\top,\quad \Gamma_{ij}=\frac{-1}{s_is_j(s_i+s_j)},\ s_i=\sqrt{1+\sigma_i^2},
+\]
+\[
+\ell=\log\det(I+SS^\top):\qquad d\ell = 2\,\langle (I+SS^\top)^{-1}S,\ dS\rangle .
+\]
+
+<p>The second rule is the Daleckii–Krein formula [@higham2008]. For \(f(\lambda)=(1+\lambda)^{-1/2}\) the divided difference simplifies to \(\Gamma_{ij}\) above, which has neither cancellation nor a special case for repeated eigenvalues. Written as shown it needs the full \(k\times k\) basis. The shipped form works in the thin basis \(U_r\) with the projector \(P=I-U_rU_r^\top\): the cross blocks have \(\Gamma_{ic}=-1/(s_i(s_i+1))\), and the complement–complement block vanishes because \(PS=0\). The thin form agrees with the full one to \(10^{-15}\) and with finite differences to \(10^{-10}\), including at the degenerate cases below. Measured on JAX 0.10.2, as the directional derivative along a random direction:</p>
+
+<div class="tablewrap"><table>
+<tr><th>\(S\)</th><th>plain SVD, \(T\)</th><th>custom, \(T\)</th><th>plain SVD, gain</th><th>custom, gain</th><th>finite difference (\(T\), gain)</th></tr>
+<tr><td>exactly repeated \(\sigma = (2, 2)\)</td><td><code>nan</code></td><td>−0.17931</td><td><code>nan</code></td><td>−3.5449</td><td>−0.17931, −3.5449</td></tr>
+<tr><td>three zero-padded columns (a masked neighborhood)</td><td><code>nan</code></td><td>0.90220</td><td><code>nan</code></td><td>6.3385</td><td>0.90220, 6.3385</td></tr>
+<tr><td>duplicated particles (\(\sigma_{\min}\sim10^{-16}\), not exact)</td><td>−0.030849</td><td>−0.030849</td><td>−3.3119</td><td>−3.3119</td><td>agree</td></tr>
+</table></div>
+
+<p>The hazard is therefore narrower than the current contract assumed: float-generic degeneracy is harmless, and exact degeneracy is not. Exact degeneracy is exactly what localization masks and constant predicted coordinates produce.</p>
+
+<h3 id="ad-uses"><span class="num">9.3</span>Use cases</h3>
+
+<div class="tablewrap"><table>
+<tr><th>Use</th><th>Objective</th><th>Simulator requirement</th><th>Status</th></tr>
+<tr><td><strong>Noise and prior hyperparameters, linear or surrogate model</strong> [@rasmussen2006]</td><td class="wrap">exact log evidence, <code>joint.log_density(y=y)</code></td><td>none, or traceable</td><td><span class="tag ok">verified</span> Ex. 8a</td></tr>
+<tr><td><strong>Noise hyperparameters, black-box model</strong> [@carrassi2017]</td><td class="wrap">ensemble evidence \(\log\mathcal N(y;\bar g,\hat C_{gg}+R(\theta))\) on a fixed ensemble</td><td>black box (evaluated once)</td><td><span class="tag ok">verified</span> Ex. 8b</td></tr>
+<tr><td><strong>Prior hyperparameters, black-box model</strong></td><td class="wrap">the same evidence on a fixed ensemble <em>reweighted</em> from \(\theta_0\) to \(\theta\): \(\log w_j = \log p_\theta(u_j)-\log p_{\theta_0}(u_j)\). The weighted projection makes it differentiable in \(\theta\) without \(\partial G/\partial u\).</td><td>black box</td><td><span class="tag spec">specified</span></td></tr>
+<tr><td><strong>EnKF noise, transition noise, inflation, localization radius</strong> [@carrassi2017]</td><td class="wrap">\(\sum_t\) one-step predictive log evidence (<code>FilterResult.log_evidence</code>)</td><td class="wrap">traceable for the full gradient; black box gives the one-step gradient with forecasts held fixed</td><td><span class="tag spec">specified</span> (the objective is <span class="tag ok">verified</span>, Ex. 2)</td></tr>
+<tr><td><strong>Learning simulator or dynamics parameters end to end</strong> (a differentiable EnKF [@chen2022])</td><td class="wrap">any loss on a run's output</td><td class="wrap">traceable; long runs need <code>jax.checkpoint</code> per step</td><td><span class="tag ok">verified</span> short runs, Ex. 15b</td></tr>
+<tr><td><strong>Experimental design</strong> [@chaloner1995]</td><td class="wrap">linear-Gaussian expected information gain \(\tfrac12\log\det(I+SS^\top)\) = <code>0.5 * IdentityPlusGram(S).logdet()</code>, differentiable in design parameters inside \(H\) or \(R\)</td><td>none, or traceable</td><td><span class="tag spec">specified</span></td></tr>
+<tr><td><strong>Sensitivity of posterior summaries to the data</strong></td><td class="wrap">\(\partial\,\mathbb E[u\mid y]/\partial y\), for robustness and influence diagnostics</td><td>none (fixed ensemble)</td><td><span class="tag spec">specified</span></td></tr>
+<tr><td><strong>Training transport maps</strong> (future)</td><td class="wrap">a map's fitting loss on particle arrays</td><td>none</td><td>§11</td></tr>
+</table></div>
+
+<div class="callout hazard"><span class="label">What a zero derivative means</span>
+<p>A gradient through a run that evaluates a black box at points depending on \(\theta\) is a partial derivative: those evaluations are held fixed. For noise hyperparameters on a fixed ensemble that is exactly the derivative wanted. Through a multi-step EKI run, it is not, because later particles depend on \(\theta\) and so do their evaluations. The user guide states this, and the evidence objectives above are chosen to avoid it.</p></div>
+
+<h2 id="weights"><span class="num">10</span>Weighted ensembles</h2>
+
+<p><strong>Recommendation: minimal weighting in the core, and no SMC driver.</strong></p>
+<ul>
+  <li><strong>In:</strong>
+    <ul>
+      <li><code>Ensemble.log_weights</code>, <code>weights</code> and <code>is_weighted</code>;</li>
+      <li><code>reweight</code>, <code>effective_sample_size</code> and <code>resample</code>;</li>
+      <li>weighted <code>mean</code>, <code>cov</code> and <code>project</code>.</li>
+    </ul>
+    This is about 150 lines, and every part of it is already needed. The ESS schedule computes tempering weights [@jasra2011], whose effective sample size [@kong1994] it controls. Your EKI-then-IS workflow needs a weighted ensemble type to hand back (Example 10). Reweighting a fixed ensemble is the cleanest route to prior-hyperparameter gradients with a black-box model (§9.3).</li>
+  <li><strong>Out:</strong> MCMC mutation kernels and an SMC driver. These are large, opinionated and well served elsewhere, and a user's SMC loop composes the pieces above with their own kernel. An <code>algorithms.smc</code> module is a natural later addition (§11). Nothing in the core would change to admit it.</li>
+  <li><strong>Weighted projection fails loudly when it is meaningless.</strong> \(1-\sum w^2\) is computed stably from the log weights. When it rounds to zero (one particle holds all the weight) <code>project</code> raises rather than returning <code>nan</code>.</li>
+  <li><strong>Kalman updates refuse weighted ensembles.</strong> A weighted ensemble's projection is not particle-aligned, because reading particles back would divide by \(\sqrt{w_j}\). A weighted square-root update is a different estimator with its own literature. The error message tells the user to resample first.</li>
+</ul>
+
+<h2 id="extensibility"><span class="num">11</span>Extensibility</h2>
+
+<p>None of the following is in scope now. Each one is listed with the piece it would add and where that piece lives. In every case the import rules accept it without change.</p>
+
+<h3 id="ext-eks"><span class="num">11.1</span>EKS and ALDI</h3>
+<p>The ensemble Kalman sampler (EKS) [@garbuno2020eks] and its affine-invariant, finite-ensemble-corrected form ALDI [@garbuno2020aldi].</p>
+<p>These are interacting-particle Langevin dynamics, not conditioning, so they do not use <code>kalman</code> at all. Everything they need is in <code>distribution</code> and <code>linalg</code>: the sample cross-covariance as an operator, the prior precision through <code>solve</code>, and \(\hat C^{1/2}\) as the projected factor. A step reads naturally (sketch, not prototyped):</p>
+<pre><code class="language-python">def aldi_step(key, ens, forward, y, noise_cov, prior, dt):
+    """One explicit step of ALDI (EKS plus the finite-ensemble correction)."""
+    ens = maps.pushforward(ens, forward, inputs="u", output="g")
+    J, d = ens.n_particles, ens.dims["u"]
+    C_ug, C_uu = ens.cov("u", "g"), ens.cov("u")          # operators, never formed
+    drift = (C_ug.matvec(noise_cov.solve(ens["g"] - y))
+             + C_uu.matvec(prior.block_cov("u").solve(ens["u"] - prior.mean("u"))))
+    sqrt_C = ens.project().factor("u")                    # (d, J): C_uu = F F^T
+    noise = sqrt_C.matvec(jax.random.normal(key, (J, J)))
+    # ALDI's correction is (d + 1)/J with 1/J-normalized covariances; with the
+    # package's J - 1 divisor it is (d + 1)/(J - 1)
+    u = (ens["u"] - dt * drift + jnp.sqrt(2 * dt) * noise
+         + dt * (d + 1) / (J - 1) * ens.anomalies("u"))
+    return ens.assign(u=u).drop("g")</code></pre>
+<p>It would live in <code>algorithms.eks</code>, with its own state (a time and a step size instead of a level) and the existing driver machinery. A tamed or implicit variant solves with \(I+\Delta t\,\hat C\Gamma^{-1}\), which is a <code>LowRankUpdate</code>.</p>
+
+<h3 id="ext-uki"><span class="num">11.2</span>Unscented Kalman inversion</h3>
+<p>Unscented Kalman inversion (UKI) [@huang2022].</p>
+<p>Sigma points are a weighted point set whose mean weights and covariance weights differ. That is a new <code>distribution</code> type, <code>SigmaPoints</code>, with <code>Gaussian.sigma_points(rule)</code> to create one and <code>project()</code> to fit a Gaussian. <code>maps.pushforward</code> already only needs <code>names</code>, <code>[]</code> and <code>assign</code> from its input, so it accepts any such point set once that is written as a <code>PointSet</code> protocol. A UKI step is then exact Gaussian algebra: predict, place sigma points, push forward, project, add noise, condition. It lives in <code>algorithms.uki</code>.</p>
+
+<h3 id="ext-transport"><span class="num">11.3</span>Nonlinear transport maps</h3>
+<p>Conditional sampling by measure transport [@marzouk2016], and its use in nonlinear ensemble filtering [@spantini2022].</p>
+<p>A new sibling of <code>kalman</code>, <code>enskit.transport</code>, imports <code>distribution</code> and <code>linalg</code>. It provides fitters such as <code>fit_triangular(particles, given=..., targets=..., basis=...) -> ConditionalMap</code>, and an update rule, <code>TransportRule(fitter)</code>. Its <code>build</code> adds the given blocks' noise to the particles (drawn as in <code>Matheron</code>, from the approximation's independent terms) and fits the map; the returned update applies it at each \(y^*\) it is called with. Because a rule receives the particles themselves, it drops into <code>kalman.update</code>, <code>eki.run</code> and <code>enkf.filter</code> unchanged. A Kalman-affine fit is the degree-1 case, which gives a built-in correctness test.</p>
+
+<h3 id="ext-other"><span class="num">11.4</span>Other directions</h3>
+<div class="tablewrap"><table>
+<tr><th>Method</th><th>New piece</th><th>Where</th></tr>
+<tr><td>Iterative ensemble smoothers: IEnKS [@bocquet2014], LM-EnRML [@chen2013]</td><td class="wrap">ensemble sensitivity \(\hat C_{gu}\hat C_{uu}^{+}\) as an operator (thin SVD of the anomalies), and a Gauss–Newton loop</td><td><code>distribution</code> (<code>Ensemble.regression</code>), <code>algorithms.ies</code></td></tr>
+<tr><td>Localized hybrid covariance</td><td class="wrap"><code>LocalizedUpdateRule</code> requires an approximation aligned with the particles, so it rejects the hybrid approximation of Example 11 (a plain <code>Gaussian</code> whose latent space is the particles plus the columns of \(B\)'s factor). Supporting it means defining alignment as "the first \(J\) latent columns are the particles" and localizing the extra columns' rows alongside them.</td><td><code>distribution</code>, <code>kalman</code></td></tr>
+<tr><td>Covariance localization [@houtekamer2001; @hamill2001; @sakov2011]</td><td class="wrap"><code>PSDHadamard(taper, factor)</code>, plus a data-space kernel (dense Cholesky of \(H(\rho\circ\hat C)H^\top+R\)), only for moderate \(N\)</td><td><code>linalg</code>; an <code>UpdateRule</code> in <code>kalman</code></td></tr>
+<tr><td>Very wide latent spaces (\(k\gg N\))</td><td class="wrap">a data-space kernel and a downdate representation \(F(I-B^\top B)F^\top\) for the posterior, sampled by Matheron's rule; an internal optimization behind the same signatures</td><td><code>distribution</code></td></tr>
+<tr><td>Multilevel and multifidelity ensembles</td><td class="wrap">moment estimators combining several ensembles into one Gaussian (not aligned), used through the conditional map</td><td><code>distribution</code> constructors</td></tr>
+<tr><td>SMC and particle filters</td><td class="wrap">a driver composing <code>reweight</code>, <code>resample</code> and a user's mutation kernel</td><td><code>algorithms.smc</code></td></tr>
+<tr><td>Fixed-interval smoothers (EnKS, RTS-like)</td><td class="wrap">keeping past states as blocks (Example 13 generalizes to lag \(L\)), or storing ensembles and running a backward pass</td><td><code>algorithms.enkf</code></td></tr>
+<tr><td>Blocks with event shapes (fields on grids)</td><td class="wrap">blocks stored as <code>(n, *shape)</code> and flattened at the operator boundary</td><td><code>distribution</code></td></tr>
+</table></div>
+
+<h2 id="migration"><span class="num">12</span>From pyEKI to the new package</h2>
+
+<h3 id="mig-map"><span class="num">12.1</span>What becomes what</h3>
+<div class="tablewrap"><table>
+<tr><th>pyEKI today</th><th>New package</th></tr>
+<tr><td><code>pyeki.linalg.*</code></td><td><code>enskit.linalg.*</code>, kept, plus <code>Zero</code>, <code>LowRankUpdate</code> and <code>Kronecker</code>; <code>n</code> → <code>dim</code></td></tr>
+<tr><td><code>gauss.Gaussian(mean, cov)</code></td><td><code>Gaussian.independent(u=(mean, cov))</code></td></tr>
+<tr><td><code>GaussianJoint</code></td><td><code>Gaussian</code> over named blocks</td></tr>
+<tr><td><code>GaussianJoint.from_linear_map(prior, A)</code></td><td><code>pushforward(prior, Linear(A), inputs="u", output="g")</code></td></tr>
+<tr><td><code>GaussianJoint.condition(y, noise_cov)</code></td><td><code>joint.add_noise(g=R).condition(g=y)</code></td></tr>
+<tr><td><code>GaussianJoint.pathwise(...)</code></td><td><code>joint.conditional_map("g")(particles, g=y, key=k)</code>, a <code>MatheronMap</code></td></tr>
+<tr><td><code>EmpiricalJoint</code>, <code>to_gaussian_joint()</code></td><td><code>Ensemble</code>, and <code>Ensemble.project()</code> returning an <code>EnsembleGaussian</code></td></tr>
+<tr><td><code>EmpiricalJoint.transform_update</code> / <code>pathwise_update</code></td><td><code>EnsembleGaussian.square_root_map</code> / <code>MatheronMap</code>; as rules, <code>kalman.SymmetricSquareRoot</code> / <code>kalman.Matheron</code></td></tr>
+<tr><td><code>gain_weights</code>, <code>sqrt_transform</code></td><td><code>linalg.IdentityPlusGram(S).solve_factor</code>, <code>.inverse_sqrt()</code>, with custom JVPs</td></tr>
+<tr><td><code>eki.EnsembleUpdate</code>, <code>TransformUpdate</code>, <code>PathwiseUpdate</code></td><td><code>kalman.UpdateRule</code> (now a factory, <code>build(particles, approximation, given)</code>), <code>SymmetricSquareRoot</code>, <code>Matheron</code></td></tr>
+<tr><td><code>eki.MultiplicativeInflation</code>, <code>AdditiveInflation</code></td><td><code>enskit.algorithms.MultiplicativeInflation</code>, <code>AdditiveInflation</code>, plus <code>RelaxToPriorSpread</code>/<code>Perturbations</code>, shared by both drivers</td></tr>
+<tr><td><code>eki.*</code> driver, policies, values</td><td><code>algorithms.eki</code>, same semantics, with an <code>Ensemble</code> state</td></tr>
+<tr><td><code>pyeki.localize</code> (planned)</td><td><code>kalman.Localized</code>, <code>DomainLocalization</code> (closes #14)</td></tr>
+<tr><td><code>eki.testing.check_*</code>, <code>linalg.testing.check_operator</code></td><td><code>enskit.testing</code></td></tr>
+<tr><td><code>toy</code></td><td><code>toy</code>, plus <code>lorenz96</code> and <code>linear_state_space</code></td></tr>
+</table></div>
+
+<p><strong>Kept:</strong> the operator layer, its contract and conformance suite; the conditioning core (now <code>IdentityPlusGram</code>) and every numerical rule in §5.6; the EKI driver's semantics, history and error behavior; the forward-model (simulator) contract and <code>check_simulator</code>; the toy problems; the regression tests, ported rather than deleted. <strong>Rewritten:</strong> the Gaussian contract, which becomes the distribution contract; the user guide, which gets one page per level; and the tutorials.</p>
+
+<h2 id="open"><span class="num">13</span>Decisions</h2>
+
+<h3 id="open-settled"><span class="num">13.1</span>Settled in review</h3>
+<p>Every design decision is now settled. What remains before implementation is in §14.4.</p>
+<p>Applied throughout the prototype and the document; all 15 examples were re-run after each round.</p>
+<div class="tablewrap"><table>
+<tr><th>Decision</th><th>Where</th></tr>
+<tr><td>Name: <strong>EnsKit</strong>, <code>enskit</code>. Unregistered on PyPI (both <code>enskit</code> and <code>ens-kit</code> return 404) and unused by any Python project found; the only near-match is ENSKit, a Swift library for the Ethereum Name Service.</td><td>everywhere</td></tr>
+<tr><td>Update rules <code>Matheron</code> and <code>SymmetricSquareRoot</code>; <code>update_rule</code> is a required argument everywhere</td><td>§3.4, §6.3</td></tr>
+<tr><td>Update rules are map factories: build from particles, a joint approximation and given <em>names</em>; call with given <em>values</em>. Pointwise <code>MatheronMap</code> and particle-set <code>SquareRootMap</code> kept distinct.</td><td>§3.4, §6.1, §6.3</td></tr>
+<tr><td><code>EnsembleGaussian</code> subclass carries particle alignment, <code>realize_particles</code> and <code>square_root_map</code></td><td>§3.3, §6.1</td></tr>
+<tr><td>The conditioning core becomes <code>linalg.IdentityPlusGram</code></td><td>§4.1, §6.7, §9.2</td></tr>
+<tr><td><code>linalg.dense_fallback(max_n=...)</code>, opt-in and off by default</td><td>§5.5, §6.7</td></tr>
+<tr><td><code>kalman.joint</code> → <code>kalman.gaussian_approximation</code>, and the hook <code>joint=</code> → <code>approximation=</code>, so the name says a joint Gaussian approximation is made</td><td>§6.3, examples</td></tr>
+<tr><td><code>DomainLocalization</code> documented as the geometry of domain localization, with the local weights stated</td><td>§6.3</td></tr>
+<tr><td>Round 3: the argument is <code>update_rule</code>; <code>Localized</code> → <code>LocalizedUpdateRule</code>; <code>inflate</code>/<code>perturb</code> → <code>inflate_multiplicative</code>/<code>inflate_additive</code>, with <code>anomaly_scale</code> in place of <code>factor</code>; <code>HistoryRecord</code> described as the record of one step; <code>toy.linear_gaussian(parameter_dim, data_dim)</code></td><td>§6, examples</td></tr>
+<tr><td>Round 3: project rules for public API first and for citing the literature (amending self-containment); every method from a paper is cited, in docstrings (numpydoc <code>References</code>), prose and examples</td><td>§4.3, §6, §7, References</td></tr>
+<tr><td>Round 3: the examples are notebooks, with setup, when to use, mathematics, citations, code and real output</td><td>§7</td></tr>
+<tr><td>Round 4: <code>kalman.update</code> keeps its name, called through the module; <code>inflate_multiplicative</code>/<code>inflate_additive</code>; <code>LocalizedUpdateRule</code>; the lower-stakes defaults of §10 and §13 stand (minimal weighting support, <code>beta</code>, a static <code>step</code>, <code>enkf</code> scope)</td><td>§6.3</td></tr>
+<tr><td>Round 1: "particle" and "sample"; block values as keywords; <code>realize_particles</code>; <code>all_finite</code>; <code>log_weight_increments</code>; several outputs from one simulator call; <code>distribution/</code>; <code>Kronecker</code>; math in <code>.. math::</code> blocks; American English; \(\hat CH^\top\) and \(H\hat CH^\top\); <code>pipe</code> and the dense-fallback discussion</td><td>§3–§6</td></tr>
+</table></div>
+
+<h2 id="plan"><span class="num">14</span>Implementation plan</h2>
+
+<h3 id="plan-approach"><span class="num">14.1</span>Approach</h3>
+<ol>
+  <li><strong>Build in place, one pull request at a time, with <code>main</code> always green.</strong> The new layers are built beside the old ones: <code>gauss</code> and <code>eki</code> keep working until <code>algorithms.eki</code> replaces them, and are then deleted in one pull request. There is no long-lived branch to rebase.</li>
+  <li><strong>Contract first for every new layer, as for <code>linalg</code>.</strong> A normative contract page is written and adversarially reviewed before the implementation, starting from the stubs in §6.</li>
+  <li><strong>The prototype is a reference, not a starting point.</strong> It skips the validation tiers, returns dense matrices where the design returns operators, and ignores the public-first ordering. Three things carry over verbatim: the derivative formulas, the regression checks from review, and the fifteen notebooks, which become acceptance tests.</li>
+  <li><strong>Every pull request follows the existing workflow.</strong>
+    <ul>
+      <li>Branch <code>dev/&lt;topic&gt;</code> off <code>origin/main</code>.</li>
+      <li><code>uv run pytest</code>, <code>uv run ruff check .</code> and the warnings-as-errors docs build all pass.</li>
+      <li>An adversarial review pass runs before the pull request is opened. Design tensions it finds become issues; trivial defects are folded in.</li>
+      <li>You review and merge.</li>
+    </ul></li>
+  <li><strong>Tests are ported, not rewritten from scratch.</strong> The regression tests in <code>test_gauss.py</code> and <code>test_eki.py</code> (about 5,900 lines) encode silent-failure classes and are moved to the new API, not deleted. New conformance checks (<code>check_update_rule</code>, <code>check_conditional_map</code>), count tests (whitenings per update, compilations per run), and a test that executes every notebook are added.</li>
+</ol>
+
+<h3 id="plan-sequence"><span class="num">14.2</span>Sequence</h3>
+<div class="tablewrap"><table>
+<tr><th>PR</th><th>Content</th><th>Depends on</th><th>Size</th><th>Closes</th></tr>
+<tr><td>0</td><td class="wrap"><strong>Adopt the design.</strong> A <code>docs/redesign.md</code> page with the decisions, layers and rules from this document (the artifact is private, and the repository's docs must stand alone); <code>CLAUDE.md</code> rewritten (layer table, vocabulary, the four new rules); <code>HANDOFF.md</code> updated; a milestone with one issue per pull request below; superseded issues closed or re-scoped. The working material from this design moves into the repository, because it exists only in a temporary session folder: the API stubs (the starting docstrings), the fifteen notebook sources with their builder, the bibliography, and the prototype under <code>docs/redesign/prototype/</code> as a read-only reference.</td><td>—</td><td>S</td><td>#29 (as decided)</td></tr>
+<tr><td>1</td><td class="wrap"><strong>Mechanical renames, no behavior change.</strong> <code>pyeki</code> → <code>enskit</code> (package, <code>pyproject.toml</code>, imports, docs, CI coverage flag); American spelling (<code>centre_misfit</code> → <code>center_misfit</code>, …); public-API-first ordering in every module; <code>SquareLinOp.n</code> → <code>dim</code>.</td><td>0</td><td>M</td><td>#20</td></tr>
+<tr><td>2</td><td class="wrap"><strong><code>linalg</code> additions.</strong> <code>IdentityPlusGram</code>, moving the conditioning core out of <code>gauss</code>, which switches to it, so today's code gets the degenerate-safe derivatives at once; <code>Zero</code>; <code>LowRankUpdate</code>; <code>dense_fallback</code>; import-linter contracts in CI.</td><td>1</td><td>M</td><td>#11 (A1–A3)</td></tr>
+<tr><td>3</td><td class="wrap"><strong>The distribution contract</strong>, a normative page reviewed before code, absorbing the Gaussian contract and the open noise-covariance findings.</td><td>2</td><td>M</td><td>#10, #25 (as specified)</td></tr>
+<tr><td>4</td><td class="wrap"><strong><code>enskit.distribution</code></strong>: <code>Ensemble</code>, <code>Gaussian</code>, <code>EnsembleGaussian</code>, <code>MatheronMap</code>, <code>SquareRootMap</code>, weights, <code>exact_moment_ensemble</code>, beside the old <code>gauss</code>. Includes the small extension of the pytree decorator that these fields need.</td><td>3</td><td>L</td><td>#23</td></tr>
+<tr><td>5</td><td class="wrap"><strong><code>enskit.maps</code></strong>: <code>pushforward</code>, <code>Linear</code>, <code>AdditiveNoise</code>, <code>BlackBox</code>, <code>StructuredMap</code>. The simulator contract and <code>check_simulator</code> move here.</td><td>4</td><td>M</td><td>#19</td></tr>
+<tr><td>6</td><td class="wrap"><strong><code>enskit.kalman</code></strong>: contract and code for <code>gaussian_approximation</code>, <code>update</code>, <code>UpdateRule</code>/<code>ParticleUpdate</code>, <code>Matheron</code>, <code>SymmetricSquareRoot</code>, and the inflation and relaxation functions; <code>check_update_rule</code>.</td><td>4</td><td>M</td><td></td></tr>
+<tr><td>7</td><td class="wrap"><strong><code>enskit.algorithms.eki</code></strong> on the new layers, with the EKI contract revised and the shared policies; then <code>gauss</code> and the old <code>eki</code> deleted, and the tutorials' code moved to the new API (their prose waits for PR 11).</td><td>5, 6</td><td>L</td><td></td></tr>
+<tr><td>8</td><td class="wrap"><strong><code>enskit.algorithms.enkf</code></strong>, <code>toy.lorenz96</code>, <code>toy.linear_state_space</code>.</td><td>7</td><td>M</td><td></td></tr>
+<tr><td>9</td><td class="wrap"><strong><code>LocalizedUpdateRule</code></strong> and <code>DomainLocalization</code>.</td><td>6</td><td>M</td><td>#14</td></tr>
+<tr><td>10</td><td class="wrap"><strong>The <code>Kronecker</code> family.</strong></td><td>2</td><td>M</td><td>#15</td></tr>
+<tr><td>11</td><td class="wrap"><strong>Documentation.</strong> User guide by level (§2); the examples gallery from the fifteen notebooks; tutorials revised; API reference; landing page.</td><td>8, 9</td><td>L</td><td>#24, #26, #27</td></tr>
+<tr><td>12</td><td class="wrap"><strong>Release 0.1.0</strong> to PyPI.</td><td>11</td><td>S</td><td></td></tr>
+</table></div>
+<p>The critical path is 0 → 1 → 2 → 3 → 4 → 6 → 7 → 8 → 11 → 12. Three pieces can run alongside it, each in its own worktree: <code>maps</code> (5) next to <code>kalman</code> (6), since they are sibling layers that never import each other; <code>Kronecker</code> (10) any time after 2; and localization (9) any time after 6.</p>
+
+<h3 id="plan-risks"><span class="num">14.3</span>Risks, and where each is retired</h3>
+<div class="tablewrap"><table>
+<tr><th>Risk</th><th>Retired in</th></tr>
+<tr><td class="wrap"><code>IdentityPlusGram</code> as a full operator: custom derivative rules inside the pytree machinery, under <code>vmap</code>, <code>jit</code> and vmapped families. The prototype tested the functions, not the operator.</td><td>PR 2, with operator conformance plus gradient tests at the measured degenerate spectra</td></tr>
+<tr><td class="wrap">The pytree decorator's allowlist (arrays, operators, tuples of them) does not yet admit tuples containing <code>None</code> or distributions as fields.</td><td>PR 4</td></tr>
+<tr><td class="wrap">Porting about 5,900 lines of tests without losing a regression class.</td><td>PRs 4, 6 and 7, each listing which old test maps to which new one</td></tr>
+<tr><td class="wrap">Notebook run time in CI. The Lorenz-96 notebooks take about a minute each.</td><td>PR 11: outputs stored in the repository, executed by a test marked slow</td></tr>
+<tr><td class="wrap">A localized hybrid is not yet expressible (§11.4).</td><td>An issue opened in PR 0; out of scope for 0.1</td></tr>
+</table></div>
+
+<h3 id="plan-you"><span class="num">14.4</span>Needed from you before PR 1</h3>
+<ul>
+  <li><strong>Reserve <code>enskit</code> on PyPI</strong> (a placeholder release) so the name cannot be taken while the work is under way. This is a publishing action under your account.</li>
+  <li><strong>Rename the GitHub repository</strong> <code>TARPS-group/pyEKI</code> → <code>enskit</code> when PR 1 merges. GitHub redirects the old URLs.</li>
+  <li><strong>The existing tutorials.</strong> Keep all nine (code updated in PR 7, prose revised in PR 11), or retire the ones the notebooks now cover.</li>
+</ul>
+
+<h2 id="appendix">Appendix: prototype verification</h2>
+
+<p>The prototype is about 1,200 lines in the session scratchpad. It reuses today's <code>pyeki.linalg</code> unchanged and was run with <code>uv run</code> in the pyEKI environment (JAX 0.10.2, float64). Every check below passed.</p>
+<div class="tablewrap"><table>
+<tr><th>Example</th><th>Check</th><th>Result</th></tr>
+<tr><td>1</td><td>adaptive ladder reaches \(\beta=1\) exactly; discrepancy stop fires</td><td>6 and 3 evaluations</td></tr>
+<tr><td>2</td><td>EnKF RMSE below the observation noise</td><td>0.360 (noise sd 1.0)</td></tr>
+<tr><td>3</td><td>square-root update equals the exact posterior (exact-moment ensemble)</td><td>to \(10^{-12}\)</td></tr>
+<tr><td>4</td><td>hand-written loop equals the driver</td><td>to \(10^{-12}\)</td></tr>
+<tr><td>5</td><td>Matheron samples match the exact conditional; realize∘condition matches the fitted conditional</td><td>\(10^{-2}\) (MC), \(10^{-12}\)</td></tr>
+<tr><td>6</td><td>exact-noise estimator beats sampled noise</td><td>MSE 6.03 vs 13.97</td></tr>
+<tr><td>7</td><td>Gaussian-algebra filter equals dense KF: means, covariance, log likelihood</td><td>to \(10^{-10}\), \(10^{-9}\)</td></tr>
+<tr><td>8</td><td>hyperparameters recovered; gradient equals finite difference</td><td>(0.153, 0.085) vs (0.15, 0.10); \(10^{-6}\) rel.</td></tr>
+<tr><td>9</td><td>Gibbs posterior mean of \(R\) near truth</td><td>within 0.2 entrywise</td></tr>
+<tr><td>10</td><td>IS correction closer to brute-force reference than EKI</td><td>0.0020 vs 0.0093</td></tr>
+<tr><td>11</td><td>hybrid beats plain EnKF at \(J=10\)</td><td>0.67 vs 4.78</td></tr>
+<tr><td>12</td><td>localized ETKF at \(J=10\)</td><td>0.39 (global 4.67)</td></tr>
+<tr><td>13</td><td>smoother beats filter; forcing recovered</td><td>0.335 vs 0.362; 8.04</td></tr>
+<tr><td>14</td><td>DEnKF mean exact, spread not smaller; works in both drivers</td><td>to \(10^{-12}\); RMSE 0.294</td></tr>
+<tr><td>15</td><td>plain SVD gradient <code>nan</code>, custom finite and equal to finite difference; whole-run gradient; <code>BlackBox</code> under <code>jit</code>/<code>vmap</code> with zero simulator gradient</td><td>\(10^{-6}\), \(10^{-4}\) rel.; exact</td></tr>
+<tr><td>review</td><td>regression checks for every review finding (aligned vs general <code>Matheron</code>, target noise, \(J=N\) refusal, weights, joint exact moments, <code>LocalizedUpdateRule</code> under EKI, <code>compress</code> gradient)</td><td>all pass</td></tr>
+</table></div>

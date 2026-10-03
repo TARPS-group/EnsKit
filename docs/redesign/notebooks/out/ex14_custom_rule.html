@@ -1,0 +1,119 @@
+<h3 id="ex14">Writing an update rule</h3>
+<p>Implement the deterministic ensemble Kalman filter (DEnKF) as a new update
+rule, and use it unchanged in a single update, a filter and an EKI run.</p>
+<h4>When to use this</h4>
+<p>Write an update rule when the drivers fit the problem but the way particles
+are moved does not. A rule is a class with one method, <code>build</code>, so it can be
+passed wherever <code>kalman.Matheron</code> or <code>kalman.SymmetricSquareRoot</code> is
+accepted. The DEnKF (Sakov &amp; Oke, 2008) is a short example: like ensemble
+square-root filters (Tippett et al., 2003) it uses no perturbed data, and it
+replaces their matrix square root with a half-gain correction of the
+anomalies.</p>
+<h4>Setup</h4>
+<p>Conditioning a jointly Gaussian pair \((u, g)\) on \(g + e = y^*\), with
+\(e \sim \mathcal N(0, R)\), is represented by the map</p>
+<p>\[
+(u, g, e) \mapsto u + K\,(y^* - g - e), \qquad K = C_{ug}\,(C_{gg} + R)^{-1},
+\]</p>
+<p>where \(C_{ug}\) and \(C_{gg}\) are covariances of the ensemble's Gaussian
+approximation. The DEnKF applies this map with \(e = 0\) to particles
+whose \(g\) block has been pulled halfway to its mean, \(g_j \to \bar g +
+\tfrac12 (g_j - \bar g)\), so particle \(j\) moves to</p>
+<p>\[
+u_j' = u_j + K\big(y^* - \bar g - \tfrac12 (g_j - \bar g)\big).
+\]</p>
+<p>The mean receives the full Kalman correction, \(\bar u' = \bar u + K(y^* -
+\bar g)\), and the anomalies half of it, \(u_j' - \bar u' = (u_j - \bar u) -
+\tfrac12 K (g_j - \bar g)\). For a linear model \(g = A u\) with prior
+covariance \(P\) the resulting covariance is</p>
+<p>\[
+\big(I - \tfrac12 K A\big) P \big(I - \tfrac12 K A\big)^\top
+= (I - K A) P + \tfrac14 K A P A^\top K^\top,
+\]</p>
+<p>the Kalman posterior covariance plus a positive semidefinite term.</p>
+
+<pre><code class="language-python">import jax
+import jax.numpy as jnp
+
+import enskit
+from enskit import kalman, maps, toy
+from enskit.distribution import exact_moment_ensemble
+from enskit.algorithms import MultiplicativeInflation, eki, enkf</code></pre>
+<h4>The rule</h4>
+<p><code>build</code> receives the particles, their Gaussian approximation and the names
+of the given blocks, but not their values. It builds the conditional map
+and the halfway particles once, and returns a function that takes the
+values \(y^*\) at call time. Calling the map without a key adds no noise.</p>
+
+<pre><code class="language-python">class DEnKF:
+    &quot;&quot;&quot;Update rule: full gain on the mean, half gain on the anomalies.
+
+    Particle j moves by K (y* - g_bar - (g_j - g_bar) / 2): the approximation&#x27;s
+    Matheron map, applied with no noise to particles whose given blocks are
+    pulled halfway to their mean.
+    &quot;&quot;&quot;
+
+    def build(self, particles, approximation, given):
+        cmap = approximation.conditional_map(given)            # pointwise, value-free
+        halfway = particles.assign(
+            {c: particles.mean(c) + 0.5 * particles.anomalies(c) for c in given})
+
+        def update(values=None, /, *, key=None, **block_values):  # the value arrives here
+            return cmap(halfway, values, **block_values).marginal(*cmap.targets)
+
+        return update</code></pre>
+<h4>One update</h4>
+<p>The test problem is linear: \(u \in \mathbb R^4\) with prior \(\mathcal N(0,
+C)\), \(g = A u \in \mathbb R^6\) with fixed random \(A\), and \(R = 0.3^2 I_6\).
+The 32 particles have sample mean and covariance exactly equal to the
+prior's, so <code>kalman.SymmetricSquareRoot</code> reproduces the Kalman posterior
+and serves as the reference.</p>
+
+<pre><code class="language-python"># It plugs into the one-call update, and therefore into every driver.
+problem = toy.linear_gaussian(parameter_dim=4, data_dim=6)
+ens = exact_moment_ensemble(jax.random.key(0), problem.prior, n_particles=32)
+ens = maps.pushforward(ens, problem.forward, inputs=&quot;u&quot;, output=&quot;g&quot;)
+post = kalman.update(ens, g=problem.y, noise={&quot;g&quot;: problem.noise_cov}, update_rule=DEnKF())
+exact = kalman.update(ens, g=problem.y, noise={&quot;g&quot;: problem.noise_cov},
+                      update_rule=kalman.SymmetricSquareRoot())</code></pre>
+<h4>A filter and an EKI run</h4>
+<p>The same rule drives <code>enkf.filter</code> on a 40-dimensional Lorenz-96 state
+(Lorenz, 1996) observed at its 20 even-numbered sites with unit noise
+variance, using 40 particles and anomaly inflation 1.02 (Anderson &amp; Anderson, 1999). It
+also drives <code>eki.run</code> on a two-parameter exponential decay
+\(G(u)_i = a\, e^{-r t_i}\), \(u = (a, r)\), at ten times \(t_i\) in \([0.1, 2]\)
+with \(R = 0.05^2 I_{10}\), using 64 particles and an adaptive schedule to
+\(\beta = 1\); a step from \(\beta\) to \(\beta + \delta\) conditions with noise
+covariance \(R / \delta\).</p>
+
+<pre><code class="language-python">l96 = toy.lorenz96(dim=40, n_steps=300)
+res = enkf.filter(jax.random.key(1), l96.initial.sample(jax.random.key(2), 40),
+                  l96.observations, transition=l96.transition, observe=l96.observe,
+                  noise_cov=l96.noise_cov, update_rule=DEnKF(),
+                  inflation=MultiplicativeInflation(1.02))
+rmse = jnp.sqrt(jnp.mean((res.means[&quot;x&quot;] - l96.truth) ** 2, axis=1))[50:].mean()
+
+decay = toy.exponential_decay()
+fit = eki.run(eki.EKIState.from_prior(jax.random.key(3), decay.prior, 64), decay.forward,
+              decay.y, decay.noise_cov, update_rule=DEnKF(), schedule=eki.AdaptiveESSSchedule())
+print(f&quot;DEnKF: L96 RMSE {rmse:.3f};  EKI mean {fit.ensemble.mean(&#x27;u&#x27;)}&quot;)</code></pre>
+<pre class="output"><code class="language-plaintext">DEnKF: L96 RMSE 0.294;  EKI mean [1.48991109 1.16419277]</code></pre>
+<h4>What to notice</h4>
+<p>The filter's root-mean-square error, averaged over times 50 to 299, is
+0.294, below the observation noise standard deviation of 1. The EKI run
+ends with mean \((1.490, 1.164)\), near the parameters \((1.5, 1.2)\) that
+generated the data. The checks confirm the linear case: the DEnKF mean
+equals the Kalman mean, and its variances are at least the Kalman ones.</p>
+
+<pre><code class="language-python"># checks: the mean update is the exact Kalman mean; the spread is larger
+assert jnp.allclose(post.mean(&quot;u&quot;), exact.mean(&quot;u&quot;), atol=1e-12)
+assert jnp.all(jnp.diag(post.cov(&quot;u&quot;).to_dense()) &gt;= jnp.diag(exact.cov(&quot;u&quot;).to_dense()))
+assert rmse &lt; 0.6</code></pre>
+<div class="refs"><h4>References</h4>
+<ul>
+<li>Anderson, J. L. &amp; Anderson, S. L. (1999). A Monte Carlo implementation of the nonlinear filtering problem to produce ensemble assimilations and forecasts. <em>Monthly Weather Review</em>, 127(12), 2741–2758.</li>
+<li>Lorenz, E. N. (1996). Predictability: a problem partly solved. In <em>Proceedings of the ECMWF Seminar on Predictability</em>, vol. 1, 1–18. Reading, UK.</li>
+<li>Sakov, P. &amp; Oke, P. R. (2008). A deterministic formulation of the ensemble Kalman filter: an alternative to ensemble square root filters. <em>Tellus A</em>, 60(2), 361–371.</li>
+<li>Tippett, M. K., Anderson, J. L., Bishop, C. H., Hamill, T. M. &amp; Whitaker, J. S. (2003). Ensemble square root filters. <em>Monthly Weather Review</em>, 131(7), 1485–1490.</li>
+</ul>
+</div>

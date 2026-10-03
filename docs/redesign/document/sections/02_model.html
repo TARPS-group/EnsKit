@@ -1,0 +1,144 @@
+<h2 id="model"><span class="num">3</span>The model</h2>
+
+<h3 id="model-blocks"><span class="num">3.1</span>Named blocks</h3>
+
+<p>A <em>block</em> is a named vector: <code>"u"</code> of dimension 4, <code>"g"</code> of dimension 6. Every distribution in the package is a joint distribution over an ordered set of blocks. Every operation names the blocks it reads and writes: <code>condition(y=y_obs)</code>, <code>marginal("u")</code>, <code>pushforward(ens, f, inputs=("x", "forcing"), output="x")</code>.</p>
+
+<p>Three things follow from this.</p>
+<ul>
+  <li><strong>No index bookkeeping.</strong> Joint state and parameter estimation, an augmented smoother state and Tikhonov-style augmentation are written by adding blocks, never by slicing a concatenated vector.</li>
+  <li><strong>No privileged roles.</strong> The package never says "observation" or "parameter" below the algorithm layer. A block becomes a target or a given block only at the moment it is conditioned. The same joint over <code>(x, θ, x_prev)</code> serves as a filter, a parameter estimator and a smoother at once.</li>
+  <li><strong>Blocks are vectors.</strong> A field on a grid is a flattened block, and the simulator reshapes it internally. Multi-dimensional event shapes are a possible later extension (§11) but are not needed for anything here.</li>
+</ul>
+
+<h3 id="model-dists"><span class="num">3.2</span>Two distributions</h3>
+
+<p><strong><code>Ensemble</code></strong> holds \(J\) particles. Block \(b\) is a \((J, d_b)\) array, one particle per row, with optional log weights. It is the empirical distribution \(\sum_j w_j \delta_{x_j}\). Pushing it through any callable is exact, particle by particle.</p>
+
+<p><strong><code>Gaussian</code></strong> holds a mean \(m_b\), a row \(F_b\) of a shared factor, and an optional independent term \(D_b\) for each block:</p>
+
+\[
+x_b = m_b + F_b\,\xi + e_b,\qquad \xi\sim\mathcal N(0, I_k),\qquad e_b\sim\mathcal N(0, D_b)\ \text{independent},
+\]
+\[
+\operatorname{cov}(x_a, x_b) = F_a F_b^\top\ (a\neq b),\qquad \operatorname{cov}(x_b,x_b) = F_bF_b^\top + D_b .
+\]
+
+<p>\(F_b\) is any <code>LinOp</code> of shape \((d_b, k)\), and \(D_b\) is any <code>PSDLinOp</code>. One representation covers every Gaussian an ensemble method meets:</p>
+
+<div class="tablewrap"><table>
+<tr><th>Gaussian</th><th>Shared factor</th><th>Independent terms</th><th>Built by</th></tr>
+<tr><td>a prior \(\mathcal N(m, C)\) with \(C\) Kronecker, diagonal, dense…</td><td>none (\(k=0\))</td><td>\(C\)</td><td><code>Gaussian.independent</code></td></tr>
+<tr><td>an ensemble's moment match</td><td>\(A^\top/\sqrt{J-1}\) (anomalies)</td><td>none</td><td><code>Ensemble.project</code></td></tr>
+<tr><td>the same, plus known noise \(R\) on <code>y</code></td><td>\(A^\top/\sqrt{J-1}\)</td><td>\(R\) on <code>y</code></td><td><code>.add_noise</code> or <code>pushforward(·, AdditiveNoise(R))</code></td></tr>
+<tr><td>linear-Gaussian joint of <code>u</code> and <code>y = A u + e</code></td><td>\([L;\ AL]\), \(LL^\top = C\)</td><td>\(R\) on <code>y</code></td><td><code>pushforward(prior, Linear(A))</code>, then noise</td></tr>
+<tr><td>hybrid: \(\alpha\hat C + (1-\alpha)B\)</td><td>\(\sqrt\alpha\,A^\top/\sqrt{J-1}\)</td><td>\((1-\alpha)B\)</td><td>constructor (Example 11)</td></tr>
+</table></div>
+
+<p>The independent terms are kept separate from the factor because they carry the structure the operator layer exists to exploit. A noise covariance is only ever whitened. A prior's Kronecker or diagonal form is never densified. The shared factor keeps every cross-covariance consistent by construction, as the current joint factor does (<code>docs/joint-factor.md</code>).</p>
+
+<h3 id="model-alignment"><span class="num">3.3</span>Particle alignment</h3>
+
+<p>For an unweighted ensemble, <code>project()</code> returns an <code>EnsembleGaussian</code>: the Gaussian whose factor rows are the anomalies divided by \(\sqrt{J-1}\), so that its latent coordinate \(j\) <em>is</em> particle \(j\). <code>EnsembleGaussian</code> is a subclass of <code>Gaussian</code> that adds exactly the two operations this correspondence makes possible. A Gaussian built any other way (from a prior, by exact algebra, by a hybrid estimator) is a plain <code>Gaussian</code> and lacks them, so a type checker catches misuse rather than a runtime error.</p>
+<ul>
+  <li><strong>Reading the particles back out loses nothing.</strong> <code>realize_particles()</code> returns \(x_j = m + \sqrt{J-1}\,F e_j\), the original particles to round-off. The non-Gaussian information in the particles (skew, multimodality, the arrangement that issue #29 is about) is still there.</li>
+  <li><strong>Conditioning acts on particles.</strong> Exact conditioning right-multiplies the factor by \(T=(I+SS^\top)^{-1/2}\). Because centered columns stay centered (\(T\mathbf 1=\mathbf 1\)), column \(j\) of the conditioned factor is still particle \(j\)'s anomaly, and <code>realize_particles()</code> after <code>condition()</code> returns the square-root-updated particles.</li>
+</ul>
+
+<p>Operations that keep the latent space return an <code>EnsembleGaussian</code>: <code>marginal</code>, <code>condition</code>, <code>add_noise</code> on a block without an independent term, and <code>Linear</code> pushforward of such a block. The two that change it, <code>absorb</code> and <code>compress</code>, return a plain <code>Gaussian</code>. The latent width is static metadata, so a marginal over blocks without factor rows keeps it. In normal use only <code>Ensemble.project</code> creates an <code>EnsembleGaussian</code>, and it centers by construction; a hand-built one has its centering checked in debug mode. This is the guarantee the current <code>EmpiricalJoint</code> exists to give, now carried by a type.</p>
+
+<h3 id="model-updates"><span class="num">3.4</span>Two updates, two orders</h3>
+
+<p>Let <code>joint</code> be the particle-aligned Gaussian over target blocks \(x\) and given blocks \(y\), with the given blocks' known noise \(R\) as their independent term. With \(W\) a whitener of \(R\), let \(S = (WF_y)^\top\) and let \(g_j\) be particle \(j\)'s noise-free value of \(y\).</p>
+
+<figure>
+<div class="fig">
+<svg viewBox="0 0 760 300" role="img" aria-labelledby="sq-title">
+  <title id="sq-title">The square-root update is realize after condition; the stochastic update is transport after realize</title>
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker>
+    <marker id="aha" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="arrow accent" d="M0,0 L10,5 L0,10 z"/></marker>
+    <marker id="aho" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="arrow ochre" d="M0,0 L10,5 L0,10 z"/></marker>
+  </defs>
+  <rect class="box" x="20" y="20" width="250" height="70" rx="6"/>
+  <text class="t strong" x="36" y="48">joint Gaussian</text>
+  <text class="t small" x="36" y="70">particle-aligned, over x and y</text>
+  <rect class="box" x="490" y="20" width="250" height="70" rx="6"/>
+  <text class="t strong" x="506" y="48">conditional Gaussian</text>
+  <text class="t small" x="506" y="70">over x, still aligned</text>
+  <rect class="box" x="20" y="205" width="250" height="70" rx="6"/>
+  <text class="t strong" x="36" y="233">particles (x_j, g_j)</text>
+  <text class="t small" x="36" y="255">the ensemble itself</text>
+  <rect class="box accent" x="490" y="205" width="250" height="70" rx="6"/>
+  <text class="t strong" x="506" y="233">updated particles x_j′</text>
+  <text class="t small" x="506" y="255">an Ensemble over x</text>
+  <path class="edge" d="M272,55 L486,55" marker-end="url(#ah)"/>
+  <text class="t code" x="330" y="45">condition({y: y*})</text>
+  <path class="edge" d="M145,92 L145,201" marker-end="url(#ah)"/>
+  <text class="t code" x="155" y="152">realize_particles()</text>
+  <path class="edge accent" d="M615,92 L615,201" marker-end="url(#aha)"/>
+  <text class="t code" x="625" y="140">realize_particles()</text>
+  <text class="t small" x="625" y="160">SymmetricSquareRoot</text>
+  <path class="edge ochre" d="M272,240 L486,240" marker-end="url(#aho)"/>
+  <text class="t code" x="292" y="230">conditional_map(y)(…, key)</text>
+  <text class="t small" x="350" y="262">Matheron</text>
+</svg>
+</div>
+<figcaption>The two routes from the joint to updated particles. The square does not commute: the routes are two estimators of the same conditional and agree in distribution only for a linear-Gaussian joint.</figcaption>
+</figure>
+
+<p><strong>SymmetricSquareRoot</strong> (deterministic square root, the ETKF form [@bishop2001; @hunt2007]): <code>joint.condition(y=y_star).realize_particles()</code>, available prebuilt as <code>joint.square_root_map("y")(y=y_star)</code>,</p>
+\[
+x_j' = m_x + F_x w + \sqrt{J-1}\,F_x T e_j,
+\]
+\[
+w = (I+SS^\top)^{-1}S\,W(y^*-m_y),\qquad T=(I+SS^\top)^{-1/2}.
+\]
+
+<p><strong>Matheron</strong> (stochastic, perturbed values, Matheron's rule [@burgers1998; @wilson2021]): transport the particles through the pointwise map, <code>joint.conditional_map("y")(particles, y=y_star, key=key)</code>. For the default joint the particles are exactly <code>joint.realize_particles(exclude_block_covs=("y",))</code>, so this is transport after realize:</p>
+\[
+x_j' = x_j + F_x\,(I+SS^\top)^{-1}S\,\big(W(y^*-g_j) - \varepsilon_j\big),\qquad \varepsilon_j\sim\mathcal N(0, I_N).
+\]
+
+<p>Both formulas come from the same SVD of \(S\) and never form \(SS^\top\). The pathwise noise is drawn in whitened coordinates, so \(R\) is used only through <code>whiten</code> and never needs a <code>factor</code>. This is the existing contract's rule, and the prototype first broke it by sampling noise in data space. With an aligned joint, the residuals come from \(S\) itself, \(W(y^*-g_j)=W(y^*-\bar g)-\sqrt{J-1}\,S_{j\cdot}\), for \(J{+}1\) whitenings in all. A target block with an independent term gets a draw from it as well, so both methods report the same conditional.</p>
+
+<h4>Building a map, then calling it</h4>
+<p>Two things are kept apart that the first draft ran together: which blocks are conditioned on (names, known when the map is built) and the values they are conditioned on (supplied when it is called). Neither the gain nor the transform depends on the value, so everything expensive happens once, at build. There are two kinds of map, and the difference is not cosmetic:</p>
+<ul>
+  <li>a <strong>pointwise</strong> map, <code>MatheronMap</code>, built by any <code>Gaussian.conditional_map(given)</code>, moves any samples of the joint, one at a time;</li>
+  <li>a <strong>particle-set</strong> map, <code>SquareRootMap</code>, built by <code>EnsembleGaussian.square_root_map(given)</code>, moves the particles the Gaussian was built from, as a whole, through each particle's latent coordinate. It has no samples argument, because it would mean nothing on any other points.</li>
+</ul>
+<p>An <strong>update rule</strong> is a factory: <code>update_rule.build(particles, approximation, given_names)</code> returns a <strong>particle update</strong>, a callable from given values to updated particles. <code>SymmetricSquareRoot.build</code> returns the square-root map. <code>Matheron.build</code> returns the pointwise map bound to the particles, with the aligned fast path and the target-noise draws. It works with any approximation, which is what lets a hybrid covariance reach the drivers. <code>kalman.update</code> is the three stages in one call:</p>
+<pre><code class="language-python">approx = kalman.gaussian_approximation(ens, {"g": R})         # 1. approximate
+step = kalman.Matheron().build(ens, approx, ("g",))             # 2. build (no values)
+post = step(g=y_obs, key=key)                                   # 3. call with the value
+
+post = kalman.update(ens, g=y_obs, noise={"g": R}, update_rule=kalman.Matheron(), key=key)  # same</code></pre>
+
+<div class="tablewrap"><table>
+<tr><th>Term</th><th>What it is</th><th>Layer</th><th>Instances</th></tr>
+<tr><td><code>ConditionalMap</code></td><td class="wrap">Pointwise: samples of a joint and a value \(y^*\) in, samples of the conditional out. Built from a joint and given names.</td><td><code>distribution</code></td><td class="wrap"><code>MatheronMap</code>; later a triangular transport map</td></tr>
+<tr><td><code>SquareRootMap</code></td><td class="wrap">Particle-set: a value in, the updated particles of the <code>EnsembleGaussian</code> it came from out.</td><td><code>distribution</code></td><td class="wrap">symmetric square root</td></tr>
+<tr><td><code>UpdateRule</code></td><td class="wrap">A factory: <code>build(particles, approximation, given) -&gt; ParticleUpdate</code>.</td><td><code>kalman</code></td><td class="wrap"><code>Matheron</code>, <code>SymmetricSquareRoot</code>, <code>LocalizedUpdateRule</code>, user rules (Example 14)</td></tr>
+<tr><td><code>ParticleUpdate</code></td><td class="wrap">What a rule builds: given values in, updated particles out, bound to particular particles.</td><td><code>kalman</code></td><td class="wrap">a <code>SquareRootMap</code>; a bound <code>MatheronMap</code></td></tr>
+<tr><td>transport map</td><td class="wrap">Not a type yet. A fitted unconditional map is a callable. It earns a protocol (with inverse and log-Jacobian) when nonlinear transport arrives (§11.3).</td><td>—</td><td>—</td></tr>
+</table></div>
+
+<h3 id="model-structure"><span class="num">3.5</span>Structure through the order of operations</h3>
+
+<p>The update never takes a flag for structure. Each kind of structure except locality is an exact operation on the joint before the update reads it, and the order in which a user composes operations chooses the estimator. Locality is a wrapper around an update rule. A joint built differently reaches <code>kalman.update</code> and both drivers through their <code>approximation=</code> hook, a callable <code>(ensemble, noise) -&gt; Gaussian</code>.</p>
+
+<div class="tablewrap"><table>
+<tr><th>Structure</th><th>Generic route (estimate it)</th><th>Structured route (use it exactly)</th><th>Shown in</th></tr>
+<tr><td>Additive noise with known covariance</td><td class="wrap"><code>project(pushforward(ens, AdditiveNoise(R), key=k))</code>: \(\hat C_{yy}\) from sampled \(g_j+e_j\)</td><td class="wrap"><code>pushforward(project(ens), AdditiveNoise(R))</code>: \(\hat C_{gg} + R\) exactly</td><td>Ex. 6 (MSE 14.0 vs 6.0)</td></tr>
+<tr><td>Linear map</td><td class="wrap">push particles through \(H\), then project</td><td class="wrap"><code>pushforward(gaussian, Linear(H))</code>: \(C_{xy}=CH^\top\), exact for any \(C\), including a static \(B\)</td><td>Ex. 7, 11</td></tr>
+<tr><td>Static or hybrid covariance [@hamill2000]</td><td>none</td><td class="wrap">an <code>approximation=</code> builder: \(\sqrt\alpha\) factor and \((1-\alpha)B\) independent term</td><td>Ex. 11 (RMSE 4.8 → 0.67)</td></tr>
+<tr><td>Spatial locality [@hunt2007]</td><td>global update</td><td class="wrap"><code>LocalizedUpdateRule(SymmetricSquareRoot(), DomainLocalization(...))</code>, a method wrapper</td><td>Ex. 12 (RMSE 4.7 → 0.39)</td></tr>
+<tr><td>Structured prior or noise covariance</td><td>dense</td><td class="wrap">any <code>PSDLinOp</code> as an independent term, used through <code>whiten</code>/<code>factor</code>/<code>logdet</code></td><td>Ex. 8</td></tr>
+</table></div>
+
+<p>A linear map \(y = Hx\) brings two covariances: the cross-covariance \(\operatorname{cov}(x, y) = CH^\top\), of shape \(d_x \times d_y\), and \(\operatorname{cov}(y, y) = HCH^\top\), to which the noise \(R\) is added. With the sample covariance \(C = \hat C\), a linear map gains nothing statistically. Computing \(Hx_j\) for every particle and then estimating gives exactly \(\hat C H^\top\) and \(H\hat C H^\top\), because sample covariances are linear in the particles. Linear structure pays off once \(C\) is <em>not</em> the sample covariance. That is the hybrid case, which is why Example 11 rather than a plain EnKF demonstrates it.</p>
+
+<h3 id="model-transport"><span class="num">3.6</span>The conditional map is the transport abstraction</h3>
+
+<p><code>ConditionalMap</code> is the protocol for pointwise maps from samples of a joint and a value \(y^*\) to samples of the conditional. <code>Gaussian.conditional_map(given)</code> returns the affine instance, the <code>MatheronMap</code> [@journel1978; @wilson2021] \(x\mapsto x+K(y^*-y)\). Applied to exact joint samples it gives exact conditional samples (Example 5 checks this to \(10^{-2}\) with \(2\times10^5\) samples). Applied to ensemble particles it is the stochastic EnKF. A nonlinear triangular transport map fitted to an ensemble is the same protocol with a different fitting procedure [@spantini2022] (§11.3), and an update rule that builds one fits the factory signature, because a rule receives the particles themselves.</p>

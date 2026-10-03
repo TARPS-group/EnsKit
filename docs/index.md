@@ -179,5 +179,6 @@ gaussian-contract
 eki-contract
 joint-factor
 design
+redesign/index
 api/index
 ```

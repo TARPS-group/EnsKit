@@ -1,0 +1,93 @@
+<h3 id="ex02">Ensemble Kalman filter</h3>
+<p>Track the state of a chaotic 40-variable system from noisy observations of
+half of its coordinates, with one call to the filtering driver.</p>
+<h4>When to use this</h4>
+<p>The ensemble Kalman filter (EnKF) estimates the state of a dynamical system
+that is observed sequentially in time (Evensen, 1994). It needs only the
+ability to run the model forward, and it represents uncertainty with a
+small ensemble even when the state is large. <code>enkf.filter</code> is the right
+level of the API when the model, the observations and the update rule are
+fixed in advance and the analysis means are all you need from the run.</p>
+<h4>Setup</h4>
+<p>The state \(x \in \mathbb R^{40}\) follows the Lorenz-96 equations
+(Lorenz, 1996), with cyclic indices and forcing \(F = 8\):</p>
+<p>\[
+\frac{dx_i}{dt} = (x_{i+1} - x_{i-2})\, x_{i-1} - x_i + F,
+\qquad i = 0, \dots, 39 .
+\]</p>
+<p>One time step is one fourth-order Runge-Kutta step of size
+\(\Delta t = 0.05\), written \(x_{t} = M(x_{t-1})\), with no model noise. After
+a spin-up onto the attractor, the true state \(x_0\) is run for \(T = 300\)
+steps and every other coordinate is observed at every step:</p>
+<p>\[
+y_t = H x_t + \varepsilon_t, \qquad
+\varepsilon_t \sim \mathcal N(0, R), \quad R = I_{20},
+\]</p>
+<p>where \(H \in \mathbb R^{20 \times 40}\) selects the sites \(i = 0, 2, \dots, 38\).
+The filter starts from \(J = 40\) particles drawn from
+\(\mathcal N(x_0, I_{40})\).</p>
+
+<pre><code class="language-python">import jax
+import jax.numpy as jnp
+
+import enskit
+from enskit import kalman, toy
+from enskit.algorithms import MultiplicativeInflation, enkf
+
+problem = toy.lorenz96(dim=40, n_steps=300, obs_every=2, noise_sd=1.0)</code></pre>
+<h4>Filtering</h4>
+<p>Each cycle moves every particle through \(M\), then scales the anomalies
+about the ensemble mean, \(x_j \mapsto \bar x + \lambda (x_j - \bar x)\) with
+\(\lambda = 1.05\), to offset the spread the small ensemble loses
+(Anderson &amp; Anderson, 1999). The analysis is Matheron's rule, the perturbed-observation
+update (Burgers, van Leeuwen &amp; Evensen, 1998; Houtekamer &amp; Mitchell, 1998):</p>
+<p>\[
+x_j \mapsto x_j + K (y_t - H x_j - e_j), \qquad
+K = P H^\top (H P H^\top + R)^{-1}, \quad e_j \sim \mathcal N(0, R),
+\]</p>
+<p>with \(P\) the sample covariance of the inflated forecast. The factor 1.05
+was chosen because 1.03 was sensitive to the seed. Over four seeds
+(initial-ensemble keys 0 to 3, filter keys 100 to 103), the time-averaged
+error ranged from 0.35 to 0.75 at 1.03 and from 0.35 to 0.40 at 1.05.</p>
+
+<pre><code class="language-python">ensemble = problem.initial.sample(jax.random.key(0), n_particles=40)   # Ensemble over &quot;x&quot;
+result = enkf.filter(
+    jax.random.key(1), ensemble, problem.observations,
+    transition=problem.transition,        # (J, 40) -&gt; (J, 40), a plain JAX function
+    observe=problem.observe,              # maps.Linear: every other coordinate
+    noise_cov=problem.noise_cov,          # PSDDiagonal
+    update_rule=kalman.Matheron(),
+    inflation=MultiplicativeInflation(1.05),
+)</code></pre>
+<h4>Error and evidence</h4>
+<p>The error at step \(t\) is the root mean square difference between the
+analysis mean and the truth over the 40 coordinates, averaged here over
+steps 50 to 299. The driver also returns, at each step, the log density of
+\(y_t\) under the forecast's Gaussian approximation,
+\(\log \mathcal N(y_t;\ H \bar x_t,\ H P_t H^\top + R)\). Their sum over the
+run estimates the log model evidence (Carrassi et al., 2017).</p>
+
+<pre><code class="language-python">rmse = jnp.sqrt(jnp.mean((result.means[&quot;x&quot;] - problem.truth) ** 2, axis=1))
+print(&quot;time-averaged RMSE after spin-up:&quot;, rmse[50:].mean())
+print(&quot;total log evidence:&quot;, result.log_evidence.sum())</code></pre>
+<pre class="output"><code class="language-plaintext">time-averaged RMSE after spin-up: 0.3600745514167668
+total log evidence: -8834.294280657736</code></pre>
+<h4>What to notice</h4>
+<p>The time-averaged error after spin-up is 0.36, about a third of the
+observation noise standard deviation of 1.0, although only half of the
+coordinates are observed. The total log evidence, -8834.3, has no meaning
+on its own; it becomes useful when compared with the same quantity for a
+different model or noise level on the same observations.</p>
+
+<pre><code class="language-python"># checks
+assert rmse[50:].mean() &lt; 0.6   # well below the observation noise sd of 1.0</code></pre>
+<div class="refs"><h4>References</h4>
+<ul>
+<li>Anderson, J. L. &amp; Anderson, S. L. (1999). A Monte Carlo implementation of the nonlinear filtering problem to produce ensemble assimilations and forecasts. <em>Monthly Weather Review</em>, 127(12), 2741–2758.</li>
+<li>Burgers, G., van Leeuwen, P. J. &amp; Evensen, G. (1998). Analysis scheme in the ensemble Kalman filter. <em>Monthly Weather Review</em>, 126(6), 1719–1724.</li>
+<li>Carrassi, A., Bocquet, M., Hannart, A. &amp; Ghil, M. (2017). Estimating model evidence using data assimilation. <em>Quarterly Journal of the Royal Meteorological Society</em>, 143(703), 866–880.</li>
+<li>Evensen, G. (1994). Sequential data assimilation with a nonlinear quasi-geostrophic model using Monte Carlo methods to forecast error statistics. <em>Journal of Geophysical Research: Oceans</em>, 99(C5), 10143–10162.</li>
+<li>Houtekamer, P. L. &amp; Mitchell, H. L. (1998). Data assimilation using an ensemble Kalman filter technique. <em>Monthly Weather Review</em>, 126(3), 796–811.</li>
+<li>Lorenz, E. N. (1996). Predictability: a problem partly solved. In <em>Proceedings of the ECMWF Seminar on Predictability</em>, vol. 1, 1–18. Reading, UK.</li>
+</ul>
+</div>

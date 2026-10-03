@@ -1,0 +1,228 @@
+<h2 id="layout"><span class="num">4</span>Package layout and import rules</h2>
+
+<h3 id="layout-tree"><span class="num">4.1</span>Layout</h3>
+
+<pre><code class="language-plaintext">enskit/
+├── __init__.py          enables float64; re-exports nothing but __version__
+├── linalg/              L0  structured operators                    (kept from pyEKI)
+│   ├── base.py              LinOp, SquareLinOp, PSDLinOp, capabilities, debug checks
+│   ├── elementary.py        Identity, Zero*, PSDDiagonal, Dense, DenseSquare, Triangular,
+│   │                        DensePSD, PSDLowRank
+│   ├── composite.py         Transposed, Scaled, Product, HStack, BlockDiag, …,
+│   │                        LowRankUpdate*, Kronecker*
+│   ├── gram.py              IdentityPlusGram*: I + S S^T, the conditioning core,
+│   │                        with custom derivatives
+│   ├── fallback.py          dense_fallback* (opt-in, off by default)
+│   └── testing.py           check_operator (re-exported by enskit.testing)
+├── distribution/        L1  distributions over named blocks
+│   ├── ensemble.py          Ensemble
+│   ├── gaussian.py          Gaussian, EnsembleGaussian
+│   ├── maps.py              ConditionalMap, MatheronMap, SquareRootMap
+│   ├── weights.py           reweight, effective_sample_size, resample
+│   └── construct.py         exact_moment_ensemble
+├── maps.py              L2  pushforward, Linear, AdditiveNoise, BlackBox, StructuredMap
+├── kalman/              L2  ensemble updates
+│   ├── update.py            update, gaussian_approximation, UpdateRule, ParticleUpdate,
+│   │                        SymmetricSquareRoot, Matheron
+│   ├── localize.py          LocalizedUpdateRule, DomainLocalization, gaspari_cohn
+│   └── inflation.py         inflate_multiplicative, inflate_additive,
+│                            relax_to_prior_spread, relax_to_prior_perturbations
+├── algorithms/          L3  runs over steps or time
+│   ├── eki.py               the EKI driver, schedules, stops, values  (ported from pyeki.eki)
+│   ├── enkf.py              forecast, analysis, filter
+│   ├── policies.py          inflation and relaxation policies shared by the drivers
+│   └── _driver.py           shared: key splitting, failure repair, dtype checks
+├── toy.py               --  toy problems; imports below, imported by nothing
+└── testing.py           --  conformance checks; imports below, imported by nothing
+                         * = new operator</code></pre>
+
+<p><code>maps</code> and <code>kalman</code> are siblings. Neither imports the other. An update conditions a distribution and has no need to know how its blocks were produced, and a map produces blocks with no need to know they will be conditioned. The only module that combines a forward evaluation with an update is the algorithm layer.</p>
+
+<h3 id="layout-imports"><span class="num">4.2</span>Import rules</h3>
+
+<figure>
+<div class="fig">
+<svg viewBox="0 0 760 330" role="img" aria-labelledby="dag-title">
+  <title id="dag-title">Import graph: linalg at the bottom, dist above it, maps and kalman side by side, algorithms on top; toy and testing import everything and are imported by nothing</title>
+  <defs>
+    <marker id="ad" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker>
+  </defs>
+  <rect class="box accent" x="230" y="20" width="220" height="50" rx="6"/>
+  <text class="t strong" x="250" y="50">enskit.algorithms</text>
+  <rect class="box" x="120" y="115" width="180" height="50" rx="6"/>
+  <text class="t strong" x="140" y="145">enskit.maps</text>
+  <rect class="box" x="380" y="115" width="180" height="50" rx="6"/>
+  <text class="t strong" x="400" y="145">enskit.kalman</text>
+  <rect class="box" x="250" y="200" width="180" height="50" rx="6"/>
+  <text class="t strong" x="270" y="230">enskit.distribution</text>
+  <rect class="box ochre" x="250" y="270" width="180" height="50" rx="6"/>
+  <text class="t strong" x="270" y="300">enskit.linalg</text>
+  <path class="edge" d="M300,72 L230,112" marker-end="url(#ad)"/>
+  <path class="edge" d="M380,72 L455,112" marker-end="url(#ad)"/>
+  <path class="edge" d="M220,167 L300,197" marker-end="url(#ad)"/>
+  <path class="edge" d="M460,167 L385,197" marker-end="url(#ad)"/>
+  <path class="edge" d="M340,252 L340,267" marker-end="url(#ad)"/>
+  <rect class="box" x="590" y="40" width="150" height="44" rx="6"/>
+  <text class="t strong" x="606" y="67">enskit.toy</text>
+  <rect class="box" x="590" y="100" width="150" height="44" rx="6"/>
+  <text class="t strong" x="606" y="127">enskit.testing</text>
+  <text class="t small" x="590" y="168">import any layer;</text>
+  <text class="t small" x="590" y="186">imported by none</text>
+  <path class="edge dash" d="M228,45 L60,45 L60,295 L244,295" marker-end="url(#ad)"/>
+  <text class="t small" x="70" y="190">lower layers also</text>
+  <text class="t small" x="70" y="206">importable directly</text>
+</svg>
+</div>
+<figcaption>An arrow means "may import". Every layer may also import any layer below the ones it points to. Nothing points up or sideways.</figcaption>
+</figure>
+
+<ol>
+  <li><strong>Downward only.</strong> <code>distribution</code> imports <code>linalg</code>. <code>maps</code> and <code>kalman</code> import <code>distribution</code> and <code>linalg</code>. <code>algorithms</code> imports all four. No module imports a layer above it or beside it.</li>
+  <li><strong>Leaves are leaves.</strong> <code>toy</code> and <code>testing</code> may import any layer, and nothing in the four layers or in <code>algorithms</code> imports them. This keeps toy problems from becoming load-bearing (the current rule, unchanged).</li>
+  <li><strong>Cross-layer chaining goes through <code>pipe</code>.</strong> <code>Gaussian.pipe(maps.pushforward, …)</code> lets user code chain an operation defined above <code>distribution</code> without <code>distribution</code> importing it. Methods on a distribution are only the operations of its own layer. See §4.4.</li>
+  <li><strong>Private modules stay private.</strong> An underscore module is imported only from inside its own package. The conditioning core needs no exception to this: it is pure linear algebra on \(I + SS^\top\), so it lives in <code>linalg</code> as the public operator <code>IdentityPlusGram</code>, used by <code>distribution</code>, by <code>kalman.localize</code> for vectorized local updates, and by anyone writing a local rule of their own.</li>
+</ol>
+
+<h4>Enforcement</h4>
+<p>One static check in CI and one runtime test:</p>
+<pre><code class="language-toml"># pyproject.toml
+[tool.importlinter]
+root_package = "enskit"
+
+[[tool.importlinter.contracts]]
+name = "layers"
+type = "layers"
+layers = [
+    "enskit.algorithms",
+    "enskit.maps | enskit.kalman",   # independent siblings
+    "enskit.distribution",
+    "enskit.linalg",
+]
+
+[[tool.importlinter.contracts]]
+name = "leaves are leaves"
+type = "forbidden"
+source_modules = ["enskit.linalg", "enskit.distribution", "enskit.maps", "enskit.kalman", "enskit.algorithms"]
+forbidden_modules = ["enskit.toy", "enskit.testing"]</code></pre>
+<p>The existing fresh-interpreter test (<code>tests/test_toy.py</code>) stays. It asserts that importing each layer does not load <code>enskit.toy</code>, which catches lazy imports inside functions that a static check misses.</p>
+
+<h3 id="layout-vocab"><span class="num">4.3</span>Vocabulary per layer</h3>
+
+<p>Vocabulary goes down only, as now. A layer may name a consumer above it to justify its scope, but may not use the consumer's concepts to define its own behavior.</p>
+
+<div class="tablewrap"><table>
+<tr><th>Layer</th><th>Speaks of</th><th>Must not speak of</th></tr>
+<tr><td><code>linalg</code></td><td>operators, batches, rows, factors, whiteners</td><td>distributions, blocks, particles, conditioning, anything above</td></tr>
+<tr><td><code>distribution</code></td><td>distributions, blocks, particles, weights, the latent space, means, covariances, sampling, marginals, conditioning, projection, realizing, conditional maps</td><td>maps, simulators, updates, observations, forecasts, steps, time, tempering</td></tr>
+<tr><td><code>maps</code></td><td>maps, simulators, inputs, outputs, pushforward, noise</td><td>updates, gains, observations, steps, time, tempering</td></tr>
+<tr><td><code>kalman</code></td><td>updates, update rules, given and target blocks, gains, transforms, localization, inflation</td><td>observations, forecasts, steps, runs, schedules, levels, time</td></tr>
+<tr><td><code>algorithms</code></td><td>runs, steps, phases, levels, schedules, tempering, forecasts, analyses, observations, time</td><td>—</td></tr>
+<tr><td><code>toy</code></td><td>anything above, to describe a problem</td><td>it may not <em>define</em> a schedule, an update rule, an inflation or a stopping rule</td></tr>
+</table></div>
+
+<p><strong>One word per concept, across the package.</strong> A <em>sample</em> is a draw from any distribution: the generic term, used wherever the subject is probability in general ("a conditional map carries samples of the joint to samples of the conditional"). A <em>particle</em> is an element of an <code>Ensemble</code>, and when an ensemble is passed where samples are expected its particles are those samples. "Particle" replaces both of today's terms, <code>n_samples</code> in gauss and <code>n_members</code> in eki, and suits weighted ensembles. Now that ensembles are a core type, it belongs to <code>distribution</code>. Sizes are <code>n_particles</code>, <code>n_steps</code>, <code>n_evaluations</code>, <code>latent_dim</code> and <code>dims[name]</code>. The names <code>u_dim</code> and <code>v_dim</code> disappear from every layer because blocks are named. Only the toy problems keep them, as constructor arguments. EKI keeps its normative terms: a <em>run</em> contains <em>steps</em>, each made of the phases <code>evaluate</code> and <code>assimilate</code>.</p>
+
+<p><strong>Replacement text for <code>CLAUDE.md</code>'s "Layer boundaries and vocabulary" section</strong> is the table above, plus rules 1–4 of §4.2 and this paragraph. The boundary between empirical and Gaussian is no longer crossed in exactly one place; it is crossed by <code>Ensemble.project</code> and <code>Gaussian.realize_particles</code>, and both live in <code>distribution</code>.</p>
+
+<p><strong>Four new project rules</strong> join <code>CLAUDE.md</code>:</p>
+<ul>
+  <li><strong>Mathematics in docstrings.</strong> When a function or class implements a mathematical object or operation, its docstring states it precisely in a <code>.. math::</code> block of LaTeX, defining every symbol. Prose descriptions of a formula do not substitute for the formula. The stubs in §6 follow this rule.</li>
+  <li><strong>American English</strong> in code, docstrings and documentation: "centering", "behavior", "neighbor", "modeling". Today's repository uses British spelling in places (<code>CLAUDE.md</code> itself, the contracts, the attribute <code>centre_misfit</code>, which becomes <code>center_misfit</code>); the rename PR converts them.</li>
+  <li><strong>Public API first.</strong> In every module, the public classes and functions come first, in the order of the module's index table, and private helpers (underscore names) follow below them. A reader opening a file sees the interface before the machinery.</li>
+  <li><strong>Cite the literature.</strong> Wherever documentation, an example or a docstring describes a method from a paper, it cites the paper. Docstrings do so in a numpydoc <code>References</code> section with the full reference; the user guide and the examples do so in text, with a reference list. This amends the current self-containment rule rather than replacing it: a docstring must still be complete without the paper, and the citation records where the method comes from, not where its explanation is.</li>
+</ul>
+
+<h3 id="layout-pipe"><span class="num">4.4</span>Chaining across layers: <code>pipe</code></h3>
+
+<p><code>x.pipe(f, *args, **kwargs)</code> is exactly <code>f(x, *args, **kwargs)</code>, the same method that pandas and polars provide under the same name. It exists because of rule 1. <code>maps.pushforward</code> lives above <code>distribution</code>, so it cannot be a method of <code>Gaussian</code> without an upward import. Monkey-patching it onto the class from <code>maps</code> would be worse: the method would exist or not depending on what had been imported. That leaves three ways to write a chain of operations from different layers:</p>
+<pre><code class="language-python"># nested calls: correct, but read inside out
+joint = maps.pushforward(maps.pushforward(prior, observe, inputs="x", output="g"),
+                         maps.AdditiveNoise(R), inputs="g", output="y")
+
+# reassignment: explicit, no new concept
+joint = maps.pushforward(prior, observe, inputs="x", output="g")
+joint = maps.pushforward(joint, maps.AdditiveNoise(R), inputs="g", output="y")
+
+# pipe: reads top to bottom like a method chain
+joint = (prior
+         .pipe(maps.pushforward, observe, inputs="x", output="g")
+         .pipe(maps.pushforward, maps.AdditiveNoise(R), inputs="g", output="y"))</code></pre>
+<p>The cost of <code>pipe</code> is two spellings of the same program; the implementation is three lines. Typed as <code>pipe(f: Callable[Concatenate[Self, P], R], *args: P.args, **kwargs: P.kwargs) -&gt; R</code>, it keeps return types for static checkers. <strong>Recommendation:</strong> keep it as optional sugar. The user guide introduces reassignment first, so <code>pipe</code> is never needed to read an example.</p>
+
+<h2 id="conventions"><span class="num">5</span>Project-wide conventions</h2>
+
+<h3 id="conv-arrays"><span class="num">5.1</span>Arrays and batching</h3>
+
+<dl class="defs">
+<dt>core trailing</dt><dd>Every array operand is <code>(*batch, *core)</code>: leading batch axes, core shape trailing. This is the NumPy generalized-ufunc rule and what <code>vmap</code> produces. Operators contract the trailing axis; <code>M @ x</code> never appears in an implementation.</dd>
+<dt>block values</dt><dd>A value of block <code>b</code> has core shape <code>(d_b,)</code>. Methods that conceptually take <em>one</em> value (<code>condition</code>, <code>update</code>'s <code>given</code>, the <code>values</code> of a conditional map) require exactly that shape. A family of values is a <code>vmap</code>.</dd>
+<dt>particles</dt><dd>An ensemble block is exactly <code>(n_particles, d_b)</code>. The particles axis is a batch axis to <code>linalg</code>, so <code>op.matvec(ens["x"])</code> applies an operator to every particle, and <code>noise_cov.whiten(y - ens["g"])</code> whitens every residual.</dd>
+<dt>batched evaluation</dt><dd><code>Gaussian.log_density</code>, <code>reweight</code> factors and the EKI helpers accept leading batch axes and return them, as the operator layer does.</dd>
+<dt>objects</dt><dd><code>Ensemble</code>, <code>Gaussian</code>, maps, update rules and states are frozen pytrees with no batch axes. A pytree rebuilt with stacked leaves is a <em>vmapped family</em>. It reports <code>batch_shape</code> and refuses every method until applied under <code>jax.vmap</code>, exactly as operators do today. Block names, <code>n_particles</code> and other metadata are static fields. A field is data only if it is an array, a <code>LinOp</code>, a distribution, or a tuple of these.</dd>
+<dt>scalars</dt><dd>Returned as 0-d JAX arrays, never Python floats.</dd>
+</dl>
+
+<h3 id="conv-keys"><span class="num">5.2</span>Randomness</h3>
+<ul>
+<li>Typed keys only (<code>jax.random.key</code>), checked. Raw <code>uint32</code> keys are rejected because their shape makes <code>batch_shape</code> ambiguous.</li>
+<li>Below the algorithm layer, a function that is always random takes <code>key</code> as its <strong>first positional</strong> argument (<code>Gaussian.sample</code>, <code>dist.resample</code>, <code>kalman.inflate_additive</code>). One that is random only for some configurations takes a <strong>keyword-only</strong> <code>key=</code> (<code>pushforward</code>, <code>update</code>, <code>realize_particles</code>, update rules) and raises when a needed key is missing.</li>
+<li>In the algorithm layer every step function takes the key first (<code>enkf.forecast</code>, <code>enkf.analysis</code>, <code>enkf.filter</code>) and splits it with a fixed arity whatever is configured: EKI into <code>(next, inflate, update)</code>, the EnKF into <code>(next, forecast, inflate, analysis)</code>. Toggling one policy therefore never shifts another's random stream.</li>
+<li>A key is consumed whole. Callers split, and nothing stores or advances a key except an algorithm state.</li>
+</ul>
+
+<h3 id="conv-dtype"><span class="num">5.3</span>Dtypes and failures</h3>
+<ul>
+<li>Float64 is enabled on import. Worker processes need <code>JAX_ENABLE_X64=1</code>.</li>
+<li>All blocks of a distribution share one real floating dtype. A simulator returning a narrower float is promoted with one warning per call. Integer or complex output raises. Wider output raises with a message naming the simulator, which resolves issue #19 in the direction that issue preferred.</li>
+<li>A failed particle is a non-finite row. <code>Ensemble.all_finite</code> finds them. <code>kalman.update</code> does not repair: in debug mode it raises on non-finite input. Repair is an algorithm-level policy (<code>on_failure="repair"</code>) because it changes the estimator.</li>
+</ul>
+
+<h3 id="conv-validation"><span class="num">5.4</span>Validation and errors</h3>
+<p>The four tiers carry over unchanged:</p>
+<ul>
+  <li>class definition: field declarations;</li>
+  <li>construction: shapes only, never reading values;</li>
+  <li>call: operand core shapes, unconditional and free;</li>
+  <li>debug mode: values, skipped on tracers.</li>
+</ul>
+<p><code>distribution</code> keeps its tier-4 postcondition that conditioning results are finite. The layers define no exception types of their own except <code>UnsupportedOpError</code> (linalg) and <code>EKIError</code> (algorithms). Unsupported operations raise and never fall back to dense algebra, and size guards raise before allocating. Arguments that could be swapped silently when two dimensions coincide are keyword-only.</p>
+
+<h3 id="conv-dense"><span class="num">5.5</span>Raising instead of falling back to dense algebra</h3>
+
+<p>An operator advertises what it can do cheaply (<code>whiten</code>, <code>solve</code>, <code>factor</code>, <code>logdet</code>). The question is what happens when an algorithm needs an operation the operator does not provide.</p>
+<div class="tablewrap"><table>
+<tr><th></th><th>Raise (the current rule)</th><th>Fall back to dense algebra</th></tr>
+<tr><td>Small problems</td><td class="wrap">The user calls <code>densify(op)</code> once and continues. There is friction, and the error message names the fix.</td><td class="wrap">They just work.</td></tr>
+<tr><td>Large problems</td><td class="wrap">Cost follows from the types: code that runs, runs at the structured cost.</td><td class="wrap">A silent performance cliff. Densifying a diagonal of side \(10^5\) needs 80 GB; the process dies of memory exhaustion rather than raising, far from the cause.</td></tr>
+<tr><td>Bugs in structure</td><td class="wrap">Surface immediately. A composite that loses a capability (<code>SquareScaled.T</code> loses <code>solve</code>, issue #33) is an error, not a slowdown nobody notices.</td><td class="wrap">Hidden: the code stays correct and becomes \(O(n^3)\) without warning.</td></tr>
+<tr><td>Wrong numbers</td><td class="wrap">None; nothing is computed.</td><td class="wrap">Possible. A dense solve of a thin <code>PSDLowRank</code> is <code>nan</code> (issue #7), and a dense route can be numerically different from the structured one.</td></tr>
+<tr><td>Maintenance</td><td class="wrap">One code path per operation; every capability is designed and documented.</td><td class="wrap">Two code paths per operation to test.</td></tr>
+</table></div>
+<p>Where the rule bites in this design:</p>
+<ul>
+  <li>Conditioning needs <code>whiten</code> of each given block's noise.</li>
+  <li><code>absorb</code>, and so a <code>Linear</code> pushforward of a block with an independent term, needs that term's <code>factor</code>. A prior known only through its precision cannot be pushed through a linear map.</li>
+  <li><code>LocalizedUpdateRule</code> needs noise that acts row by row (a diagonal, possibly scaled).</li>
+  <li><code>inflate_additive</code> and <code>AdditiveNoise</code> on an ensemble need <code>factor</code>.</li>
+</ul>
+<p>The rule stays: raise, never fall back silently. Two refinements are adopted:</p>
+<ul>
+  <li><strong>Check capabilities when an operation starts,</strong> before any work, so the error is raised at the call that needs the capability and names it, rather than from deep inside a kernel.</li>
+  <li><strong>An explicit opt-in for prototyping</strong> (adopted): <code>with linalg.dense_fallback(max_n=2048):</code> densifies missing capabilities with a one-time warning and keeps the size guard. It is off by default, so library code never relies on it.</li>
+</ul>
+
+<h3 id="conv-numerics"><span class="num">5.6</span>Numerical rules carried over</h3>
+<p>These were learned the hard way in the current contracts, and each one is normative in the new <code>distribution</code> contract. Every one stays a targeted regression test.</p>
+<div class="tablewrap"><table>
+<tr><th>Rule</th><th>What goes wrong otherwise</th></tr>
+<tr><td>One thin SVD of \(S=(WF_c)^\top\); never form \(SS^\top\) or \(S^\top S\)</td><td>Forming either rounds away every \(\sigma<\sqrt\varepsilon\,\sigma_{\max}\). At \(\sigma_{\max}=10^8\) that is a relative error of 0.1 against \(10^{-8}\).</td></tr>
+<tr><td>\(T = I + U((I+\Sigma^2)^{-1/2}-I)U^\top\) (identity completion)</td><td>The naive \(U(\cdot)U^\top\) is wrong whenever \(\operatorname{rank} S < k\), for example \(N<J\).</td></tr>
+<tr><td><code>realize_particles</code> only on particle-aligned Gaussians</td><td>An uncentered factor displaces the mean silently. The measured covariance error was 18% to 62%.</td></tr>
+<tr><td>Center before whitening: <code>whiten_mat([F_c | y − m_c])</code> in one call</td><td>Whitening first loses accuracy in proportion to \(\sqrt{\kappa(R)}\): \(9\times10^{-6}\) against \(10^{-12}\) at \(\kappa=10^{10}\).</td></tr>
+<tr><td>Matheron residuals \(W(y^*-g_j)=W(y^*-\bar g)-\sqrt{J-1}\,S^\top e_j\): \(J{+}1\) whitenings, not \(2J\)</td><td>Only a count test catches the regression, because the numbers are identical.</td></tr>
+<tr><td>Anomalies: subtract the first particle, then the mean</td><td>Identical particles of magnitude \(6\times10^{23}\) produce an update of order 1.</td></tr>
+<tr><td>Noise in whitened coordinates only</td><td>Mixing <code>whiten</code> and <code>factor</code> of the same \(R\) in one update corrupts the joint law while every marginal looks right.</td></tr>
+<tr><td>ESS and weights in log space</td><td>\(\delta\Phi\) is routinely in the hundreds, and naive exponentiation gives \(0/0\).</td></tr>
+<tr><td>Increments finite and \(>0\); noise \(R/\Delta\beta\), never \(R/\beta\)</td><td>A zero increment spins an adaptive ladder until <code>max_steps</code>. The level form over-counts the data \((T{+}1)/2\) times.</td></tr>
+<tr><td>Explicit <code>nan</code> propagation in schedules</td><td><code>nan &gt; 0</code> is False, so a poisoned ensemble silently takes the largest step.</td></tr>
+</table></div>

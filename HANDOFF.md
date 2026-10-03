@@ -3,9 +3,51 @@
 Written 2026-08-24, updated 2026-08-25 after the operator layer was reworked
 against the normative contract, 2026-08-27 after `pyeki.eki` shipped,
 2026-08-28 after the forward-model contract was specified and the layer
-vocabulary was fixed, and 2026-09-02 after the joint was split into a
-Gaussian and a sample container. Read `CLAUDE.md` first for conventions — including the
-layer-boundary rules, which are new — then this for state and next steps.
+vocabulary was fixed, 2026-09-02 after the joint was split into a
+Gaussian and a sample container, and 2026-10-03 when the EnsKit redesign was
+adopted. Read `CLAUDE.md` first for conventions, including the layer rules,
+which the redesign replaced; then the section below; then the rest of this
+file, which describes the code as it stands before the redesign lands.
+
+## 2026-10-03: the EnsKit redesign is adopted
+
+pyEKI is being redesigned as **EnsKit** (`enskit`), a toolkit of ensemble
+Kalman building blocks with EKI and the EnKF shipped as algorithms built from
+them. The design was settled over four rounds of review and is recorded in
+`docs/redesign/index.md`; the full document, with every public API written out
+as docstrings and fifteen worked examples, is `docs/redesign/design.html`.
+`CLAUDE.md` was rewritten for it: new layers, vocabulary ("particle" for an
+element of an `Ensemble`, "sample" for any draw) and four new rules
+(mathematics in `.. math::` blocks, American English, public API first,
+citations).
+
+**The plan is thirteen pull requests**, numbered 0 to 12 in
+`docs/redesign/index.md`, each tracked by an issue in the "EnsKit 0.1"
+milestone. This is PR 0. **PR 1 is next**: the mechanical renames (`pyeki` →
+`enskit`, American spelling, public-API-first ordering, `SquareLinOp.n` →
+`dim`) with no behavior change.
+
+Three things are waiting on Andrew before PR 1: reserving `enskit` on PyPI,
+renaming the GitHub repository when PR 1 merges, and deciding whether to keep
+or retire the nine tutorials.
+
+**What is in `docs/redesign/`, and how to use it:**
+
+- **`stubs/`**: the docstrings each layer starts from. They are a design, not
+  a contract. Each layer's normative contract is written and reviewed before
+  its code (PRs 3 and 6, and the EKI contract's revision in 7), and it may
+  refine them.
+- **`notebooks/`**: the fifteen examples as notebook sources, their builder,
+  the executed notebooks and the bibliography. Every entry in
+  `references.py` was checked against the publisher or arXiv record, so cite
+  from it.
+- **`prototype/`**: the throwaway implementation the examples ran against. It
+  imports `pyeki.linalg`, so it only runs on a tree from before the rename. It
+  skips validation and densifies, so treat it as a record, not as code to
+  copy. Its examples, and `review_checks.py`, become acceptance tests.
+
+Until PR 7 the old `gauss` and `eki` modules stay in place, under their own
+contracts. Do not extend them, and do not make the new layers depend on them.
 
 ## Where things stand
 
@@ -180,16 +222,20 @@ operator layer was first written. That repository keeps the domain-specific
 work — forward models, priors, experiment configuration — and will depend on
 pyEKI. Nothing domain-specific should come back across.
 
-## Next steps, in order
+## Next steps
 
-### 1. `Kron`
+Follow the plan in `docs/redesign/index.md`, one pull request at a time.
+PR 1 is next. The notes below, written before the redesign, still apply to
+the pull requests they name.
+
+### Notes for PR 10, the `Kronecker` family
 
 The operator that blocks the rest of the linalg roadmap. No shipped layer
 needs it — `pyeki.gauss` and `pyeki.eki` run on the operators already there —
 so this is a capability step rather than an unblocking one. Two variants, and
 they are not the same code:
 
-- **Square** `Kron(A, B)` representing $A \otimes B$. Convention: the first
+- **Square** `Kronecker(A, B)` representing $A \otimes B$. Convention: the first
   factor's index is the *slow* one, so block $(i,j)$ of the result is
   $A_{ij}B$. Implement `matvec` by reshaping the trailing axis to `(n_A, n_B)`,
   applying `B` then `A`, and flattening back.
@@ -207,11 +253,11 @@ is built from `jnp.kron` of the children, a different code path, so it passes
 even when `matvec` is wrong.
 :::
 
-Then `KronLMC` (a sum $\sum_q A_q \otimes B_q$), `KronPlusNugget` and
+Then `KroneckerLMC` (a sum $\sum_q A_q \otimes B_q$), `KroneckerPlusNugget` and
 `LowRankPlus`, in that order. `docs/design.md` records the closed forms and
 their preconditions, including a log-determinant term that is easy to omit.
 
-### 2. `pyeki.localize`
+### Notes for PR 9, `LocalizedUpdateRule`
 
 Domain localization, not covariance localization — `docs/design.md` explains
 why the latter destroys the low-rank structure the conditioning kernel depends
@@ -219,8 +265,9 @@ on. Watch the two hazards recorded there: exempting unlocated parameters from
 tapering, and fixed-size neighbourhoods with masks so the local analyses
 vectorize.
 
-`pyeki.eki` is ready for it: localization plugs in as an `EnsembleUpdate`,
-and the driver needs no knowledge of it. Two things localization must bring
+In the new design, localization is an update rule, `LocalizedUpdateRule`,
+wrapping `Matheron` or `SymmetricSquareRoot`, and no driver needs to know
+about it. Two things localization must bring
 itself, neither of which `pyeki.eki` supplies: observation **locations**,
 which appear nowhere in the layer and so live as static fields on the rule,
 and the neighbourhood and taper definitions. One real limit, recorded in the
@@ -230,6 +277,15 @@ operation, so localization composes cleanly for diagonal noise or for
 neighbourhoods aligned to the noise operator's blocks, and not for arbitrary
 neighbourhoods cutting across a correlated block. That is a constraint on
 neighbourhood construction rather than a gap in the layer below.
+
+### Notes for PR 11, documentation
+
+Notebook wiring needs deciding. `myst-nb` would *replace* `myst_parser`
+rather than join it, which changes how every existing page is parsed. The
+sub-decisions at the bottom of `docs/examples/index.md` still stand. The
+fifteen notebooks in `docs/redesign/notebooks/` are the gallery's content. The
+Lorenz-96 ones take about a minute each, so the plan stores their outputs and
+re-runs them in a test marked slow.
 
 ## Open decisions
 
