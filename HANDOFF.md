@@ -4,10 +4,49 @@ Written 2026-08-24, updated 2026-08-25 after the operator layer was reworked
 against the normative contract, 2026-08-27 after `pyeki.eki` shipped,
 2026-08-28 after the forward-model contract was specified and the layer
 vocabulary was fixed, 2026-09-02 after the joint was split into a
-Gaussian and a sample container, and 2026-10-03 when the EnsKit redesign was
-adopted. Read `CLAUDE.md` first for conventions, including the layer rules,
-which the redesign replaced; then the section below; then the rest of this
-file, which describes the code as it stands before the redesign lands.
+Gaussian and a sample container, 2026-10-03 when the EnsKit redesign was
+adopted, and the same day after PR 1's renames. Read `CLAUDE.md` first for
+conventions, including the layer rules, which the redesign replaced; then the
+two sections below; then the rest of this file, which describes the code as it
+stands before the redesign lands. That description is historical: where it
+names `pyeki.<module>`, the module is now `enskit.<module>`.
+
+## 2026-10-03: PR 1, the mechanical renames
+
+The package is **`enskit`**. PR 1 (#35) changed names and nothing else; the
+test count is unchanged at 537. What moved:
+
+- `pyeki` → `enskit` everywhere outside `docs/redesign/`, including the
+  distribution name, the Sphinx title, the CI coverage flag and the figure
+  override, now `ENSKIT_DOCS_FIGURES=force`. Prose says "EnsKit".
+- American spelling throughout. The public names it changed are the
+  `center_misfit` fields of `Evaluation` and `HistoryRecord` (were
+  `centre_misfit`); test names changed with them. Two quoted paper titles keep their British spelling, in the EKI
+  contract's references table.
+- `SquareLinOp.n` → `SquareLinOp.dim` (#20). The Gaussian contract now
+  states one naming rule for both layers instead of recording a departure.
+- Every module lists its public classes and functions first, in its index
+  table's order, with private helpers below; in modules divided by section
+  banners, the helpers' banners say `private`.
+  `enskit.linalg.base` has no index table, so it follows its docstring's
+  sections: the three levels, then `linop` and `static_field`, then
+  `UnsupportedOpError` and `densify`. `enskit.linalg.testing` puts
+  `check_operator` first, since its docstring opens with it. New modules
+  should be written in this order from the start.
+
+**Still named `pyEKI`, deliberately:** the GitHub URLs in `pyproject.toml`,
+`docs/conf.py` and `README.md`, and the clone instructions in
+`docs/installation.md` (`git clone …/pyEKI.git`, `cd pyEKI`, and the
+`../pyEKI` path of a local checkout). They change when the repository is
+renamed; GitHub redirects the old URLs in the meantime. The prototype in
+`docs/redesign/prototype/` still imports `pyeki.linalg`, so it runs only on a
+checkout from before this PR, such as `b1d829c`.
+
+**Left for PR 11:** the package docstring and the README and landing-page
+taglines still describe EKI alone ("Ensemble Kalman Inversion for
+derivative-free Bayesian calibration"). Renaming did not change what the
+package does, so they were not rewritten here; `pyproject.toml`'s description
+already reads "Building blocks for ensemble Kalman methods".
 
 ## 2026-10-03: the EnsKit redesign is adopted
 
@@ -186,7 +225,7 @@ Three things the first three pages settled, none of which had a precedent:
   a figure cannot disagree with the code that made it. Regeneration is skipped
   when every output postdates both that module and every source file of the
   package — 6 s to regenerate all of them, 1.6 s cached — and
-  `PYEKI_DOCS_FIGURES=force` overrides. That alone catches only a figure whose
+  `ENSKIT_DOCS_FIGURES=force` overrides. That alone catches only a figure whose
   code *raises*, so each figure function also returns the numbers it plotted
   and `tests/test_tutorials.py` pins them; a figure drawing the wrong array
   fails the test rather than merely looking wrong. Pixels are deliberately not
@@ -226,8 +265,10 @@ pyEKI. Nothing domain-specific should come back across.
 
 Follow the plan in `docs/redesign/index.md`, one pull request at a time, in
 a fresh session for each, as described in "Pull requests and handoffs" in
-`CLAUDE.md`. PR 1 (#35) is next. The notes below, written before the redesign,
-still apply to the pull requests they name.
+`CLAUDE.md`. PR 1 (#35) is done; PR 2 (#36) is next, and PR 10 (#44) can
+start once PR 2 has merged. The notes below, written before the redesign,
+still apply to the pull requests they name; their `pyeki` modules are now
+`enskit` modules.
 
 ### Notes for PR 10, the `Kronecker` family
 
