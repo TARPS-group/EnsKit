@@ -155,16 +155,16 @@ $SS^\top$ is formed, and the result is exact at every latent width — including
 $k < P$, where the prior is singular and the precision form $(C_0^{-1} +
 G^\top R^{-1}G)^{-1}$ does not exist at all.
 
-## Centred factors and sample sets
+## Centered factors and sample sets
 
 $T$ multiplies $F_u$ on the *right*: it acts on the latent index. Whether
 that constitutes an update of a set of samples is exactly the question of
 whether the latent index *is* a sample index. Two facts settle it.
 
-Call a factor **centred** when $F\mathbf{1}_k = 0$. This is a property of the
+Call a factor **centered** when $F\mathbf{1}_k = 0$. This is a property of the
 representation, not of the distribution it represents.
 
-:::{admonition} A centred factor is a sample set
+:::{admonition} A centered factor is a sample set
 :class: important
 
 For $F \in \mathbb{R}^{n\times k}$ and $m \in \mathbb{R}^n$, form the $k$
@@ -185,17 +185,17 @@ anomaly matrix is $\sqrt{k-1}F^\top$, whose empirical covariance is
 $FF^\top$.
 :::
 
-So a mean together with a centred factor of width $k$ *is* a set of $k$
+So a mean together with a centered factor of width $k$ *is* a set of $k$
 samples whose empirical moments equal the Gaussian's — and the map runs both
 ways, since $\mathsf{U} \mapsto (\bar u,\ A_u^\top/\sqrt{J-1})$ sends a
-$J$-sample set to a centred factor of width $J$. A factor read off samples is
-centred precisely because anomalies sum to zero.
+$J$-sample set to a centered factor of width $J$. A factor read off samples is
+centered precisely because anomalies sum to zero.
 
 The second fact is that conditioning preserves this. If $F_v\mathbf{1}_k =
 0$ then $S^\top\mathbf{1}_k = WF_v\mathbf{1}_k = 0$, hence
 $SS^\top\mathbf{1}_k = 0$, hence $(I_k + SS^\top)\mathbf{1}_k = \mathbf{1}_k$
 and so $T\mathbf{1}_k = \mathbf{1}_k$. Therefore $F_uT\mathbf{1}_k =
-F_u\mathbf{1}_k = 0$: **a centred factor conditions to a centred factor.**
+F_u\mathbf{1}_k = 0$: **a centered factor conditions to a centered factor.**
 
 Together they give the square-root update. Conditioning maps sample sets to
 sample sets, and
@@ -213,7 +213,7 @@ Two consequences for the API.
 **The projection from samples to a joint loses nothing.** Running the
 equivalence backwards, $u_j = \bar u + \sqrt{J-1}(F_u)_{\cdot j}$, so
 {meth}`~enskit.gauss.EmpiricalJoint.to_gaussian_joint` is a bijection onto
-(mean, centred width-$J$ factor) pairs. Neither update needs its samples
+(mean, centered width-$J$ factor) pairs. Neither update needs its samples
 supplied a second time: everything they use is in the joint. What the
 projection drops is the *reading* of the latent index as a sample index.
 
@@ -224,7 +224,7 @@ $A_u'^\top(I_J + SS^\top)^{-1}A_u'/(J-1)$, which equals $C_{\text{post}}$ only
 when $A_u'^\top/\sqrt{J-1} = F_u$ — that is, only when the sample set is the
 one the joint was fitted to. Worse, the *mean* survives regardless, since
 $\mathbf{1}^\top A_u' = 0$ and $T\mathbf{1} = \mathbf{1}$ hold for any
-centred set. On an unrelated sample set of the same shape the mean is correct
+centered set. On an unrelated sample set of the same shape the mean is correct
 to round-off and the covariance is wrong by a large fraction of its own scale
 — 62% on the conformance fixture, though the exact figure depends on the
 draw, so the test asserts only that it exceeds a tenth. Finite, with nothing
@@ -351,14 +351,14 @@ holds.
 | --------- | -------- | ------- |
 | `condition` | `GaussianJoint` | moment-determined, returns a distribution |
 | `pathwise` | `GaussianJoint` | per-realization, correct for realizations the joint never saw |
-| `transform_update` | `EmpiricalJoint` | valid only for a centred factor |
+| `transform_update` | `EmpiricalJoint` | valid only for a centered factor |
 | `pathwise_update` | `EmpiricalJoint` | returns samples aligned with the ones held |
 
 Two placements deserve comment.
 
 **`condition` is not on `EmpiricalJoint`.** Conditioning a set of samples
 means conditioning a Gaussian fitted to their moments. That fit is a
-modelling step, and a method named `condition` on a class named for the
+modeling step, and a method named `condition` on a class named for the
 empirical distribution reads like conditioning the empirical measure, which
 is not what it would do. Writing
 `joint.to_gaussian_joint().condition(y, noise_cov)` costs one call and puts
@@ -370,7 +370,7 @@ $F\mathbf{1}_k = 0$ — is a *value* precondition. On a general joint it could
 only be checked in debug mode, so a `from_linear_map` joint would silently
 return samples with the right covariance and a mean shifted by
 $\sqrt{k-1}F\mathbf{1}_k/k$. Held on the class that owns samples,
-centredness is structural: the only constructor reachable from there centres,
+centeredness is structural: the only constructor reachable from there centers,
 and no check is needed.
 
 ## What it costs
@@ -379,17 +379,17 @@ Conditioning whitens $k+1$ vectors — the factor's $k$ columns and the mean
 residual — from one `whiten_mat` call on the stacked columns $[F_v \mid y -
 \bar v]$. At $k = J$ that is the $J+1$ a sample update spends.
 
-Holding a factor rather than samples settles the centre-before-whiten
+Holding a factor rather than samples settles the center-before-whiten
 question structurally. The two orders agree in exact arithmetic but not in
-stability: centring already-whitened vectors makes the cancellation ratio
+stability: centering already-whitened vectors makes the cancellation ratio
 $\lVert W\bar v\rVert / \lVert WF_v\rVert$ in place of $\lVert \bar v\rVert /
 \lVert F_v\rVert$, so the error grows with $\kappa(W) = \sqrt{\kappa(R)}$
 whenever $\bar v$ is aligned with a precise direction of the noise. Measured
 against an exact rational reference at $\kappa(R) = 10^{10}$, with the
 observed block's mean of magnitude $10^{10}$ along $R$'s most precise
 direction: whitening first gives a posterior-mean relative error of
-$9.0\times10^{-6}$ where centring first gives $1.0\times10^{-12}$, six orders
-apart. Because the factor is centred at construction, there is no ordering
+$9.0\times10^{-6}$ where centering first gives $1.0\times10^{-12}$, six orders
+apart. Because the factor is centered at construction, there is no ordering
 left to get wrong inside a conditioning call — only the mean residual, which
 is differenced before whitening.
 
@@ -425,11 +425,11 @@ $\varepsilon = 2.22\times10^{-16}$.
 | fully operator-form path, structured prior and operator map | mean $7.8\times10^{-16}$, covariance $1.6\times10^{-15}$ |
 | samples recovered from mean and factor | $4.4\times10^{-16}$ |
 | $F\mathbf{1} = 0$ for a factor read off samples | $3.9\times10^{-16}$ |
-| $T\mathbf{1} = \mathbf{1}$, and $F_uT$ still centred | $1.1\times10^{-16}$, $4.7\times10^{-16}$ |
+| $T\mathbf{1} = \mathbf{1}$, and $F_uT$ still centered | $1.1\times10^{-16}$, $4.7\times10^{-16}$ |
 | `transform_update` against `condition` plus the reading | $4.4\times10^{-16}$ |
 | Matheron on exact-moment realizations, against the closed-form posterior | mean $2.2\times10^{-16}$, covariance $3.3\times10^{-16}$ |
 | a sample-set argument: mean survives, covariance does not | mean $5.6\times10^{-17}$; covariance error $1.17$ on a scale of $1.88$ |
-| centring before whitening, $\kappa(R) = 10^{10}$ | $1.0\times10^{-12}$, against $9.0\times10^{-6}$ for the reverted grouping |
+| centering before whitening, $\kappa(R) = 10^{10}$ | $1.0\times10^{-12}$, against $9.0\times10^{-6}$ for the reverted grouping |
 | block recovery of $F_u$, wide factor ($k > N$) | ill-posed; recovered $F_u$ off by $1.4\times10^{9}$ |
 | block recovery of $F_u$, Gram route at $\kappa(F_v) = 1.4\times10^{8}$ | $\kappa(F_v^\top F_v) = 2\times10^{16}$; $F_u$ to $1.8\times10^{-8}$, against $4.7\times10^{-8}$ for an SVD pseudo-inverse |
 

@@ -32,7 +32,7 @@ Conventions shared by everything in the module:
 
 Notes
 -----
-The behaviour of this module is specified by the "Ensemble Kalman Inversion
+The behavior of this module is specified by the "Ensemble Kalman Inversion
 contract" page of the documentation, which is normative.
 
 Every field of :class:`HistoryRecord` is a 0-d array, ``step`` and
@@ -378,9 +378,9 @@ class Evaluation:
     storing it.
 
     The recovered anomaly matrix is a diagnostic and never a substitute for
-    the update's own: :mod:`enskit.gauss` centres before it whitens — the
-    factor it whitens was centred when it was built — precisely because
-    centring already-whitened predictions cancels a common
+    the update's own: :mod:`enskit.gauss` centers before it whitens — the
+    factor it whitens was centered when it was built — precisely because
+    centering already-whitened predictions cancels a common
     :math:`W\\bar v` and loses accuracy as the ensemble collapses.
 
     ``rms_parameter_spread`` is scale-dependent, and the name says so: it
@@ -458,7 +458,7 @@ class Evaluation:
         return _misfits_from_residuals(self.whitened_residuals)
 
     @property
-    def centre_misfit(self) -> Array:
+    def center_misfit(self) -> Array:
         """The misfit of the mean prediction, a 0-d array.
 
         :math:`\\Phi(\\bar v) = \\tfrac12\\lVert \\bar b\\rVert^2`. This is
@@ -472,10 +472,10 @@ class Evaluation:
               \\bigl(W \\widehat{C}_{vv} W^\\top\\bigr) ,
 
         coinciding only as the ensemble collapses. A discrepancy principle
-        asks about the centre; a tempering criterion asks about the
+        asks about the center; a tempering criterion asks about the
         individual members.
         """
-        _check_not_vmap_family(self, "centre_misfit")
+        _check_not_vmap_family(self, "center_misfit")
         return _misfits_from_residuals(jnp.mean(self.whitened_residuals, axis=-2))
 
     @property
@@ -544,7 +544,7 @@ class HistoryRecord:
         ladder needs no arithmetic.
     misfit_mean, misfit_min, misfit_max
         Summaries of the step's per-member misfits.
-    centre_misfit
+    center_misfit
         The misfit of the mean prediction.
     spread
         The evaluation's ``rms_parameter_spread``.
@@ -573,7 +573,7 @@ class HistoryRecord:
     misfit_mean: Array
     misfit_min: Array
     misfit_max: Array
-    centre_misfit: Array
+    center_misfit: Array
     spread: Array
     ess: Array
 
@@ -611,7 +611,7 @@ _RECORD_FIELDS = (
     "misfit_mean",
     "misfit_min",
     "misfit_max",
-    "centre_misfit",
+    "center_misfit",
     "spread",
     "ess",
 )
@@ -839,7 +839,7 @@ def _zero_record() -> HistoryRecord:
         misfit_mean=zero,
         misfit_min=zero,
         misfit_max=zero,
-        centre_misfit=zero,
+        center_misfit=zero,
         spread=zero,
         ess=zero,
     )

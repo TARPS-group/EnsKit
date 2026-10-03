@@ -7,7 +7,7 @@ them.
 
 This page is about *when and why* to reach for each piece. The
 {doc}`../gaussian-contract` reference page specifies exactly *what* each one
-does — precise shapes, error behaviour, the conditioning mathematics — and
+does — precise shapes, error behavior, the conditioning mathematics — and
 {doc}`../joint-factor` derives the representation they all share.
 
 The layer knows nothing about inversion. {doc}`running-an-inversion` is where
@@ -113,7 +113,7 @@ methods, and both return the `u` block only. A caller that needs a matching
 
 **Why `condition` is not a method on `EmpiricalJoint`.** Conditioning a set of
 samples means conditioning a Gaussian fitted to their moments. That fit is a
-modelling step, so it is written out — `samples.to_gaussian_joint().condition(...)`
+modeling step, so it is written out — `samples.to_gaussian_joint().condition(...)`
 — rather than hidden inside a method whose name would suggest you had
 conditioned the samples themselves.
 

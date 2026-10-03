@@ -52,7 +52,7 @@ contracts. Do not extend them, and do not make the new layers depend on them.
 ## Where things stand
 
 **Done.** `pyeki.linalg` is implemented to the specification in
-`docs/linop-contract.md` — the normative reference for the layer's behaviour,
+`docs/linop-contract.md` — the normative reference for the layer's behavior,
 written and adversarially reviewed before this implementation. Three-level
 hierarchy (`LinOp`/`SquareLinOp`/`PSDLinOp`) with template methods (public
 methods gate and validate; authors implement `_`-prefixed hooks), transposes
@@ -83,7 +83,7 @@ previously unreachable, since the only entrance to conditioning was to
 present samples. `docs/joint-factor.md` derives the representation and records
 why it is a factor rather than three covariance blocks. The square-root update
 stayed on `EmpiricalJoint` because its reading of the conditioned factor is
-valid only for a centred one, which holding samples makes structural; the
+valid only for a centered one, which holding samples makes structural; the
 contract and that page both give the measured failure it avoids.
 
 `pyeki.eki` was not touched: both update policies call the same two methods
@@ -263,7 +263,7 @@ their preconditions, including a log-determinant term that is easy to omit.
 Domain localization, not covariance localization — `docs/design.md` explains
 why the latter destroys the low-rank structure the conditioning kernel depends
 on. Watch the two hazards recorded there: exempting unlocated parameters from
-tapering, and fixed-size neighbourhoods with masks so the local analyses
+tapering, and fixed-size neighborhoods with masks so the local analyses
 vectorize.
 
 In the new design, localization is an update rule, `LocalizedUpdateRule`,
@@ -271,13 +271,13 @@ wrapping `Matheron` or `SymmetricSquareRoot`, and no driver needs to know
 about it. Two things localization must bring
 itself, neither of which `pyeki.eki` supplies: observation **locations**,
 which appear nowhere in the layer and so live as static fields on the rule,
-and the neighbourhood and taper definitions. One real limit, recorded in the
+and the neighborhood and taper definitions. One real limit, recorded in the
 EKI contract's *How the layers around this one connect*: extracting a
 principal submatrix of a *correlated* noise block is not an operator-layer
 operation, so localization composes cleanly for diagonal noise or for
-neighbourhoods aligned to the noise operator's blocks, and not for arbitrary
-neighbourhoods cutting across a correlated block. That is a constraint on
-neighbourhood construction rather than a gap in the layer below.
+neighborhoods aligned to the noise operator's blocks, and not for arbitrary
+neighborhoods cutting across a correlated block. That is a constraint on
+neighborhood construction rather than a gap in the layer below.
 
 ### Notes for PR 11, documentation
 
@@ -311,7 +311,7 @@ what shape it wants. Revisit when localization lands. The EKI contract's
 (Three decisions previously listed here were settled. Capability declaration
 and whitening versus triangularity went to the operator contract: `supports()`
 is defined by hook presence with derived-dependency resolution, and
-`cholesky()` was removed in favour of `factor()` plus a primitive `whiten()`.
+`cholesky()` was removed in favor of `factor()` plus a primitive `whiten()`.
 `AdditiveInflation`'s supposed per-step refactorization turned out not to
 exist: every shipped PSD operator factorizes at construction, so `factor()`
 returns a stored factor and the update path contains no Cholesky at all.)
@@ -338,8 +338,8 @@ layer; this is the index.
 | Per-step noise is $\Sigma/\Delta\beta_t$, never $\Sigma/\beta_t$ | a plausible posterior, wrong by $(T+1)/2$ times the data precision on a uniform $T$-step ladder, growing with ladder length |
 | A single-`where` guard sends a `nan` misfit to the `inf` branch | `nan > 0` is `False`, so the schedule silently returns the *largest* allowed step |
 | A Python float passed as a `jit` **argument** does not retrace | the retrace-per-step bug is a *static field* on an object crossing the boundary, so never pass an `EKIState` or `Evaluation` whole |
-| `Evaluation.centre_misfit` is not the mean of `Evaluation.misfits` | they differ by exactly $\tfrac{J-1}{2J}\operatorname{tr}(W \widehat C_{vv} W^\top)$ |
-| The repair formula is not bit-exactly the identity when nothing failed | it must be `jnp.where(valid, ensemble, centre)` *and* skipped in Python on the synchronized `n_valid` |
+| `Evaluation.center_misfit` is not the mean of `Evaluation.misfits` | they differ by exactly $\tfrac{J-1}{2J}\operatorname{tr}(W \widehat C_{vv} W^\top)$ |
+| The repair formula is not bit-exactly the identity when nothing failed | it must be `jnp.where(valid, ensemble, center)` *and* skipped in Python on the synchronized `n_valid` |
 | A static field on a `HistoryRecord` makes every record a different pytree | `jax.tree.map` across a history raises instead of stacking |
 | `step` is cumulative across runs | chaining a fresh ladder onto a finished state returns unchanged, with nothing raised — use `restart()` |
 | `cov.factor()` is free, because operators factorize at construction | "hoisting" it by storing a densified factor turns an $O(P)$ diagonal into a $P \times P$ array |
@@ -350,7 +350,7 @@ layer; this is the index.
 | A policy's output needs its **dtype** checked, not only its shape | an inflation returning `int64` handed the forward model an integer ensemble and the run completed silently; the shape check passed |
 | A `float32` forward model is promoted and warned about, not rejected | it still costs ~$7\times10^{-5}$ relative in the posterior mean where the prediction mean exceeds the spread by $10^4$; promotion recovers only about half, since the digits are gone before the array arrives |
 | `ensemble @ G` instead of `ensemble @ G.T` is silent when $G$ is square | the transposed model's predictions, right shape, no error; `G @ ensemble` raises, so it is the harmless mistake |
-| A **symmetric** coupling across ensemble members survives a permutation of them | mean-centring is permutation-equivariant, so a permutation test alone passes a model that normalizes across the ensemble; it takes re-evaluating a *subset* to catch, and that comparison cannot be bit-exact |
+| A **symmetric** coupling across ensemble members survives a permutation of them | mean-centering is permutation-equivariant, so a permutation test alone passes a model that normalizes across the ensemble; it takes re-evaluating a *subset* to catch, and that comparison cannot be bit-exact |
 | The same members in a differently *sized* batch round differently | a dense contraction picks a different kernel per batch shape, so a subset comparison holds only to round-off while a permutation one is bit-exact |
 | The closed form's cost is set by the prior factor's width $k$, not by $P$ | a full-rank prior at $P = 2000$ means a $(2000, 2000)$ posterior factor — 32 MB, 0.07 s — so `LinearGaussian.posterior` guards on $Pk$ and the *run* has no such limit |
 | A run at $P \gg J$ reports a spread the exact posterior contradicts | at $P = 2000$, $N = 40$, $J = 40$ the ensemble's mean posterior sd is 0.014 against an exact 0.990, a factor of seventy, with nothing raised and no history field flagging it |

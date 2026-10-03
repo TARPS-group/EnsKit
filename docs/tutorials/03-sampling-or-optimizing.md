@@ -112,10 +112,10 @@ Stop when you reach it.
 In numbers: the misfit of a member that fits as well as the noise allows is
 about $N/2$, which is 6 for this problem's twelve observations.
 `DiscrepancyStop(tau=1.0)` fires when the misfit of the ensemble's mean
-prediction — `centre_misfit` — drops to that level. In this run:
+prediction — `center_misfit` — drops to that level. In this run:
 
 ```python
-fit.stacked.centre_misfit    # [9654.0285  577.3526  6.5196  4.5978]
+fit.stacked.center_misfit    # [9654.0285  577.3526  6.5196  4.5978]
 ```
 
 6.52 is above the threshold of 6, so the run continued; 4.60 is below it, so

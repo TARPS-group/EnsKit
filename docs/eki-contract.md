@@ -19,7 +19,7 @@ them.
 
 `enskit.eki` implements this document, and the conformance suite of
 {ref}`eki-conformance` is what checks that it does. This page remains the
-normative reference for the layer's behaviour: where the code and this page
+normative reference for the layer's behavior: where the code and this page
 disagree, one of them is a defect.
 :::
 
@@ -47,7 +47,7 @@ designed so that neither is privileged ({ref}`eki-axes`):
   tempered targets summing to $\beta = 1$, producing an approximate posterior
   ensemble; and
 - the **optimization form**, which runs the same update without a temperature
-  budget until the data are fit, producing a collapsing ensemble whose centre
+  budget until the data are fit, producing a collapsing ensemble whose center
   approximates a regularized least-squares solution.
 
 Deliberately outside the layer: the forward model (any callable, per the
@@ -367,7 +367,7 @@ state = EKIState.from_prior(key, prior, n_members=64)
 sampled = run(state, forward, y, noise_cov,
               schedule=AdaptiveESSSchedule())
 ensemble = sampled.ensemble          # (J, P) approximate posterior ensemble
-centre = sampled.mean                # (P,) its mean
+center = sampled.mean                # (P,) its mean
 
 # Optimization form: unit steps, no budget, stop on the discrepancy principle.
 fit = run(state, forward, y, noise_cov,
@@ -626,7 +626,7 @@ current = evaluate(s, forward, y, noise_cov)
 while not done(current):
     trial, record = assimilate(s, current, increment=delta, y=y, noise_cov=noise_cov)
     probe = evaluate(trial, forward, y, noise_cov)
-    if probe.centre_misfit < current.centre_misfit:
+    if probe.center_misfit < current.center_misfit:
         s, current, delta = trial, probe, delta * 1.5   # accept, lengthen
     else:
         delta = delta / 2                               # reject, reuse `current`
@@ -816,7 +816,7 @@ Requirements on any implementation:
   damping — **breaks the telescoping identity of {ref}`eki-algorithm`**, for
   the same reason inflation does, and the layer states that consequence rather
   than preventing it. Withholding the arguments would not prevent the
-  behaviour: it would only push callers into keeping a counter inside the
+  behavior: it would only push callers into keeping a counter inside the
   rule, which violates the purity requirement above and silently breaks
   resumption — a failure the conformance suite can catch in the package's own
   rules and cannot catch in a user's. Given the choice between an unenforced
@@ -1132,7 +1132,7 @@ clamped as {ref}`eki-adaptive` specifies. Three implementation requirements:
 
   When $\mathrm{ESS}(\delta_{\mathrm{hi}})$ already meets the target the cap
   binds and $\delta_{\mathrm{hi}}$ is the answer — but that case must be folded
-  in **branchlessly**, by initialising `lo = jnp.where(ess_hi >= ess_fraction *
+  in **branchlessly**, by initializing `lo = jnp.where(ess_hi >= ess_fraction *
   J, delta_hi, 0.0)` and letting the loop run unchanged, never as an early
   Python return on a device value. It is not an optimization: without it the
   degenerate ensemble of {ref}`eki-adaptive` reaches the largest allowed step
@@ -1239,7 +1239,7 @@ exactly the coefficient of variation of a $\chi^2_N$ variate. For any
 appreciable $N$ that is the common case — the source reports it holding
 throughout its own experiments, and notes that it corresponds to a prior wide
 enough to contain the truth. The variance bound takes over for an unusually
-tightly clustered ensemble, or a prior centred far from the truth with little
+tightly clustered ensemble, or a prior centered far from the truth with little
 spread, where it correctly permits a longer step than the mean alone would.
 
 **How this differs from the ESS criterion — and why both ship.** The two are
@@ -1309,7 +1309,7 @@ not an implementation artifact.
 
 **`DiscrepancyStop(tau=1.0)`** implements Morozov's discrepancy principle,
 in the form Iglesias adapted to ensemble Kalman methods
-({ref}`eki-references`): stop as soon as the ensemble centre fits the data to
+({ref}`eki-references`): stop as soon as the ensemble center fits the data to
 within the noise level,
 
 $$
@@ -1317,11 +1317,11 @@ $$
 $$
 
 where $\bar v = \frac1J\sum_j v_j$ is the **mean prediction** and
-$\Phi(\bar v)$ is the evaluation's `centre_misfit`.
+$\Phi(\bar v)$ is the evaluation's `center_misfit`.
 
 The scaling is the natural one. At the true parameter, the whitened residual is
 the whitened noise, so $2\Phi$ is a $\chi^2_N$ variate with mean $N$ and
-standard deviation $\sqrt{2N}$: $\tau = 1$ stops when the centre's residual
+standard deviation $\sqrt{2N}$: $\tau = 1$ stops when the center's residual
 reaches the size the noise alone explains *in expectation*, and $\tau^2 = 1 +
 k\sqrt{2/N}$ puts the threshold $k$ standard deviations above that, values up
 to about
@@ -1391,7 +1391,7 @@ read any external formula's definition before transcribing it.
 | implementation | field | effect |
 | -------------- | ----- | ------ |
 | `MultiplicativeInflation(anomaly_factor)` | 0-d array | $u_j \mapsto \bar u + r\,(u_j - \bar u)$ |
-| `AdditiveInflation(cov)` | a `PSDLinOp` of side $P$ | adds centred draws from `cov` |
+| `AdditiveInflation(cov)` | a `PSDLinOp` of side $P$ | adds centered draws from `cov` |
 
 **`MultiplicativeInflation`** is the classical covariance inflation of Anderson
 and Anderson ({ref}`eki-references`). It scales the anomalies, so the empirical
@@ -1421,9 +1421,9 @@ one place in the package, the gauss layer's snapshot test covers this one too,
 and the two cannot drift apart — which they could if this layer wrote out its
 own `normal(key, (J, k))`, since nothing but review would notice the shapes
 diverging. The perturbations
-are **centred**, which preserves the ensemble mean exactly. The empirical
+are **centered**, which preserves the ensemble mean exactly. The empirical
 covariance is inflated by `cov` in expectation under the $J-1$ divisor —
-exactly, and independently of the centring, since subtracting the perturbation
+exactly, and independently of the centering, since subtracting the perturbation
 mean leaves the anomalies about the new mean unchanged. A
 scale is folded into the operator by the caller — `AdditiveInflation(0.01 *
 prior.cov)` — rather than carried as a second field. This is the only shipped
@@ -1586,7 +1586,7 @@ they were returned, so a schedule or stopping rule shown one twice sees the
 same numbers however stochastic the model is; the layer never re-calls the
 model to answer a question it has already asked.
 
-**Failure is signalled by non-finite predictions.** A member whose prediction
+**Failure is signaled by non-finite predictions.** A member whose prediction
 row contains any `nan` or `inf` is invalid. Deriving validity this way rather
 than adding a mask to the return type keeps the interface at one array, and
 matches what failing simulators actually produce.
@@ -1620,7 +1620,7 @@ so their absence is a decision:
 - **Slow failure** — a member that never returns. There is no per-member
   timeout, and there should not be one here; it belongs to the wrapper that
   owns the process.
-- **Systematically failing members.** A member repaired to the centre is
+- **Systematically failing members.** A member repaired to the center is
   updated to the posterior mean, may fail again next step, and can be absent
   from the run's effective ensemble throughout while every step still reports
   $J_v$ close to $J$. Only the `n_valid` history reveals it, and only if a
@@ -1634,9 +1634,9 @@ Handling is governed by `on_failure`, whose value must be one of the two
 strings below; anything else is a `ValueError` at the call
 ({ref}`eki-validation`), never a silent fallback to the default:
 
-| value | behaviour |
+| value | behavior |
 | ----- | --------- |
-| `"repair"` (default) | replace failed members by the valid centre, leaving valid members untouched |
+| `"repair"` (default) | replace failed members by the valid center, leaving valid members untouched |
 | `"raise"` | raise `EKIError` naming the number and indices of failed members |
 
 Either way, $J_v < 2$ raises: a single valid member has no anomalies.
@@ -1665,7 +1665,7 @@ $$
 u_j \;\longmapsto\; \hat u + m_j\,(u_j - \hat u) ,
 $$
 
-and identically for $v_j$: **failed members are moved to the valid centre and
+and identically for $v_j$: **failed members are moved to the valid center and
 valid members are left exactly where they are.** Then, exactly:
 
 - the all-$J$ mean equals $\hat u$, because the valid anomalies sum to zero
@@ -1705,7 +1705,7 @@ $$
 It is the construction {doc}`gaussian-contract` anticipates as the reason its
 anomaly divisor is fixed, and on the moments it is strictly better. EnsKit does
 not use it, because of what it does to the members. The factor is applied to
-the *surviving* members too, so each one is moved outward from the centre; the
+the *surviving* members too, so each one is moved outward from the center; the
 pair $(u_j, v_j)$ is no longer forward-model-consistent; and the run's returned
 ensemble can contain members never evaluated at their own parameters.
 
@@ -1738,7 +1738,7 @@ consequence for compilation is at most one extra traced variant
 **Misfits are computed after repair.** A failed member would otherwise
 contribute a `nan` misfit and poison every statistic and every adaptive
 criterion. After repair its prediction is $\hat v$, so it contributes
-$\Phi(\hat v)$ — the misfit of the valid centre, which by the identity of
+$\Phi(\hat v)$ — the misfit of the valid center, which by the identity of
 {ref}`eki-diagnostics` sits *below* the valid members' mean misfit by
 $\tfrac{J_v-1}{2J_v}\operatorname{tr}(W \widehat C_{vv} W^\top)$. The bias in
 $\overline{\Phi}$ is therefore downward, which makes the reported misfit
@@ -1844,11 +1844,11 @@ class is otherwise an ordinary unbatched frozen pytree ({ref}`eki-jax`).
 driver whitens $y - v_j$ against the base $R$ to build this array, and the
 update then whitens the fitted factor against $R/\Delta\beta$ inside
 {class}`~enskit.gauss.EmpiricalJoint`. The two are the same computation up to a
-factor: centring the rows of `whitened_residuals` gives $-A_v W^\top$ in exact
+factor: centering the rows of `whitened_residuals` gives $-A_v W^\top$ in exact
 arithmetic, and the tempered whitener is $\sqrt{\Delta\beta}\,W$. The two
-routes are **not** interchangeable in floating point: `enskit.gauss` centres
-before it whitens — structurally, since it whitens a factor that was centred
-when it was built — precisely because centring already-whitened predictions
+routes are **not** interchangeable in floating point: `enskit.gauss` centers
+before it whitens — structurally, since it whitens a factor that was centered
+when it was built — precisely because centering already-whitened predictions
 cancels a
 common $W\bar v$ and loses
 $O(\varepsilon\sqrt{\kappa(R)}\,\lVert W\bar v\rVert / \lVert W A_v\rVert)$
@@ -1871,10 +1871,10 @@ an optimization.
 | property | value |
 | -------- | ----- |
 | `misfits` | `(J,)`, $\Phi_j = \tfrac12\lVert b_j\rVert^2$ |
-| `centre_misfit` | 0-d, $\Phi(\bar v) = \tfrac12\lVert \bar b\rVert^2$ |
+| `center_misfit` | 0-d, $\Phi(\bar v) = \tfrac12\lVert \bar b\rVert^2$ |
 | `n_members`, `u_dim`, `v_dim` | `int`; `u_dim` and `v_dim` are named as in {doc}`gaussian-contract`, whose `n_samples` is this layer's `n_members` |
 
-`centre_misfit` is *not* the mean of `misfits`, and the two must never be
+`center_misfit` is *not* the mean of `misfits`, and the two must never be
 confused: they differ by half the whitened prediction spread,
 
 $$
@@ -1883,7 +1883,7 @@ $$
 $$
 
 coinciding only as the ensemble collapses. Both are wanted — a discrepancy
-principle asks about the centre, a tempering criterion about the individual
+principle asks about the center, a tempering criterion about the individual
 members — so both are provided, under names that cannot be mistaken for one
 another.
 
@@ -1897,7 +1897,7 @@ absent: computing it costs an extra forward-model evaluation
 One row of the history, built by the driver from the evaluation and the chosen
 increment. **Every field is a 0-d array**, `step` and `n_valid` included (as
 0-d integer arrays): `step`, `n_valid`, `beta`, `increment`, `beta_next`,
-`misfit_mean`, `misfit_min`, `misfit_max`, `centre_misfit`, `spread`, and
+`misfit_mean`, `misfit_min`, `misfit_max`, `center_misfit`, `spread`, and
 `ess`.
 
 **No field of `HistoryRecord` is static metadata, and that is a requirement
@@ -1932,7 +1932,7 @@ ensemble collapsing — and no field here reports it. Two reasons: the update
 computes its own SVD internally and has no channel to return one, and having
 the driver compute a second SVD would add an $O(NJ^2)$ cost per step, the same
 order as the update itself, for a diagnostic. It is not lost, because
-`evaluation.whitened_residuals` **determines $S$ completely** — centring its
+`evaluation.whitened_residuals` **determines $S$ completely** — centering its
 rows gives $-A_v W^\top$, as the evaluation's own section shows, to the
 accuracy that section records — so a caller who wants the spectrum takes one
 SVD in an `iterate` loop and pays for it deliberately. The related identity
@@ -2169,7 +2169,7 @@ There is no `"max_steps"` status, because **exceeding `max_steps` raises**. The
 bound is a safety net against a schedule that can never be exhausted and a run
 with no stopping rule; a genuinely step-limited run is a `FixedSchedule` with
 that many steps, or a `break` in an `iterate` loop. A sampling run that
-silently returned an ensemble at $\beta = 0.7$ labelled as a posterior is
+silently returned an ensemble at $\beta = 0.7$ labeled as a posterior is
 the failure `stop_fired` and `budget_complete` exist to expose.
 
 **Progress reporting.** The driver emits one record per step at `INFO` on the
@@ -2260,7 +2260,7 @@ return is a `ValueError` as before.
 **String arguments are validated, never silently defaulted.** `on_failure` is
 checked against its two permitted values at the call, and an unrecognized one
 raises rather than falling back to `"repair"` — a typo such as `"Raise"` must
-not quietly select the opposite behaviour on a run that then discards failures
+not quietly select the opposite behavior on a run that then discards failures
 it was asked to reject. `status` is produced by the layer rather than consumed
 from it, and is exported as constants for the same class of reason
 ({ref}`eki-driver`).
@@ -2433,7 +2433,7 @@ The regularization weight is the noise block's scale: `block_diag(noise_cov, (1
 / lam) * prior.cov)` gives the penalty
 $\tfrac{\lambda}{2}\lVert C_0^{-1/2}(u - m_0)\rVert^2$, a
 {class}`~enskit.linalg.PSDScaled` that whitens as cheaply as `prior.cov` does.
-Centring at $m_0$ rather than at the origin is a choice, and the origin is
+Centering at $m_0$ rather than at the origin is a choice, and the origin is
 recovered by passing a zero mean.
 
 *A Langevin-type update fits the protocol.* Such rules — the ensemble Kalman
@@ -2484,15 +2484,15 @@ the increment; the conditioning primitives give it the per-block analyses;
 {ref}`contract-composites` gives it the noise operator's block anatomy. Two
 things it must bring itself, neither of which this layer supplies: observation
 **locations**, which appear nowhere in `enskit.eki` and so live as static fields
-on the rule, and the neighbourhood and taper definitions.
+on the rule, and the neighborhood and taper definitions.
 
 One real limit. A local analysis needs the noise covariance restricted to a
-neighbourhood, and {ref}`gauss-consumers` states that extracting a principal
+neighborhood, and {ref}`gauss-consumers` states that extracting a principal
 submatrix of a *correlated* block is not an operator-layer operation. So
-localization composes cleanly for **diagonal noise, or neighbourhoods aligned
-to the noise operator's blocks**, and not for arbitrary neighbourhoods cutting
+localization composes cleanly for **diagonal noise, or neighborhoods aligned
+to the noise operator's blocks**, and not for arbitrary neighborhoods cutting
 across a correlated block — which is the case {doc}`design` spends a section
-motivating. This is a constraint on `enskit.localize`'s neighbourhood
+motivating. This is a constraint on `enskit.localize`'s neighborhood
 construction, not a gap in this layer, but the claim that everything it needs
 is already contractual would be false without it.
 
@@ -2723,7 +2723,7 @@ written independently of the code under test. The suite must verify at least:
    update — and resuming a run from a caught `exc.state` continues it exactly,
    which is what makes the attributes worth having.
 9. **Failure handling.** `repair_failed_members` leaves valid members
-   **bit-identical**, maps failed members to the valid centre, reproduces the
+   **bit-identical**, maps failed members to the valid center, reproduces the
    valid-member mean exactly, and gives an all-$J$ covariance and
    cross-covariance equal to the valid-member ones scaled by exactly
    $(J_v-1)/(J-1)$ — the damping of {ref}`eki-failures`, pinned as an equality
@@ -2743,10 +2743,10 @@ written independently of the code under test. The suite must verify at least:
     $\tfrac12 (y-v)^\top R^{-1} (y-v)$ at batch ranks 0, 1 and 2, is invariant
     across two noise operators representing the same $R$ with different
     whiteners, and pins the factor of $\tfrac12$ against a closed-form case.
-    `centre_misfit` differs from `misfit_mean` by exactly
+    `center_misfit` differs from `misfit_mean` by exactly
     $\tfrac{J-1}{2J}\operatorname{tr}(W\widehat{C}_{vv}W^\top)$ — a divisor
     the derivation gets wrong easily and which no tolerance-based test would
-    catch. `misfits` and `centre_misfit` are recovered from the evaluation's
+    catch. `misfits` and `center_misfit` are recovered from the evaluation's
     stored `whitened_residuals` alone, and the whitened prediction anomalies
     recovered from it agree with $-W A_v$.
 12. **Reproducibility and resumption.** The same initial state and policies
@@ -2756,7 +2756,7 @@ written independently of the code under test. The suite must verify at least:
     policy-purity rule. `iterate` and `run` agree.
 13. **The optimization form.** On an affine problem, a run with
     `FixedSchedule.constant(1.0, n)` and `DiscrepancyStop` terminates, its
-    misfit decreases monotonically in the affine case, and its centre
+    misfit decreases monotonically in the affine case, and its center
     approaches the least-squares solution restricted to the initial
     ensemble's affine subspace — the correct target given
     {ref}`eki-subspace`, not the unrestricted minimizer.
@@ -2764,7 +2764,7 @@ written independently of the code under test. The suite must verify at least:
     **compiles a bounded number of times, independent of the number of
     steps** (asserted against a compilation counter, not inspected by eye) —
     the executable form of the traced-increment requirement; flatten and
-    unflatten preserve type and behaviour for all three pytree classes, with
+    unflatten preserve type and behavior for all three pytree classes, with
     sentinel leaves; families report their batch shape, take the
     `vmapped(...)` repr, and refuse every method.
 15. **The history stacks.** `result.stacked` yields a `HistoryRecord` with
@@ -2838,7 +2838,7 @@ written independently of the code under test. The suite must verify at least:
     is checked against an independently recomputed value: `step` and `beta`
     against the state entering the step, `beta_next` against the state
     leaving it, `increment` against their difference, and `misfit_mean`,
-    `misfit_min`, `misfit_max`, `centre_misfit`, `spread` (which carries the
+    `misfit_min`, `misfit_max`, `center_misfit`, `spread` (which carries the
     evaluation's `rms_parameter_spread`), `n_valid` and `ess` against NumPy
     over the model's recorded input and output. Exact where the quantity is
     exact. {ref}`eki-diagnostics` calls a record field that could disagree with
@@ -2928,7 +2928,7 @@ written independently of the code under test. The suite must verify at least:
     returned ensemble in the run's dtype; a `float64` model on a `float64` run
     warns not at all; an integer model raises. The "exactly once" is the
     load-bearing half: a per-step warning left to the caller's filter is a
-    different behaviour that passes any test asserting only that a warning
+    different behavior that passes any test asserting only that a warning
     was seen.
 
 30. **The evaluation and update counts are pinned on every termination path.**
@@ -3048,7 +3048,7 @@ document its shape agreement once.
 Not excluded because it could not be a pytree — `EKIResult` is already a plain
 frozen dataclass on the ground that it never crosses a trace boundary, and a
 `Problem` would qualify the same way. Excluded because three arguments are not
-many, the container would carry no behaviour, and every call site taking the
+many, the container would carry no behavior, and every call site taking the
 triple would then accept either form or force a conversion. The shape agreement
 it would document is validated once per run anyway ({ref}`eki-driver`). Revisit
 if a fourth element joins the triple.

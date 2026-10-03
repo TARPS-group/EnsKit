@@ -36,7 +36,7 @@ Conventions shared by everything in the module:
   and receives a concrete ``jax.Array`` — never a tracer — so it may do
   anything Python can do. It may return any array-like; a real floating
   dtype is required, and one narrower than the run's is promoted with a
-  warning. Failure is signalled by non-finite predictions: a wrapper around
+  warning. Failure is signaled by non-finite predictions: a wrapper around
   a model that may crash, time out or lose a worker must catch that itself
   and return a non-finite row.
 - **Progress is reported through the standard library's** :mod:`logging`, on
@@ -46,7 +46,7 @@ Conventions shared by everything in the module:
 
 Notes
 -----
-The behaviour of this module is specified by the "Ensemble Kalman Inversion
+The behavior of this module is specified by the "Ensemble Kalman Inversion
 contract" page of the documentation, which is normative.
 
 One step synchronizes with the device a small fixed number of times —
@@ -142,7 +142,7 @@ def evaluate(
         case the ensemble passes through bit-exactly. Keyword-only.
     on_failure
         ``"repair"`` (the default) to replace failed members by the valid
-        centre, or ``"raise"`` to raise :class:`~enskit.eki.EKIError` on any
+        center, or ``"raise"`` to raise :class:`~enskit.eki.EKIError` on any
         failure. Keyword-only.
 
     Returns
@@ -755,7 +755,7 @@ def _drive(
         if n_valid < state.n_members:
             logger.warning(
                 "step %d: %d of %d members' predictions were finite; the rest "
-                "were repaired to the valid centre",
+                "were repaired to the valid center",
                 evaluation.step,
                 n_valid,
                 state.n_members,
@@ -905,7 +905,7 @@ def _record(evaluation: Evaluation, increment: Array) -> HistoryRecord:
         misfit_mean=jnp.mean(misfits),
         misfit_min=jnp.min(misfits),
         misfit_max=jnp.max(misfits),
-        centre_misfit=evaluation.centre_misfit,
+        center_misfit=evaluation.center_misfit,
         spread=evaluation.rms_parameter_spread,
         ess=effective_sample_size(misfits, increment),
     )
@@ -1074,7 +1074,7 @@ def _check_on_failure(on_failure) -> None:
             f"on_failure: must be one of {_ON_FAILURE}, got {on_failure!r}. An "
             f"unrecognized value raises rather than falling back to 'repair': a "
             f"typo such as 'Raise' must not quietly select the opposite "
-            f"behaviour."
+            f"behavior."
         )
 
 

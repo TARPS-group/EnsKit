@@ -6,7 +6,7 @@ step, and a record of what happened.
 
 This page is about *when and why* to reach for each piece. The
 {doc}`../eki-contract` reference page specifies exactly *what* each one does,
-and is the place to look for precise shapes, error behaviour, and the
+and is the place to look for precise shapes, error behavior, and the
 mathematics of the two adaptive criteria.
 
 ## The shortest complete run
@@ -279,7 +279,7 @@ forward model that may crash, time out, or lose a worker must catch that itself
 and return a non-finite row** for the affected members. An exception that
 escapes the callable propagates out of the driver and stops the run.
 
-By default failed members are *repaired* — moved to the valid members' centre,
+By default failed members are *repaired* — moved to the valid members' center,
 with the valid members left exactly where they were. The ensemble size never
 changes, so no downstream shape becomes dynamic. The cost is that the step
 conditions on a covariance damped by $(J_v - 1)/(J - 1)$, which is exactly the
@@ -370,7 +370,7 @@ current = evaluate(s, forward, y, noise_cov)
 while not done(current):
     trial, record = assimilate(s, current, increment=delta, y=y, noise_cov=noise_cov)
     probe = evaluate(trial, forward, y, noise_cov)
-    if probe.centre_misfit < current.centre_misfit:
+    if probe.center_misfit < current.center_misfit:
         s, current, delta = trial, probe, delta * 1.5   # accept, lengthen
     else:
         delta = delta / 2                               # reject, reuse `current`
@@ -406,7 +406,7 @@ except EKIError as exc:
 ```
 
 There is no `"max_steps"` status, because exceeding `max_steps` **raises**: a
-sampling run that silently returned an ensemble at $\beta = 0.7$ labelled as a
+sampling run that silently returned an ensemble at $\beta = 0.7$ labeled as a
 posterior is the failure the two termination booleans exist to expose.
 `max_steps` bounds the steps of *this call*, not `state.step`, so a
 resumed run gets the allowance you asked for.

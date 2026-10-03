@@ -41,7 +41,7 @@ a bare function has nowhere to put an attribute.
 
 Notes
 -----
-The behaviour these checks verify is specified by the "Ensemble Kalman
+The behavior these checks verify is specified by the "Ensemble Kalman
 Inversion contract" page of the documentation.
 
 The four policy checks each take a policy and a small
@@ -409,7 +409,7 @@ def check_forward_model(
     ============================================ ============================
     checked                                      not checked
     ============================================ ============================
-    the return is array-like of shape ``(J, N)`` failure signalling on your
+    the return is array-like of shape ``(J, N)`` failure signaling on your
     at two ensemble sizes                        model's own error paths
     the return's dtype is real floating and no   whether a non-finite row
     narrower than the argument's                 *should* have been produced

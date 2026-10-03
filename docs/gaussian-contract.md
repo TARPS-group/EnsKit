@@ -202,7 +202,7 @@ chosen independently, one of $C_{uu}$ and one of $C_{vv}$, say nothing at
 all about $C_{uv}$; the pair must come from one factorization of $F F^\top$.
 The latent width $k$ is otherwise unconstrained.
 
-A factor is **centred** when $F\mathbf{1}_k = 0$. That is a property of the
+A factor is **centered** when $F\mathbf{1}_k = 0$. That is a property of the
 representation, not of the distribution, and it is what makes the latent
 index a sample index ({ref}`gauss-empirical`).
 
@@ -226,9 +226,9 @@ V \in \mathbb{R}^{N \times \rho},\;
 $$
 
 with singular values $\sigma_1 \ge \dots \ge \sigma_\rho \ge 0$. For a
-centred factor, $S^\top \mathbf{1} = W F_v \mathbf{1} = 0$: the all-ones
+centered factor, $S^\top \mathbf{1} = W F_v \mathbf{1} = 0$: the all-ones
 direction is in the null space of $S^\top$, so every $\sigma_i > 0$ has
-$U_{\cdot i} \perp \mathbf{1}$. A factor read off $J$ samples is centred and
+$U_{\cdot i} \perp \mathbf{1}$. A factor read off $J$ samples is centered and
 so has rank at most $J - 1$, putting at least one singular value exactly at
 zero whenever $N \ge J$ — in exact arithmetic; floating point returns
 $O(\varepsilon \lVert S \rVert)$ instead. Every formula below is
@@ -306,10 +306,10 @@ $(\bar u, \bar v, F_u, F_v) \mapsto (\bar u + F_u w,\; F_u T)$, from one SVD.
 
 Two structural facts:
 
-- **The transform preserves centring**: $T\mathbf{1} = \mathbf{1}$
+- **The transform preserves centering**: $T\mathbf{1} = \mathbf{1}$
   (each $U_{\cdot i}$ with $\sigma_i > 0$ is orthogonal to $\mathbf{1}$, and
-  the modifier vanishes at $\sigma_i = 0$), so a centred factor conditions
-  to a centred factor and the posterior mean is not silently shifted.
+  the modifier vanishes at $\sigma_i = 0$), so a centered factor conditions
+  to a centered factor and the posterior mean is not silently shifted.
   In floating point the numerically-zero $\sigma$'s $U$ column need not be
   orthogonal to $\mathbf{1}$; the property survives because the modifier
   decays *quadratically*: the induced mean shift is
@@ -327,16 +327,16 @@ residual — from one `whiten_mat` call on the stacked columns
 $[F_v \mid y - \bar v]$. At $k = J$ that is the $J + 1$ a sample update
 spends.
 
-Centring and differencing **must** happen before the whitener is applied. The
+Centering and differencing **must** happen before the whitener is applied. The
 two orders agree in exact arithmetic and not in stability, the error growing
 with $\kappa(W) = \sqrt{\kappa(R)}$ when $\bar v$ lies along a precise
 direction of the noise ({doc}`joint-factor` derives the ratio and measures
 it). Holding a factor rather than samples settles the first half
-structurally — the factor is centred at construction — leaving only the mean
+structurally — the factor is centered at construction — leaving only the mean
 residual, which is differenced before whitening.
 
 Two pathwise routes have deliberately different costs. Transporting the
-realizations a centred factor already holds
+realizations a centered factor already holds
 ({ref}`gauss-empirical`) gets each whitened residual from the whitened factor,
 $W(y - v_j) = W(y - \bar v) - \sqrt{J-1}\,S_{j\cdot}$, for $J + 1$
 applications in total; what must **not** be done there is whitening the factor
@@ -365,7 +365,7 @@ matrix functions of their array arguments — no divisor, no whitening, and no
 randomness folded in. They exist as the layer's *advanced tier*: the class
 methods cover the global update, and domain localization (the planned
 `enskit.localize`) calls these directly, once per local analysis, under
-`jax.vmap` over fixed-size neighbourhoods.
+`jax.vmap` over fixed-size neighborhoods.
 
 | function | signature | returns |
 | -------- | --------- | ------- |
@@ -396,7 +396,7 @@ Rules:
   there — `gain_weights` equals the rational $s(s^\top s + I)^{-1}b$, and
   `sqrt_transform` is real-analytic, the spectrum of $I + ss^\top$ being
   bounded below by 1. The
-  float-generic degeneracy of centring ($\sigma_{\min} \sim
+  float-generic degeneracy of centering ($\sigma_{\min} \sim
   10^{-16}$ when $N \ge k$) is not an exact tie and differentiates
   finitely. No conditioning path in this layer *requires* differentiation
   with respect to `s` ({ref}`gauss-jax`) — a caller who differentiates an
@@ -406,10 +406,10 @@ Rules:
   required to; note that for `sqrt_transform` that means a Fréchet
   derivative of $A \mapsto A^{-1/2}$, materially more work than
   `gain_weights`'s rational form.
-- `sqrt_transform` imposes no centring requirement on `s`. The
+- `sqrt_transform` imposes no centering requirement on `s`. The
   $T\mathbf{1} = \mathbf{1}$ property of {ref}`gauss-kernel` follows from
   $s^\top\mathbf{1} = 0$, which holds exactly when the factor the whitening
-  came from is centred; on general `s` the transform is still
+  came from is centered; on general `s` the transform is still
   $(I + ss^\top)^{-1/2}$, and $T\mathbf{1}$ is whatever that matrix makes it.
 - Both return values are functions of `s` alone, invariant to the SVD's
   sign and degenerate-rotation freedom — they equal the closed forms of
@@ -471,7 +471,7 @@ withholds `solve`, `whiten` and `logdet`, so {meth}`log_density` raises
 `UnsupportedOpError` on the result. That is correct rather than restrictive: a
 density against a singular covariance is not defined.
 
-Anomalies are formed with the same centring the conditioning methods use
+Anomalies are formed with the same centering the conditioning methods use
 ({ref}`gauss-empirical`), so identical samples give exactly zero spread rather
 than round-off.
 
@@ -609,7 +609,7 @@ $$
 which reproduces all three blocks exactly and forms none of them. It
 validates exact rank 2 on both blocks, agreement of the sample axes, and
 $J \ge 2$ (a single sample has no anomalies; shape-only, so tier 2 and
-unconditional). The factor it builds is **centred**, $F\mathbf{1}_J = 0$,
+unconditional). The factor it builds is **centered**, $F\mathbf{1}_J = 0$,
 because anomalies sum to zero — the property {ref}`gauss-empirical` depends
 on. The result is a Gaussian *fit to* the samples, not the equal-weight
 point-mass distribution of the samples themselves.
@@ -790,7 +790,7 @@ The joint Gaussian fitted to these samples' moments: exactly
 
 This call is the layer's one crossing from samples to a distribution, and it
 is deliberately explicit. Conditioning a set of samples means conditioning a
-Gaussian fitted to their moments; that fit is a modelling step, and it
+Gaussian fitted to their moments; that fit is a modeling step, and it
 belongs in the caller's source text rather than inside a method name.
 
 The conversion **loses nothing**. With the mean kept and a factor of width
@@ -802,19 +802,19 @@ $$
 
 a conformance obligation, and the same identity `transform_update` uses on
 the *conditioned* factor. So the map from a sample set to a mean and a
-centred width-$J$ factor is a bijection. What the conversion drops is the
+centered width-$J$ factor is a bijection. What the conversion drops is the
 *interpretation* of the latent index as a sample index — which is why the two
 updates below live here and not on the joint.
 
 The joint must be **derived on each call, not stored**. Holding both
 representations would hold the same numbers twice, and the derivation is an
-$O(J(P+N))$ centre-and-scale that fuses under `jit`.
+$O(J(P+N))$ center-and-scale that fuses under `jit`.
 
 ### `transform_update(y, noise_cov)`
 
 The deterministic (square-root) update: the fitted joint's posterior, read
 back as samples. Conditioning multiplies the factor on the right by $T$, and
-because the factor is centred so is $F_uT$, so its columns are again a
+because the factor is centered so is $F_uT$, so its columns are again a
 sample set:
 
 $$
@@ -842,14 +842,14 @@ than computing a second one.
 :::{important}
 **This reading is a method here, not a function of the posterior, and the
 reason is a precondition no type can carry.** It is valid exactly when the
-factor is centred. Applied to a joint built any other way — `from_linear_map`,
+factor is centered. Applied to a joint built any other way — `from_linear_map`,
 say — it returns, silently, a sample set whose mean is displaced by
 $\sqrt{k-1}\,F_uT\mathbf{1}_k/k$ and whose sample covariance falls short of
 the posterior's by the rank-one term
 $(F_uT\mathbf{1}_k)(F_uT\mathbf{1}_k)^\top/k$ — measured at 18% of the
 covariance's own scale. Held on the class that owns
-samples, centredness is structural: `from_samples` is the only constructor
-reachable from here, and it centres. Moved to `GaussianJoint`, it would be a
+samples, centeredness is structural: `from_samples` is the only constructor
+reachable from here, and it centers. Moved to `GaussianJoint`, it would be a
 value precondition detectable only in debug mode.
 
 Nor may `transform_update` take a sample set as an *argument*. Applying $T$
@@ -916,7 +916,7 @@ $$
 $$
 
 which in relative terms is $\sqrt{J}$ times looser than the mean's. The unbiasedness of the covariance
-is particular to the $J-1$ divisor, whose centring of the perturbations
+is particular to the $J-1$ divisor, whose centering of the perturbations
 cancels exactly. Individual pathwise samples are not posterior draws —
 conditional on the sample block, sample $j$ is distributed
 $\mathcal{N}\bigl(u_j + K(y - v_j),\, K R K^\top\bigr)$ — so no "exact in
@@ -1065,7 +1065,7 @@ machinery as operators, and every rule of the operator contract's JAX section
 - **Identity semantics**: `eq=False`, hash by identity, never
   `static_argnums` — a joint is always a traced argument.
 - **Constructors take the fields; classmethods take other inputs.**
-  `GaussianJoint.from_samples` centres and scales, and `from_linear_map`
+  `GaussianJoint.from_samples` centers and scales, and `from_linear_map`
   materializes $GL$; the plain constructor only stores.
   {ref}`gauss-joint` records why the SVD cannot live at construction either
   way.
@@ -1174,7 +1174,7 @@ exception).
 :::{important}
 **`enskit.eki` does not ship this construction, and the reason is worth
 recording here rather than only there.** The rescaling is applied to the
-*surviving* members too, so each is moved outward from the centre by a
+*surviving* members too, so each is moved outward from the center by a
 data-dependent factor at every step — $\sqrt{99/89} \approx 1.055$ at
 $J = 100$ with a tenth of the members failing, which is larger than the
 multiplicative inflation practitioners actually use, applied silently and by
@@ -1203,7 +1203,7 @@ prediction anomalies and residuals, build the local noise covariance as
 apply to its own $u$-anomalies. The primitives' array-purity, their
 one-SVD-per-call rule, and the block anatomy that
 {ref}`contract-composites` makes contractual are what this plan relies on.
-Two idioms make the fixed-size-neighbourhood plan exact. Zeroing column
+Two idioms make the fixed-size-neighborhood plan exact. Zeroing column
 $i$ of `s` and entry $i$ of each *whitened* residual is exactly the
 analysis in which whitened coordinate $i$ is absent — elementwise, for
 both primitives — so padded slots mask to exact no-ops under static
@@ -1212,8 +1212,8 @@ mix coordinate $i$ with the kept ones: for correlated noise a within-block
 mask is not an observation removal. Hence the second idiom: the per-block
 noise must align with the noise operator's contractual `block_shapes` —
 extracting a principal submatrix of a *correlated* block is not an
-operator-layer operation, so partial-block neighbourhoods require diagonal
-noise or block-aligned neighbourhoods.
+operator-layer operation, so partial-block neighborhoods require diagonal
+noise or block-aligned neighborhoods.
 
 **The test suite** holds the reference implementation. On small problems
 the dense Bayes formulas are written out in the tests themselves — plain
@@ -1321,7 +1321,7 @@ must verify at least:
    $\sigma = (10^{10}, 10^5, 1, 1, 1)$ they separate by eight orders of
    magnitude, which is the regime the check must use.
    It satisfies $T = T^\top$ for every
-   `s`, and $T\mathbf{1} = \mathbf{1}$ **for `s` from a centred factor**
+   `s`, and $T\mathbf{1} = \mathbf{1}$ **for `s` from a centered factor**
    ($s^\top\mathbf{1} = 0$) to a tolerance of
    $c_1 J \varepsilon + c_2 (\varepsilon \sigma_{\max})^2$; for general `s`
    no such identity holds ({ref}`gauss-primitives`). Both terms are
@@ -1378,7 +1378,7 @@ must verify at least:
    raises the same way, regardless of $k$ versus $P$.
 10. **Validation**: every tier-2 and tier-3 rule of
     {ref}`gauss-validation` raises as specified.
-11. **JAX round trips**: flatten/unflatten preserves type and behaviour for
+11. **JAX round trips**: flatten/unflatten preserves type and behavior for
     all three classes; the conditioning methods run under `jit`; constructing
     an `EmpiricalJoint` inside `vmap` round-trips and a `vmap`-ed family of
     joints agrees with a Python loop; sentinel-leaf unflattening succeeds.
@@ -1400,7 +1400,7 @@ must verify at least:
     `factor()` returned and materializes only the $v$ block, and whitens
     $k + 1$ vectors. `from_samples` reproduces all three moment blocks. The
     projection is lossless: $u_j = \bar u + \sqrt{J-1}(F_u)_{\cdot j}$
-    elementwise, and the factor it builds is centred. `from_factors` wraps a
+    elementwise, and the factor it builds is centered. `from_factors` wraps a
     bare array and leaves an operator alone.
 15. **The pathwise map**: `pathwise` equals the dense
     $u + K(y - v - W^{-1}\varepsilon)$ elementwise; on realizations of

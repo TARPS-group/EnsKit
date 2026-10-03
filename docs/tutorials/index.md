@@ -15,7 +15,7 @@ for tests, not for production.
 
 If you already know what you are looking for, the {doc}`../user-guide/quickstart`
 and the rest of the user guide are organized by question rather than by
-sequence, and the three contracts in the reference section specify behaviour
+sequence, and the three contracts in the reference section specify behavior
 exactly.
 
 ```{toctree}

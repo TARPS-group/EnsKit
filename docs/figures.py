@@ -111,7 +111,7 @@ JOINT_INDEX = 3
 #: default.
 TUTORIAL_1_UPDATE = PathwiseUpdate()
 
-# Colours. Deliberately few, and the same meaning on every figure. The prior
+# Colors. Deliberately few, and the same meaning on every figure. The prior
 # and everything derived from it before conditioning is blue; the answer, once
 # the data has been used, is green; the observation is red; a competing ladder
 # is purple and a collapsed fit indigo.
@@ -217,9 +217,9 @@ def _label_below(ax, ncol=3, y=-0.30, handles=None):
 
 
 def _reference_line(ax, level, label):
-    """A dashed reference level, labelled at its right-hand end.
+    """A dashed reference level, labeled at its right-hand end.
 
-    Labelled in place rather than in a legend: two panels carry different
+    Labeled in place rather than in a legend: two panels carry different
     reference levels, and one shared entry would have to describe both.
     """
     ax.axhline(level, color=C_TARGET, lw=1.1, ls="--", zorder=1)
@@ -312,7 +312,7 @@ def _box_around(mean, sd, half_widths=3.6):
 
 
 def _square_box(mean, sd, half_widths=3.5):
-    """A plotting box with equal sides, centred on ``mean``.
+    """A plotting box with equal sides, centered on ``mean``.
 
     A row of panels drawn at equal aspect lines up only if their boxes have
     the same shape, so a sequence of them is sized from the larger of the two
@@ -493,7 +493,7 @@ def _draw_curves(ax, predictions, color, alpha=0.3):
 
 
 def _arrow_between(fig, left, right, label):
-    """Draw ``label`` over an arrow centred in the gap between two axes.
+    """Draw ``label`` over an arrow centered in the gap between two axes.
 
     The positions are read after a draw, so an axes whose aspect ratio was
     fixed — which shrinks it inside its gridspec cell — is still measured
@@ -509,13 +509,13 @@ def _arrow_between(fig, left, right, label):
     # its own box, and a gap measured without it runs the arrow through.
     gap_lo = left.get_tightbbox(renderer).transformed(inverse).x1
     gap_hi = right.get_tightbbox(renderer).transformed(inverse).x0
-    centre = 0.5 * (gap_lo + gap_hi)
+    center = 0.5 * (gap_lo + gap_hi)
     half = 0.36 * (gap_hi - gap_lo)
     y = 0.5 * (right.get_position().y0 + right.get_position().y1)
     fig.add_artist(
         FancyArrowPatch(
-            (centre - half, y),
-            (centre + half, y),
+            (center - half, y),
+            (center + half, y),
             transform=fig.transFigure,
             arrowstyle="simple,head_width=5.5,head_length=7,tail_width=1.4",
             facecolor="#7b848d",
@@ -524,7 +524,7 @@ def _arrow_between(fig, left, right, label):
         )
     )
     fig.text(
-        centre,
+        center,
         y + 0.045,
         label,
         ha="center",
@@ -752,7 +752,7 @@ BRIDGE_LEVELS = (0.0, 0.001, 0.01, 0.1, 1.0)
 
 
 def _blend(start, end, fraction):
-    """A colour ``fraction`` of the way from ``start`` to ``end``."""
+    """A color ``fraction`` of the way from ``start`` to ``end``."""
     from matplotlib.colors import to_hex, to_rgb
 
     a, b = np.asarray(to_rgb(start)), np.asarray(to_rgb(end))
@@ -803,7 +803,7 @@ def tempering_bridge():
         ax.locator_params(nbins=4)
         # Equal aspect at every level, so that the shapes the caption talks
         # about -- a curved ridge early, a tilted ellipse late -- are the
-        # shapes the distributions have rather than artefacts of the panel.
+        # shapes the distributions have rather than artifacts of the panel.
         ax.set_aspect("equal")
 
     # constrained layout, so that the shared axis labels are placed against
@@ -821,7 +821,7 @@ def bridge_tracked():
     """The bridge again, with the ensemble the run actually produced on it.
 
     One panel per level of the default adaptive ladder, exact contours in the
-    reference grey with that level's members over them. The question the
+    reference gray with that level's members over them. The question the
     figure answers is how well the ensemble tracks the distribution it is
     meant to represent, so the panels are scaled to hold both.
     """
@@ -1009,7 +1009,7 @@ def trajectories():
         ax.set_xlabel("step")
         ax.set_title(title)
 
-    # The two reference levels are labelled where they are drawn: one legend
+    # The two reference levels are labeled where they are drawn: one legend
     # covering both would have to give them the same entry, and they mean
     # different things in different panels.
     _reference_line(axes[0], PROBLEM.v_dim / 2, "$N/2$")
@@ -1081,8 +1081,8 @@ def two_forms():
     ax = axes[0]
     post_mean, post_sd = _tempered_moments(1.0)
     box = _box_around(post_mean, post_sd, 4.5)
-    # The target density is drawn in the reference grey rather than in either
-    # form's own colour: it is what both are being measured against.
+    # The target density is drawn in the reference gray rather than in either
+    # form's own color: it is what both are being measured against.
     _draw_contours(ax, 1.0, box, color=C_TARGET)
     _cloud(ax, sampled.ensemble, C_ENSEMBLE)
     _cloud(ax, stopped.ensemble, C_ALT)

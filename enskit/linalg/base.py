@@ -55,7 +55,7 @@ public methods are defined once, here: they refuse vmapped families (see
 :class:`LinOp`), check the capability gate, validate the operand, and
 dispatch to the hook, which receives the operand unchanged — batch axes
 included. Use :func:`dense_matvec` and :func:`tri_solve` for the array work
-so the shape convention is honoured, mark non-array fields with
+so the shape convention is honored, mark non-array fields with
 :func:`static_field`, and validate every new operator with
 :func:`enskit.linalg.testing.check_operator`.
 
@@ -258,7 +258,7 @@ def _pytree_dataclass(cls: type) -> type:
     The implementation behind :func:`linop`, under a name that does not imply
     the decorated class is a linear operator: ``enskit.gauss`` declares its
     distribution classes with this. Not exported — :func:`linop` is the public
-    name, and the behaviour is documented there.
+    name, and the behavior is documented there.
     """
     cls = dataclass(frozen=True, eq=False, repr=False)(cls)
     try:
@@ -347,7 +347,7 @@ def linop(cls: type) -> type:
 
 
 # ---------------------------------------------------------------------------
-# array helpers honouring the batch contract
+# array helpers honoring the batch contract
 # ---------------------------------------------------------------------------
 
 

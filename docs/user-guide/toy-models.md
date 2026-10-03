@@ -105,7 +105,7 @@ mean to fail more members and see where repair stops being adequate; it must
 stay below the true rate of 1.5, or the observation would have been generated
 where the model does not evaluate.
 
-The failure here is signalled with `jnp.where`, which is the cheap version.
+The failure here is signaled with `jnp.where`, which is the cheap version.
 The realistic one is a wrapper that catches its own subprocess failures and
 returns non-finite rows: {doc}`writing-a-forward-model` works one through.
 

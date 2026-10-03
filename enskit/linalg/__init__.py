@@ -8,7 +8,7 @@ that is the sum over blocks rather than cubic in the total size.
 This is a lean layer aimed at what Ensemble Kalman Inversion needs — applying
 operators and their transposes, solving against them, and taking square roots
 to sample and whiten — rather than a general-purpose linear algebra library.
-Its behaviour is specified by the "Linear operator contract" page of the
+Its behavior is specified by the "Linear operator contract" page of the
 documentation.
 
 - :mod:`~enskit.linalg.base` defines the class hierarchy, the array-shape

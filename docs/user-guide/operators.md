@@ -1,4 +1,4 @@
-# Operator catalogue
+# Operator catalog
 
 ## The hierarchy
 
@@ -14,7 +14,7 @@ at all, rather than a `solve` that raises.
 | `PSDLinOp` | a symmetric positive semi-definite map | `factor`, `whiten`, `whiten_mat` |
 
 `rmatvec` applies the transpose, and `op.T` returns the transpose as an
-operator. The full behavioural specification is the
+operator. The full behavioral specification is the
 {doc}`../linop-contract` reference page.
 
 ## Operators defined by their own arrays
@@ -123,7 +123,7 @@ with debug_checks():
 
 `set_debug_checks(True)` enables them process-wide. The checks run only on
 concrete arrays and are skipped on traced values, so enabling them never
-changes `jit`-ed behaviour.
+changes `jit`-ed behavior.
 
 ## Conditional support
 

@@ -47,7 +47,7 @@ dl.py > dt {
 
 dl.py dd { margin-left: 1rem; }
 
-/* Admonitions: flatter, less candy-coloured. */
+/* Admonitions: flatter, less candy-colored. */
 .admonition { border-radius: 4px; box-shadow: none; border-left-width: 3px; }
 .admonition > .admonition-title { font-weight: 600; }
 

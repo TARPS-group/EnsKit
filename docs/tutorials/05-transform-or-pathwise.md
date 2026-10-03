@@ -42,7 +42,7 @@ how they produce the spread.
   for the default. Its errors are unbiased across keys rather than systematic,
   and averaging over keys is available to it.
 - Both rules are two lines over `enskit.gauss`, and the reason the square-root
-  reading is valid only for a centred ensemble is in
+  reading is valid only for a centered ensemble is in
   {doc}`../user-guide/conditioning` and {doc}`../joint-factor`. Link; do not
   reproduce.
 

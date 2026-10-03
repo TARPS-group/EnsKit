@@ -23,7 +23,7 @@ dimension is too large for a dense covariance to fit in memory.
 - What an operator is: a matrix represented by how it acts on vectors, so
   structure is used rather than materialized. A `PSDDiagonal` of length one
   million applies in linear time; the dense equivalent does not fit in memory.
-- The catalogue as a reader needs it, not exhaustively: `PSDDiagonal`,
+- The catalog as a reader needs it, not exhaustively: `PSDDiagonal`,
   `DensePSD`, `Identity`, `PSDLowRank`, and `block_diag` for the common
   independent-plus-correlated case.
 - The batch-axis rule — leading batch axes, core operand shape trailing — and
@@ -66,8 +66,8 @@ audience, since the operator layer is usable without the rest of the package.
 So this page is not the operator layer's reference. It leads with the reader's
 own problem — correlated observations, a non-diagonal prior, a covariance too
 large to store — introduces only the operators that problem needs, and links
-to the quickstart and {doc}`../user-guide/operators` for the catalogue. Do not
-restate the catalogue here; that is how the two pages drift apart.
+to the quickstart and {doc}`../user-guide/operators` for the catalog. Do not
+restate the catalog here; that is how the two pages drift apart.
 :::
 
 Never write `M @ x` when demonstrating application: for arrays of two or more

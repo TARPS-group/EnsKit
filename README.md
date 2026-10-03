@@ -111,7 +111,7 @@ noise.whiten(y)      # applied block by block
 <https://tarps-group.github.io/pyEKI/>
 
 Start with the tutorials, which build up from a first inversion; the user guide
-answers "when and why" for each choice; the contracts specify behaviour
+answers "when and why" for each choice; the contracts specify behavior
 normatively.
 
 ## License

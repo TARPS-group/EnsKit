@@ -71,7 +71,7 @@ The eleven fields answer four different questions.
 | field | what it tells you |
 | --- | --- |
 | `step`, `beta`, `increment`, `beta_next` | **where on the ladder** this step was, and how far it went |
-| `misfit_mean`, `misfit_min`, `misfit_max`, `centre_misfit` | **how well the members fit the observations** |
+| `misfit_mean`, `misfit_min`, `misfit_max`, `center_misfit` | **how well the members fit the observations** |
 | `spread`, `ess` | **whether the ensemble can still describe its target** |
 | `n_valid` | **whether the forward model worked** |
 
@@ -217,14 +217,14 @@ that ended because the ladder finished, the last step produced the returned
 ensemble and the loop then ended, so the returned ensemble has never been
 through the model.
 
-## The centre's misfit is not the average misfit
+## The center's misfit is not the average misfit
 
-`centre_misfit` is the misfit of the ensemble's mean prediction. It is a
+`center_misfit` is the misfit of the ensemble's mean prediction. It is a
 different number from the average of the members' misfits, and the difference
 is large:
 
 ```python
-evaluation.centre_misfit      # 4.6065
+evaluation.center_misfit      # 4.6065
 evaluation.misfits.mean()     # 6.7961
 ```
 
@@ -241,7 +241,7 @@ It is 2.1896 here, and accounts for the difference to the last digit. It
 shrinks as the ensemble collapses, so the two numbers converge in the
 optimization form and stay apart in the sampling form.
 
-Use `centre_misfit` when you want to know how well the answer's centre fits,
+Use `center_misfit` when you want to know how well the answer's center fits,
 and `misfit_mean` when you want to know how well a typical member fits. They
 are not interchangeable, and a reader who compares them expecting agreement
 will go looking for a bug.

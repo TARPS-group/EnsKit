@@ -7,8 +7,8 @@
 ## enskit.linalg
 
 Structured linear operators. See {doc}`../user-guide/operators` for the
-catalogue with costs, {doc}`../user-guide/writing-an-operator` for adding a
-new structure, and {doc}`../linop-contract` for the full behavioural
+catalog with costs, {doc}`../user-guide/writing-an-operator` for adding a
+new structure, and {doc}`../linop-contract` for the full behavioral
 contract.
 
 ### Base classes
@@ -88,7 +88,7 @@ contract.
 
 Joint Gaussian distributions and conditioning. See
 {doc}`../user-guide/conditioning` for when to use each piece, and
-{doc}`../gaussian-contract` for the full behavioural contract.
+{doc}`../gaussian-contract` for the full behavioral contract.
 
 ```{eval-rst}
 .. automodule:: enskit.gauss
@@ -123,7 +123,7 @@ Joint Gaussian distributions and conditioning. See
 
 Ensemble Kalman Inversion: the ladder, the policies that shape it, and the
 run. See {doc}`../user-guide/running-an-inversion` for when to use each piece,
-and {doc}`../eki-contract` for the full behavioural contract.
+and {doc}`../eki-contract` for the full behavioral contract.
 
 ```{eval-rst}
 .. automodule:: enskit.eki
@@ -137,7 +137,7 @@ and {doc}`../eki-contract` for the full behavioural contract.
    :members: from_prior, restart, n_members, u_dim, mean, batch_shape
 
 .. autoclass:: enskit.eki.Evaluation
-   :members: misfits, centre_misfit, n_members, u_dim, v_dim, batch_shape
+   :members: misfits, center_misfit, n_members, u_dim, v_dim, batch_shape
 
 .. autoclass:: enskit.eki.HistoryRecord
    :members: batch_shape

@@ -12,7 +12,7 @@ function                       computes
 :func:`effective_sample_size`  the effective sample size of the tempering
                                weights :math:`e^{-\\delta\\Phi}`
 :func:`repair_failed_members`  the mean-preserving repair that moves failed
-                               members to the valid centre
+                               members to the valid center
 ============================== =============================================
 
 The misfit carries the factor :math:`\\tfrac12` and is measured against the
@@ -22,7 +22,7 @@ the convention is fixed in exactly one place.
 
 Notes
 -----
-The behaviour of this module is specified by the "Ensemble Kalman Inversion
+The behavior of this module is specified by the "Ensemble Kalman Inversion
 contract" page of the documentation, which is normative.
 """
 from __future__ import annotations
@@ -181,7 +181,7 @@ def effective_sample_size(misfits, increment) -> Array:
 
 
 def repair_failed_members(*, ensemble, predictions, valid):
-    """Move failed members to the valid centre.
+    """Move failed members to the valid center.
 
     ``(J, P), (J, N), (J,) bool -> (J, P), (J, N)``.
 
@@ -193,7 +193,7 @@ def repair_failed_members(*, ensemble, predictions, valid):
         u_j \\longmapsto \\hat u + m_j (u_j - \\hat u) ,
 
     and identically for :math:`v_j`: **failed members are moved to the valid
-    centre and valid members are left exactly where they are**, bit for bit.
+    center and valid members are left exactly where they are**, bit for bit.
     The ensemble size is unchanged, so every downstream shape stays static.
 
     Parameters

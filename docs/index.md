@@ -124,7 +124,7 @@ diagnostics.
 :::
 
 :::{grid-item-card} Reference
-The normative contracts specifying each layer's behaviour exactly, the design
+The normative contracts specifying each layer's behavior exactly, the design
 notes, and the API.
 +++
 {doc}`api/index`

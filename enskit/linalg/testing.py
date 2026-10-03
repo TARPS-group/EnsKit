@@ -202,11 +202,11 @@ def check_core(op: LinOp, key) -> None:
 
 
 def check_transpose(op: LinOp, key) -> None:
-    """Check ``T`` and ``T.T``: the dense forms, and full behaviour of each.
+    """Check ``T`` and ``T.T``: the dense forms, and full behavior of each.
 
     ``T`` must densify to the dense transpose and ``T.T`` to the operator's
     own dense form. Each is then checked as an operator in its own right —
-    core behaviour, solve, scalars, and capability honesty — so a
+    core behavior, solve, scalars, and capability honesty — so a
     structured ``T`` override cannot ship a broken ``solve`` or ``logdet``
     behind a correct dense form. Either one that is the operator itself (as
     ``T`` is for a PSD operator, and ``T.T`` for a ``Transposed`` view) is
@@ -287,7 +287,7 @@ def check_whiten(op: LinOp, key) -> None:
     Recovers ``W`` by applying ``whiten`` to the columns of the identity,
     then requires ``W A W^T == I`` and *elementwise* agreement of
     ``whiten(x)`` with ``W x`` at the batch shapes of :func:`check_core` —
-    which pins linearity, per-instance fixedness, and batch behaviour at
+    which pins linearity, per-instance fixedness, and batch behavior at
     once. ``whiten_mat`` is compared columnwise against ``whiten``, never
     against any particular factorization, which the contract does not
     promise.
@@ -549,7 +549,7 @@ def _compare(got: dict, want: dict, what: str) -> None:
 
 
 def check_pytree(op: LinOp, key, *, other: LinOp | None = None) -> None:
-    """Check pytree behaviour of every supported operation.
+    """Check pytree behavior of every supported operation.
 
     Each operation — the application methods, ``to_dense``, ``solve``,
     ``solve_mat``, ``logdet``, ``diag``, ``factor().to_dense()``,

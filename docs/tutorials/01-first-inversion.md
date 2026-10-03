@@ -149,7 +149,7 @@ $$m_0 = [1, 1]^{\top}, \qquad C_0 = I_2, \qquad
 
 In EnsKit a covariance is represented as a **linear operator**: an object
 defined by how it acts on vectors rather than by a stored matrix. See
-{doc}`../user-guide/operators` for the catalogue and
+{doc}`../user-guide/operators` for the catalog and
 {doc}`06-covariances-as-operators` for details. For now we use `PSDDiagonal`,
 which represents a diagonal covariance matrix.
 
@@ -237,7 +237,7 @@ Those two shapes — `(64, 2)` in, `(64, 12)` out — are the convention above,
 with $J = 64$.
 
 ```{figure} ../_generated/figures/01-prior-predictive.png
-:alt: Left, contours of the prior over amplitude and decay rate with 64 members drawn from it. An arrow labelled G leads to the right panel, which shows the predicted decay curves those members produce, against the twelve observations.
+:alt: Left, contours of the prior over amplitude and decay rate with 64 members drawn from it. An arrow labeled G leads to the right panel, which shows the predicted decay curves those members produce, against the twelve observations.
 :width: 100%
 
 Left, the prior's one-, two- and three-standard-deviation contours in the
@@ -298,7 +298,7 @@ alternative transforms the ensemble deterministically instead; see
 {doc}`05-transform-or-pathwise` for details.
 
 ```{figure} ../_generated/figures/01-one-step.png
-:alt: Left, the true posterior's contours over amplitude and decay rate with the 64 members produced by one conditioning step. An arrow labelled G leads to the right panel, which shows those members' predicted decay curves with the observations overlaid.
+:alt: Left, the true posterior's contours over amplitude and decay rate with the 64 members produced by one conditioning step. An arrow labeled G leads to the right panel, which shows those members' predicted decay curves with the observations overlaid.
 :width: 100%
 
 The analogs of the above plots, but now showing posterior rather than prior
@@ -451,7 +451,7 @@ struggles the most during the first step. As we predicted above, the curvature
 present at the second distribution presents a challenge.
 
 ```{figure} ../_generated/figures/01-answer.png
-:alt: Left, the true posterior's contours over amplitude and decay rate with the 64 members from the completed run. An arrow labelled G leads to the right panel, which shows their predicted decay curves with the observations overlaid.
+:alt: Left, the true posterior's contours over amplitude and decay rate with the 64 members from the completed run. An arrow labeled G leads to the right panel, which shows their predicted decay curves with the observations overlaid.
 :width: 100%
 
 The final results. Left: the contours of the true posterior and the EKI
@@ -487,8 +487,8 @@ weights = jnp.exp(log_density - log_density.max())
 weights = weights / weights.sum()
 
 exact_mean = (weights[:, None] * grid).sum(axis=0)
-centred = grid - exact_mean
-exact_cov = (weights[:, None] * centred).T @ centred
+centered = grid - exact_mean
+exact_cov = (weights[:, None] * centered).T @ centered
 
 exact_mean                            # [1.9769  1.4719]
 jnp.sqrt(jnp.diag(exact_cov))         # [0.0366  0.0317]

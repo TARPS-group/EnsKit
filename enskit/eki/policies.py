@@ -30,7 +30,7 @@ shipped                               is
 :class:`AdaptiveMisfitSchedule`       adaptive tempering on the noise level
 :class:`DiscrepancyStop`              Morozov's discrepancy principle
 :class:`MultiplicativeInflation`      scales the ensemble's anomalies
-:class:`AdditiveInflation`            adds centred draws from a covariance
+:class:`AdditiveInflation`            adds centered draws from a covariance
 ===================================== ======================================
 
 Conventions shared by everything in the module:
@@ -50,7 +50,7 @@ Conventions shared by everything in the module:
 
 Notes
 -----
-The behaviour of this module is specified by the "Ensemble Kalman Inversion
+The behavior of this module is specified by the "Ensemble Kalman Inversion
 contract" page of the documentation, which is normative, and the sources the
 shipped policies reproduce are listed there.
 
@@ -700,7 +700,7 @@ class AdaptiveMisfitSchedule:
 
 @_pytree_dataclass
 class DiscrepancyStop:
-    """Morozov's discrepancy principle: stop once the centre fits to the noise.
+    """Morozov's discrepancy principle: stop once the center fits to the noise.
 
     Fires as soon as
 
@@ -709,7 +709,7 @@ class DiscrepancyStop:
         2\\,\\Phi(\\bar v) \\;\\le\\; \\tau^2 N ,
 
     where :math:`\\bar v` is the **mean prediction** and :math:`\\Phi(\\bar
-    v)` is the evaluation's ``centre_misfit``.
+    v)` is the evaluation's ``center_misfit``.
 
     Parameters
     ----------
@@ -726,7 +726,7 @@ class DiscrepancyStop:
     The scaling is the natural one. At the true parameter the whitened
     residual is the whitened noise, so :math:`2\\Phi` is a :math:`\\chi^2_N`
     variate with mean :math:`N` and standard deviation :math:`\\sqrt{2N}`:
-    :math:`\\tau = 1` stops when the centre's residual reaches the size the
+    :math:`\\tau = 1` stops when the center's residual reaches the size the
     noise alone explains in expectation, and
     :math:`\\tau^2 = 1 + k\\sqrt{2/N}` puts the threshold :math:`k` standard
     deviations above that, values up to about :math:`\\tau = 2` being the
@@ -761,7 +761,7 @@ class DiscrepancyStop:
     def __call__(self, evaluation: Evaluation) -> bool:
         """Whether :math:`2\\Phi(\\bar v) \\le \\tau^2 N`."""
         threshold = self.tau**2 * evaluation.v_dim
-        return bool(2.0 * evaluation.centre_misfit <= threshold)
+        return bool(2.0 * evaluation.center_misfit <= threshold)
 
     def __repr__(self) -> str:
         """As ``DiscrepancyStop(tau=1.0)``."""
@@ -842,7 +842,7 @@ class MultiplicativeInflation:
 
 @_pytree_dataclass
 class AdditiveInflation:
-    """Add centred draws from a covariance to the ensemble.
+    """Add centered draws from a covariance to the ensemble.
 
     With :math:`P` the parameter dimension and :math:`J` the ensemble size,
 
@@ -851,7 +851,7 @@ class AdditiveInflation:
         pert = Gaussian(jnp.zeros(P), cov).sample(key, J)
         ensemble + (pert - pert.mean(axis=0))
 
-    The perturbations are centred, so the ensemble mean is preserved exactly
+    The perturbations are centered, so the ensemble mean is preserved exactly
     and the empirical covariance is inflated by ``cov`` in expectation under
     the :math:`J-1` divisor. It is the only shipped mechanism that moves the
     ensemble out of the affine subspace its initial members span.
@@ -971,7 +971,7 @@ def _clamp(schedule, unclamped: Array, beta: Array) -> Array:
 def _bisect_ess(misfits: Array, delta_hi: Array, target, n_bisect: int) -> Array:
     """Bisect ``[0, delta_hi]`` for the largest increment meeting the target.
 
-    The cap-binds case is folded in **branchlessly**, by initialising ``lo``
+    The cap-binds case is folded in **branchlessly**, by initializing ``lo``
     to ``delta_hi`` when the top of the bracket already meets the target and
     letting the loop run unchanged. That is not an optimization: without it a
     degenerate ensemble reaches the largest allowed step only to

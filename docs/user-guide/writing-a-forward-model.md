@@ -53,7 +53,7 @@ ordinary Python loop, which is equally legal.
 | **return** | any array-like of shape `(J, N)`: a `jax.Array`, a NumPy array, or a nested Python list |
 | **dtype** | a real floating dtype; a narrower one than the run's is promoted, with a warning |
 | **rows** | row `j` of the return depends only on row `j` of the argument |
-| **failure** | signalled by a **non-finite row**, never by an exception |
+| **failure** | signaled by a **non-finite row**, never by an exception |
 | **exceptions** | the callable owns its own; anything that escapes stops the run |
 
 Nothing else — see [what is not required](#what-is-not-required).
@@ -111,7 +111,7 @@ predictions have a mean-to-spread ratio of `1e4`, and promotion halves it.
 Return `float64` where you can. Where you cannot, the run is still legitimate
 and the warning is telling you the price.
 
-## Signalling failure
+## Signaling failure
 
 A member is *failed* when its prediction row contains any non-finite entry.
 That is the entire signal, and it puts one real obligation on the wrapper:
@@ -124,7 +124,7 @@ escaping the callable propagates out of the driver and stops the run — worse
 than a `nan` row, which the layer knows how to handle.
 :::
 
-Failed members are repaired to the valid members' centre by default;
+Failed members are repaired to the valid members' center by default;
 `on_failure="raise"` turns any failure into an `EKIError`. Either way, fewer
 than two valid members raises.
 
@@ -229,7 +229,7 @@ def forward(ensemble):
 
 Three details matter. **The result starts as `nan`**, so a member is
 valid only if something wrote over its row — every path that produces no
-prediction is already a correctly signalled failure, which is what keeps the
+prediction is already a correctly signaled failure, which is what keeps the
 `except` clause short enough to be right. **The `except` names its own
 failures** rather than catching everything, so a bug in the wrapper still
 reaches you. **Stale outputs are deleted first**, so a solver that exits zero

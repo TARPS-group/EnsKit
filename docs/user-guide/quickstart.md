@@ -67,7 +67,7 @@ The `k` in `matmat` is part of the core shape, not a batch axis, and neither
 method infers which you meant from the number of dimensions.
 
 A batch of *operators* is a different thing from a batch of operands, and it
-is built with `jax.vmap` — see {ref}`operator-batches` in the catalogue.
+is built with `jax.vmap` — see {ref}`operator-batches` in the catalog.
 
 ## Composing operators
 
@@ -146,8 +146,8 @@ densify(op).solve(b)         # explicit dense fallback, with a size guard
 
 ## Next steps
 
-- {doc}`operators` — the full catalogue and what each one costs.
+- {doc}`operators` — the full catalog and what each one costs.
 - {doc}`conditioning` — the Gaussian layer built on these operators.
 - {doc}`writing-an-operator` — adding a new structure.
-- {doc}`../linop-contract` — the precise behavioural contract.
+- {doc}`../linop-contract` — the precise behavioral contract.
 - {doc}`../design` — why the interface looks the way it does.

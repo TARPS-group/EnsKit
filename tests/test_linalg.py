@@ -1,7 +1,7 @@
 """Targeted regression and exactness tests for the structured-operator layer.
 
 Conformance lives in ``test_conformance.py``; this file holds one test per
-class of bug that produces wrong numbers or silent misbehaviour without
+class of bug that produces wrong numbers or silent misbehavior without
 raising, plus exactness checks against closed forms. Do not delete these as
 redundant with conformance — they document why the contract's rules exist.
 """

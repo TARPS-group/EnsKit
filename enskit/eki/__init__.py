@@ -84,7 +84,7 @@ Conventions shared by everything in the layer:
 
 Notes
 -----
-The behaviour of this layer is specified by the "Ensemble Kalman Inversion
+The behavior of this layer is specified by the "Ensemble Kalman Inversion
 contract" page of the documentation, which is normative; the user guide's
 "Running an inversion" page explains when to reach for each piece.
 

@@ -6,7 +6,7 @@ implementation must satisfy. It is normative — an implementation that
 violates a rule here is defective even if its tests pass — and it is the
 reference for two audiences: contributors writing or reviewing operators,
 and users who want a more precise account of the layer than the
-{doc}`user-guide/operators` catalogue gives.
+{doc}`user-guide/operators` catalog gives.
 
 Throughout, *must* and *never* state requirements, *should* states a strong
 default that a documented reason may override, and *may* states a
@@ -57,7 +57,7 @@ Three rules govern the hierarchy:
    PSD subclasses `PSDLinOp`, even when some inherited operations have no
    cheap implementation for it.
 2. **Capabilities are monotone.** A subclass never removes or disables an
-   operation its base class provides. If a would-be subclass cannot honour
+   operation its base class provides. If a would-be subclass cannot honor
    an inherited operation *in principle*, the subclass relationship is
    wrong, not the operation. (Whether an operation has a *cheap
    implementation* is a separate, per-instance question — see
@@ -276,7 +276,7 @@ elements otherwise. Hooks would stay written for the unbatched case (the
 batching lives once, in the public layer), constructors would stay
 strict, and the upgrade is backward compatible by construction: code that
 was correct under the guard only ever saw `batch_shape == ()`, so turning
-errors into behaviour breaks nothing.
+errors into behavior breaks nothing.
 
 It is deferred, not rejected, for three reasons: no planned consumer
 calls operations on a family directly (every roadmap use applies families
@@ -300,11 +300,11 @@ Every operation comes in two parts:
   implement and which may assume a valid operand.
 
 Operator authors implement hooks only. This makes operand validation
-impossible to forget, gives every operator identical error behaviour, and
+impossible to forget, gives every operator identical error behavior, and
 gives the capability system ({ref}`contract-capabilities`) a single
 enforcement point.
 
-Three clauses pin the division of labour:
+Three clauses pin the division of labor:
 
 - **Hooks receive the operand unchanged, batch axes included.** The public
   method validates and passes the array through as-is; every hook
@@ -496,7 +496,7 @@ Choose one representation per $\varepsilon$.
 
 There is deliberately no `cholesky()` in the contract. Its two former
 roles are covered: sampling by `factor()`, whitening by `whiten()`. A
-guaranteed-triangular accessor cannot be honoured by exactly the operators
+guaranteed-triangular accessor cannot be honored by exactly the operators
 that matter (a block-diagonal factor is not triangular; the exponential
 correlation's factor is dense), so the promise would be either broken or a
 dense fallback in disguise. Operators for which the natural factor *is*
@@ -787,7 +787,7 @@ explicitly separated data and metadata:
   `__init__`/`__post_init__` run only where code constructs an operator
   explicitly. Consequences: constructor validation may be strict without
   breaking JAX's reconstruction boundaries, boundaries pay no validation
-  cost, and behaviour must never live in the constructor — the fields are
+  cost, and behavior must never live in the constructor — the fields are
   the whole state.
 - `eq=False`: operators compare by identity. Dataclass equality would
   compare arrays elementwise and raise on the ambiguous truth value.
@@ -976,7 +976,7 @@ per-element scaled operators**, with no error at all. `LinOp` therefore
 sets `__array_ufunc__ = None`, which makes NumPy defer as well. Operators
 must never define `__jax_array__`: it would make `x @ op` silently
 densify instead of deferring. The conformance suite pins the deferral
-behaviour for both array libraries.
+behavior for both array libraries.
 
 ### Scalar scaling: `c * op`, `op * c`, `op / c`
 
@@ -1094,7 +1094,7 @@ enough to densify, before it is merged. It must verify at least:
    of $I_n$, (a) $W A W^\top \approx I_n$, and (b) `whiten(x)` agrees
    **elementwise** with $Wx$ on random operands at batch ranks 0, 1 and 2.
    The elementwise form is deliberate: it pins linearity, per-instance
-   fixedness of $W$, and batch-rank behaviour at once, and it implies
+   fixedness of $W$, and batch-rank behavior at once, and it implies
    $\lVert Wx\rVert^2 = x^\top A^{-1} x$ (for square invertible $W$,
    $W^\top W = A^{-1}$) — whereas the norm identity alone is satisfied by
    maps that are not a fixed matrix at all. No comparison against any
@@ -1130,7 +1130,7 @@ enough to densify, before it is merged. It must verify at least:
     `ValueError`, as does an operand of insufficient rank. The
     uncontracted `k` axis is unconstrained and must not raise.
 11. **Pytree round trip**, for **every supported operation**, not only
-    `matvec`: flatten/unflatten preserves type and behaviour; unflattening
+    `matvec`: flatten/unflatten preserves type and behavior; unflattening
     with bare `object()` sentinel leaves succeeds for every operator type,
     composites included; each operation works under `jit` with the
     operator passed as a traced argument (which catches a factorization
@@ -1207,6 +1207,6 @@ solve would make `solve`'s contract untestable.
 returns new arrays. This is the only sane convention under JAX.
 
 **A general operator algebra.** The layer grows one structure at a time,
-when EKI needs it. The catalogue of shipped operators lives in
+when EKI needs it. The catalog of shipped operators lives in
 {doc}`user-guide/operators`; this contract constrains *how* any of them
 behave, not *which* exist.

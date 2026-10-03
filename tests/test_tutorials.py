@@ -22,8 +22,8 @@ an ensemble pairable with the distribution it belongs to; and that the grid
 reference the pages compare against is converged, which is the only reason a
 nonlinear problem has a reference at all.
 
-The identity behind the ``centre_misfit`` gap is *not* re-tested here — it is
-``tests/test_eki.py::test_11_the_centre_misfit_differs_from_the_mean_by_exactly_the_spread_term``.
+The identity behind the ``center_misfit`` gap is *not* re-tested here — it is
+``tests/test_eki.py::test_11_the_center_misfit_differs_from_the_mean_by_exactly_the_spread_term``.
 This file pins only the numbers tutorial 2 prints.
 """
 from __future__ import annotations
@@ -183,8 +183,8 @@ def test_1_tutorial_1_blocks_run():
     weights = weights / weights.sum()
 
     exact_mean = (weights[:, None] * grid).sum(axis=0)
-    centred = grid - exact_mean
-    exact_cov = (weights[:, None] * centred).T @ centred
+    centered = grid - exact_mean
+    exact_cov = (weights[:, None] * centered).T @ centered
 
     prints_as(exact_mean, [1.9769, 1.4719])
     prints_as(jnp.sqrt(jnp.diag(exact_cov)), [0.0366, 0.0317])
@@ -254,7 +254,7 @@ def test_1_tutorial_2_blocks_run():
         "misfit_mean",
         "misfit_min",
         "misfit_max",
-        "centre_misfit",
+        "center_misfit",
         "spread",
         "ess",
     ):
@@ -267,9 +267,9 @@ def test_1_tutorial_2_blocks_run():
 
     evaluation = result.last_evaluation
     prints_as(evaluation.misfits[:4], [5.0189, 29.4126, 4.9678, 4.7952])
-    prints_as(evaluation.centre_misfit, 4.6065)
+    prints_as(evaluation.center_misfit, 4.6065)
     prints_as(evaluation.misfits.mean(), 6.7961)
-    prints_as(evaluation.misfits.mean() - evaluation.centre_misfit, 2.1896)
+    prints_as(evaluation.misfits.mean() - evaluation.center_misfit, 2.1896)
 
     # The page's plotting block. matplotlib is on the Agg backend, since
     # importing `figures` above set it.
@@ -342,12 +342,12 @@ def test_1_tutorial_3_blocks_run():
     assert fit.n_evaluations == 4
     assert fit.n_completed_steps == 3
     prints_as(fit.mean, [1.9819, 1.4758])
-    prints_as(fit.stacked.centre_misfit, [9654.0285, 577.3526, 6.5196, 4.5978])
+    prints_as(fit.stacked.center_misfit, [9654.0285, 577.3526, 6.5196, 4.5978])
     # The page reads the threshold off those values: 6.52 above, 4.60 below.
     threshold = 1.0**2 * problem.v_dim / 2
     assert threshold == 6.0
-    assert float(fit.stacked.centre_misfit[-2]) > threshold
-    assert float(fit.stacked.centre_misfit[-1]) <= threshold
+    assert float(fit.stacked.center_misfit[-2]) > threshold
+    assert float(fit.stacked.center_misfit[-1]) <= threshold
 
     trap = run(
         state,

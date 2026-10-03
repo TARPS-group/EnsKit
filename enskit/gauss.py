@@ -60,7 +60,7 @@ every method and array-computing property until it is applied under
 
 Notes
 -----
-The behaviour of this module is specified by the "Joint Gaussian contract"
+The behavior of this module is specified by the "Joint Gaussian contract"
 page of the documentation, which is normative; the user guide's
 "Conditioning" page explains when to reach for each piece.
 
@@ -196,7 +196,7 @@ def gain_weights(s: Array, b: Array) -> Array:
     nonzero. At exactly repeated or exactly zero singular values — an
     exactly collapsed ``s``, or the zero-padded columns a masked local
     analysis may produce — the SVD's gradient is ``nan`` even though this
-    function is smooth there, equalling the rational form above. The
+    function is smooth there, equaling the rational form above. The
     float-generic degeneracy of mean-centering (:math:`\\sigma_{\\min} \\sim
     10^{-16}` when :math:`N \\ge k`) is not an exact tie and differentiates
     finitely.
@@ -260,10 +260,10 @@ def sqrt_transform(s: Array) -> Array:
 
     Notes
     -----
-    :math:`T\\mathbf{1} = \\mathbf{1}` — so a centred factor stays centred
+    :math:`T\\mathbf{1} = \\mathbf{1}` — so a centered factor stays centered
     and the posterior mean is not silently shifted — follows from
     :math:`s^\\top \\mathbf{1} = 0`, which holds exactly when the factor the
-    whitening came from is centred. A factor read off a sample set is, which
+    whitening came from is centered. A factor read off a sample set is, which
     is what makes :meth:`EmpiricalJoint.transform_update` a sample-to-sample
     map. On general ``s``, :math:`T\\mathbf{1}` is whatever that matrix makes
     it.
@@ -398,7 +398,7 @@ class Gaussian:
         correct rather than restrictive: a density against a singular
         covariance is not defined.
 
-        Anomalies are formed with the same centring the conditioning methods
+        Anomalies are formed with the same centering the conditioning methods
         use, so identical samples give exactly zero spread rather than
         round-off, and the cancellation is governed by the spread rather than
         by the magnitude.
@@ -795,7 +795,7 @@ class GaussianJoint:
 
         Notes
         -----
-        The factor this builds is **centred**, :math:`F\\mathbf{1}_J = 0`,
+        The factor this builds is **centered**, :math:`F\\mathbf{1}_J = 0`,
         because anomalies sum to zero. That is what makes the latent index a
         sample index and lets :class:`EmpiricalJoint` read updated samples
         off a conditioned factor; see
@@ -1386,7 +1386,7 @@ class EmpiricalJoint:
         why the two updates below live here and not on the joint.
 
         The joint is derived on each call, not stored. It is an
-        :math:`O(J(P+N))` centre-and-scale that fuses under ``jit``, and
+        :math:`O(J(P+N))` center-and-scale that fuses under ``jit``, and
         holding both representations would hold the same numbers twice.
         """
         _check_not_vmap_family(self, "to_gaussian_joint")
@@ -1399,7 +1399,7 @@ class EmpiricalJoint:
 
         The posterior of the fitted joint Gaussian, read back as samples.
         Conditioning multiplies the factor on the right by :math:`T =
-        \\texttt{sqrt\\_transform}(S)`, and because that factor is centred
+        \\texttt{sqrt\\_transform}(S)`, and because that factor is centered
         the conditioned one is too, so its columns are again a sample set:
 
         .. math::
@@ -1448,7 +1448,7 @@ class EmpiricalJoint:
         This is exactly ``to_gaussian_joint().condition(y, noise_cov)``
         followed by the reading above, sharing that method's single
         decomposition. It is a method here, rather than a function of the
-        returned posterior, because the reading is valid only for a centred
+        returned posterior, because the reading is valid only for a centered
         factor. On a joint built any other way it returns, silently, a
         sample set whose mean is displaced by :math:`\\sqrt{k-1}\\,F_uT
         \\mathbf{1}_k/k` and whose sample covariance falls short of the
@@ -1908,7 +1908,7 @@ def _transform_from_svd(U: Array, sigma: Array, latent_dim: int) -> Array:
     whenever :math:`\\rho < k`.
 
     :math:`T\\mathbf{1} = \\mathbf{1}` survives floating point for a
-    centred factor because the modifier decays *quadratically*: the
+    centered factor because the modifier decays *quadratically*: the
     numerically-zero singular value's column of :math:`U` need not be
     orthogonal to :math:`\\mathbf{1}`, but its modifier is
     :math:`O(\\sigma_i^2)`, so the induced mean shift is

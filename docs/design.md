@@ -122,7 +122,7 @@ kernel above and parallelizes cleanly.
 
 Two hazards worth designing against. Parameters with no location — globally
 shared ones — must be exempt from tapering, or the pooling that makes them
-global is silently destroyed. And local neighbourhoods must be fixed-size with
+global is silently destroyed. And local neighborhoods must be fixed-size with
 a validity mask, since variable-size domains cannot be vectorized.
 
 ## Structured covariance results
