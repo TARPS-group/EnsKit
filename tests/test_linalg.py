@@ -312,18 +312,18 @@ def test_composites_over_psd_low_rank_intersect_its_capabilities():
     for op in wrapped:
         assert op.capabilities() == frozenset({"diag", "factor"}), repr(op)
         args = {
-            "solve": (jnp.ones(op.n),),
-            "solve_mat": (jnp.ones((op.n, 2)),),
+            "solve": (jnp.ones(op.dim),),
+            "solve_mat": (jnp.ones((op.dim, 2)),),
             "logdet": (),
-            "whiten": (jnp.ones(op.n),),
-            "whiten_mat": (jnp.ones((op.n, 2)),),
+            "whiten": (jnp.ones(op.dim),),
+            "whiten_mat": (jnp.ones((op.dim, 2)),),
         }
         for name, operands in args.items():
             assert not op.supports(name)
             with pytest.raises(UnsupportedOpError):
                 getattr(op, name)(*operands)
         L = np.asarray(op.factor().to_dense())
-        assert L.shape[0] == op.n and L.shape[1] < op.n  # singular, and says so
+        assert L.shape[0] == op.dim and L.shape[1] < op.dim  # singular, and says so
         np.testing.assert_allclose(L @ L.T, np.asarray(op.to_dense()), atol=1e-12)
 
 

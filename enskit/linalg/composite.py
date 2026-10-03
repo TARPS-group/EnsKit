@@ -225,7 +225,7 @@ class SquareScaled(Scaled, SquareLinOp):
         return self.op._solve_mat(B) / self.c
 
     def _logdet(self) -> Array:
-        return self.n * jnp.log(jnp.abs(self.c)) + self.op._logdet()
+        return self.dim * jnp.log(jnp.abs(self.c)) + self.op._logdet()
 
     def _diag(self) -> Array:
         return self.c * self.op._diag()
@@ -545,7 +545,7 @@ class PSDDiagCongruence(PSDLinOp):
     op
         The PSD operator to rescale.
     scale
-        Per-coordinate scale vector of length ``op.n``, strictly positive.
+        Per-coordinate scale vector of length ``op.dim``, strictly positive.
     """
 
     op: PSDLinOp
@@ -673,7 +673,7 @@ def diag_congruence(op: PSDLinOp, scale) -> PSDDiagCongruence:
     op
         The PSD operator to rescale.
     scale
-        Per-coordinate scale vector of length ``op.n``, strictly positive.
+        Per-coordinate scale vector of length ``op.dim``, strictly positive.
     """
     if not isinstance(op, PSDLinOp):
         raise TypeError(

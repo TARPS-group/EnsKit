@@ -79,7 +79,7 @@ then columns, matching the dense array `to_dense()` returns.
   information (stored array shapes, static integer fields). It is therefore
   a concrete tuple of Python ints even under `jit`, and is usable in shape
   arithmetic, `jnp.split` points, and Python-level branches.
-- `SquareLinOp` adds `n`, the side length, equal to both entries of
+- `SquareLinOp` adds `dim`, the side length, equal to both entries of
   `shape`.
 - **Operators are unbatched.** Every stored array has exactly its core
   rank: a `Dense` stores a 2-D array, a `PSDDiagonal` a 1-D array. Every
@@ -252,7 +252,7 @@ family child; the `Transposed` view is the one composite a family may
 wrap. This *family guard* runs
 before the capability gate, which runs before operand validation.
 Introspection stays available, because introspection is how a family is
-recognized: `shape` (the core shape), `n`, `batch_shape`, `supports`,
+recognized: `shape` (the core shape), `dim`, `batch_shape`, `supports`,
 `capabilities`, and the `T` property (a view whose `batch_shape` is the
 wrapped operator's) all work on families — structured `T` overrides
 included, which must rebuild through the constructor-bypassing path

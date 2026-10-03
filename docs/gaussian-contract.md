@@ -437,9 +437,8 @@ The size properties across the layer follow one rule: a dimension is named
 `dim`, qualified by its block where there is more than one — `Gaussian.dim`,
 against `EmpiricalJoint`'s `u_dim` and `v_dim` and `GaussianJoint`'s `u_dim`,
 `v_dim` and `latent_dim`. Counts keep the `n_` prefix, as `n_samples` does.
-The operator layer one level down names a single dimension `n`
-({class}`~enskit.linalg.SquareLinOp`); this layer does not follow it, because
-`dim` is the name its multi-block objects already needed.
+The operator layer one level down follows the same rule: a square operator's
+side length is {attr}`SquareLinOp.dim <enskit.linalg.SquareLinOp.dim>`.
 
 **Capabilities delegate to the covariance.** `Gaussian` defines no
 capability system of its own: each method requires specific operations of

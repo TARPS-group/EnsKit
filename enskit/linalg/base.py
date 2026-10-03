@@ -976,7 +976,7 @@ class SquareLinOp(LinOp):
     """A square linear map, for which an inverse and determinant are defined."""
 
     @property
-    def n(self) -> int:
+    def dim(self) -> int:
         """Side length of the operator."""
         return self.shape[0]
 
@@ -1014,7 +1014,7 @@ class SquareLinOp(LinOp):
         """
         self._check_not_vmap_family("solve")
         self._require("solve")
-        return self._solve(_check_vec(self, "solve", b, self.n))
+        return self._solve(_check_vec(self, "solve", b, self.dim))
 
     def solve_mat(self, B) -> Array:
         """Solve ``A X = B`` for a matrix right-hand side.
@@ -1041,7 +1041,7 @@ class SquareLinOp(LinOp):
         """
         self._check_not_vmap_family("solve_mat")
         self._require("solve_mat")
-        return self._solve_mat(_check_mat(self, "solve_mat", B, self.n))
+        return self._solve_mat(_check_mat(self, "solve_mat", B, self.dim))
 
     def logdet(self) -> Array:
         """Return the log magnitude of the determinant, ``log |det A|``.
@@ -1169,7 +1169,7 @@ class PSDLinOp(SquareLinOp):
         """
         self._check_not_vmap_family("whiten")
         self._require("whiten")
-        return self._whiten(_check_vec(self, "whiten", x, self.n))
+        return self._whiten(_check_vec(self, "whiten", x, self.dim))
 
     def whiten_mat(self, X) -> Array:
         """Whiten a matrix operand: ``W X`` for the same ``W`` as :meth:`whiten`.
@@ -1196,7 +1196,7 @@ class PSDLinOp(SquareLinOp):
         """
         self._check_not_vmap_family("whiten_mat")
         self._require("whiten_mat")
-        return self._whiten_mat(_check_mat(self, "whiten_mat", X, self.n))
+        return self._whiten_mat(_check_mat(self, "whiten_mat", X, self.dim))
 
 
 # ---------------------------------------------------------------------------
