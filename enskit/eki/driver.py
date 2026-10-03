@@ -208,57 +208,6 @@ def evaluate(
     return evaluation
 
 
-def _evaluate(state, forward, y, noise_cov, inflation, on_failure, v_dim):
-    """Operations 1-5 of a step, with the problem already validated.
-
-    Returns the evaluation, the valid-member count as a Python ``int`` — which
-    the driver needs for its warning and which would otherwise have to be read
-    back off the device — and the dtype the predictions arrived in when that
-    required a promotion, or ``None`` when it did not.
-    """
-    _, key_inflate, _ = _split_key(state.key)
-
-    members = state.ensemble
-    if inflation is not None:
-        members = jnp.asarray(
-            inflation(
-                key_inflate, ensemble=members, step=state.step, beta=state.beta
-            )
-        )
-        if members.shape != state.ensemble.shape:
-            raise ValueError(
-                f"evaluate: the inflation returned shape {members.shape}, "
-                f"expected {state.ensemble.shape}. An Inflation is shape "
-                f"preserving."
-            )
-        if members.dtype != state.ensemble.dtype:
-            raise ValueError(
-                f"evaluate: the inflation returned dtype {members.dtype}, "
-                f"expected {state.ensemble.dtype}. These members are what the "
-                f"forward model is called on and what the Evaluation carries, "
-                f"so a narrower or non-floating one demotes the step's "
-                f"arithmetic with nothing else raising."
-            )
-
-    predictions, promoted_from = _check_predictions(
-        forward(members), state.n_members, v_dim, state.ensemble.dtype
-    )
-    members, predictions, n_valid = _handle_failures(
-        state, members, predictions, on_failure=on_failure
-    )
-    whitened_residuals, spread = _summarize(y, members, predictions, noise_cov)
-    evaluation = Evaluation(
-        step=state.step,
-        beta=state.beta,
-        ensemble=members,
-        predictions=predictions,
-        whitened_residuals=whitened_residuals,
-        rms_parameter_spread=spread,
-        n_valid=n_valid,
-    )
-    return evaluation, n_valid, promoted_from
-
-
 def assimilate(
     state: EKIState,
     evaluation: Evaluation,
@@ -348,45 +297,6 @@ def assimilate(
     dbeta = _check_increment("assimilate", increment)
     _check_provenance(state, evaluation)
     return _assimilate(state, evaluation, dbeta, y, noise_cov, update)
-
-
-def _assimilate(state, evaluation, dbeta, y, noise_cov, update):
-    """Operations 6-9 of a step, with the increment already validated."""
-    key_next, _, key_update = _split_key(state.key)
-    updated = jnp.asarray(
-        update(
-            key_update,
-            ensemble=evaluation.ensemble,
-            predictions=evaluation.predictions,
-            y=y,
-            noise_cov=noise_cov,
-            increment=dbeta,
-            step=state.step,
-            beta=state.beta,
-        )
-    )
-    if updated.shape != state.ensemble.shape:
-        raise ValueError(
-            f"assimilate: the update returned shape {updated.shape}, expected "
-            f"{state.ensemble.shape}"
-        )
-    if updated.dtype != state.ensemble.dtype:
-        raise ValueError(
-            f"assimilate: the update returned dtype {updated.dtype}, expected "
-            f"{state.ensemble.dtype}. A float32 update quietly demotes a run's "
-            f"precision, and every downstream check still passes at its own "
-            f"tolerance."
-        )
-    if not bool(jnp.all(jnp.isfinite(updated))):
-        raise EKIError(
-            f"assimilate: the update returned a non-finite ensemble at step "
-            f"{state.step}, beta {float(state.beta):g}. Silent nan propagation "
-            f"through a long run is the worst outcome available to this layer, "
-            f"so it is raised here rather than carried forward.",
-            state=state,
-        )
-    new_state = EKIState(updated, state.beta + dbeta, state.step + 1, key_next)
-    return new_state, _record(evaluation, dbeta)
 
 
 def advance(
@@ -834,6 +744,96 @@ def _ladder_finished(schedule, step: int, beta) -> bool:
 # ---------------------------------------------------------------------------
 # private: the array work of one step
 # ---------------------------------------------------------------------------
+
+
+def _evaluate(state, forward, y, noise_cov, inflation, on_failure, v_dim):
+    """Operations 1-5 of a step, with the problem already validated.
+
+    Returns the evaluation, the valid-member count as a Python ``int`` — which
+    the driver needs for its warning and which would otherwise have to be read
+    back off the device — and the dtype the predictions arrived in when that
+    required a promotion, or ``None`` when it did not.
+    """
+    _, key_inflate, _ = _split_key(state.key)
+
+    members = state.ensemble
+    if inflation is not None:
+        members = jnp.asarray(
+            inflation(
+                key_inflate, ensemble=members, step=state.step, beta=state.beta
+            )
+        )
+        if members.shape != state.ensemble.shape:
+            raise ValueError(
+                f"evaluate: the inflation returned shape {members.shape}, "
+                f"expected {state.ensemble.shape}. An Inflation is shape "
+                f"preserving."
+            )
+        if members.dtype != state.ensemble.dtype:
+            raise ValueError(
+                f"evaluate: the inflation returned dtype {members.dtype}, "
+                f"expected {state.ensemble.dtype}. These members are what the "
+                f"forward model is called on and what the Evaluation carries, "
+                f"so a narrower or non-floating one demotes the step's "
+                f"arithmetic with nothing else raising."
+            )
+
+    predictions, promoted_from = _check_predictions(
+        forward(members), state.n_members, v_dim, state.ensemble.dtype
+    )
+    members, predictions, n_valid = _handle_failures(
+        state, members, predictions, on_failure=on_failure
+    )
+    whitened_residuals, spread = _summarize(y, members, predictions, noise_cov)
+    evaluation = Evaluation(
+        step=state.step,
+        beta=state.beta,
+        ensemble=members,
+        predictions=predictions,
+        whitened_residuals=whitened_residuals,
+        rms_parameter_spread=spread,
+        n_valid=n_valid,
+    )
+    return evaluation, n_valid, promoted_from
+
+
+def _assimilate(state, evaluation, dbeta, y, noise_cov, update):
+    """Operations 6-9 of a step, with the increment already validated."""
+    key_next, _, key_update = _split_key(state.key)
+    updated = jnp.asarray(
+        update(
+            key_update,
+            ensemble=evaluation.ensemble,
+            predictions=evaluation.predictions,
+            y=y,
+            noise_cov=noise_cov,
+            increment=dbeta,
+            step=state.step,
+            beta=state.beta,
+        )
+    )
+    if updated.shape != state.ensemble.shape:
+        raise ValueError(
+            f"assimilate: the update returned shape {updated.shape}, expected "
+            f"{state.ensemble.shape}"
+        )
+    if updated.dtype != state.ensemble.dtype:
+        raise ValueError(
+            f"assimilate: the update returned dtype {updated.dtype}, expected "
+            f"{state.ensemble.dtype}. A float32 update quietly demotes a run's "
+            f"precision, and every downstream check still passes at its own "
+            f"tolerance."
+        )
+    if not bool(jnp.all(jnp.isfinite(updated))):
+        raise EKIError(
+            f"assimilate: the update returned a non-finite ensemble at step "
+            f"{state.step}, beta {float(state.beta):g}. Silent nan propagation "
+            f"through a long run is the worst outcome available to this layer, "
+            f"so it is raised here rather than carried forward.",
+            state=state,
+        )
+    new_state = EKIState(updated, state.beta + dbeta, state.step + 1, key_next)
+    return new_state, _record(evaluation, dbeta)
 
 
 def _split_key(key):

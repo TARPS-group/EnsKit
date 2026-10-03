@@ -68,21 +68,6 @@ __all__ = [
 ]
 
 
-def _check_ops_tuple(cls_name: str, field_name: str, ops, required=LinOp) -> None:
-    """Structural check for a tuple-of-operators field."""
-    if not isinstance(ops, tuple):
-        raise TypeError(f"{cls_name}.{field_name} must be a tuple of operators")
-    if not ops:
-        raise ValueError(f"{cls_name} needs at least one operator")
-    for op in ops:
-        if not isinstance(op, required):
-            raise TypeError(
-                f"{cls_name} blocks must be {required.__name__}, "
-                f"got {type(op).__name__}"
-            )
-        _check_not_family(cls_name, op)
-
-
 # ---------------------------------------------------------------------------
 # views: transpose and scalar scaling
 # ---------------------------------------------------------------------------
@@ -613,16 +598,6 @@ class PSDDiagCongruence(PSDLinOp):
 # ---------------------------------------------------------------------------
 
 
-def _check_factory_args(name: str, ops: tuple) -> None:
-    if not ops:
-        raise ValueError(f"{name}() needs at least one operator")
-    for op in ops:
-        if not isinstance(op, LinOp):
-            raise TypeError(
-                f"{name}() arguments must be operators, got {type(op).__name__}"
-            )
-
-
 def block_diag(*blocks: LinOp) -> LinOp:
     """Build a block-diagonal operator, choosing the most capable class.
 
@@ -686,3 +661,33 @@ def diag_congruence(op: PSDLinOp, scale) -> PSDDiagCongruence:
             f"({op.shape[0]},), got {scale.shape}"
         )
     return PSDDiagCongruence(op, scale)
+
+
+# ---------------------------------------------------------------------------
+# private helpers
+# ---------------------------------------------------------------------------
+
+
+def _check_ops_tuple(cls_name: str, field_name: str, ops, required=LinOp) -> None:
+    """Structural check for a tuple-of-operators field."""
+    if not isinstance(ops, tuple):
+        raise TypeError(f"{cls_name}.{field_name} must be a tuple of operators")
+    if not ops:
+        raise ValueError(f"{cls_name} needs at least one operator")
+    for op in ops:
+        if not isinstance(op, required):
+            raise TypeError(
+                f"{cls_name} blocks must be {required.__name__}, "
+                f"got {type(op).__name__}"
+            )
+        _check_not_family(cls_name, op)
+
+
+def _check_factory_args(name: str, ops: tuple) -> None:
+    if not ops:
+        raise ValueError(f"{name}() needs at least one operator")
+    for op in ops:
+        if not isinstance(op, LinOp):
+            raise TypeError(
+                f"{name}() arguments must be operators, got {type(op).__name__}"
+            )

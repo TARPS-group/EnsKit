@@ -130,162 +130,6 @@ __all__ = [
 
 
 # ---------------------------------------------------------------------------
-# the conditioning primitives
-# ---------------------------------------------------------------------------
-
-
-def gain_weights(s: Array, b: Array) -> Array:
-    """Sample weights for a whitened residual: the shared conditioning core.
-
-    A pure matrix function of its arguments — no divisor, no whitening and no
-    randomness folded in. For the thin SVD :math:`s = U\\Sigma V^\\top`,
-
-    .. math::
-
-        \\texttt{gain\\_weights}(s, b)
-        = U \\operatorname{diag}\\!\\Bigl(\\frac{\\sigma_i}{1+\\sigma_i^2}\\Bigr)
-          V^\\top b
-        = s\\,(s^\\top s + I_N)^{-1} b ,
-
-    the second form showing that the result is a function of ``s`` alone,
-    invariant to the SVD's sign and degenerate-rotation freedom.
-
-    In conditioning, ``s`` is the whitened factor
-    :math:`S = (W F_v)^\\top` of the observed block and ``b`` a whitened
-    residual :math:`W r`, and the returned weights give the gain applied to
-    that residual as a combination of the other block's factor columns,
-    :math:`K r = F_u w`. The multipliers are bounded by
-    :math:`\\sigma/(1+\\sigma^2) \\le 1/2` for every :math:`\\sigma \\ge 0`,
-    so the gain cannot blow up however collapsed or ill-conditioned
-    :math:`s` becomes, and there is no regularization parameter to tune.
-
-    Parameters
-    ----------
-    s
-        Array of shape ``(k, N)``, exactly 2-D, both sizes at least 1. It
-        plays the operator's role and carries no batch axes; a family of
-        local analyses is a :func:`jax.vmap` over this function.
-    b
-        Array of shape ``(..., N)`` — whitened residuals along the trailing
-        axis, any number of leading batch axes, carried through.
-
-    Returns
-    -------
-    Array
-        Shape ``(..., k)``, the batch axes of ``b`` preserved.
-
-    Raises
-    ------
-    ValueError
-        If ``s`` is not 2-D with positive sizes, or ``b``'s trailing axis is
-        not ``N``. In debug mode, also if either is not finite.
-
-    Notes
-    -----
-    One SVD per call: batch the residuals of an update into a single call
-    rather than looping, since the :math:`J` per-sample residuals of a
-    stochastic update are one ``(J, N)`` operand.
-
-    Callers own the semantics of ``s`` and ``b``. The function cannot check
-    that they are whitened and read off a single joint factor as
-    conditioning requires, which is why the methods of
-    :class:`GaussianJoint` — where those conventions are enforced — are the
-    default interface and this is the escape hatch.
-
-    Differentiable wherever the singular values of ``s`` are distinct and
-    nonzero. At exactly repeated or exactly zero singular values — an
-    exactly collapsed ``s``, or the zero-padded columns a masked local
-    analysis may produce — the SVD's gradient is ``nan`` even though this
-    function is smooth there, equaling the rational form above. The
-    float-generic degeneracy of mean-centering (:math:`\\sigma_{\\min} \\sim
-    10^{-16}` when :math:`N \\ge k`) is not an exact tie and differentiates
-    finitely.
-    """
-    s = jnp.asarray(s)
-    if s.ndim != 2 or any(size < 1 for size in s.shape):
-        raise ValueError(
-            f"gain_weights: expected s of shape (k, N), exactly 2-D with both "
-            f"sizes at least 1, got shape {s.shape}"
-        )
-    b = _check_batched_operand("gain_weights", "b", b, s.shape[1])
-    _check_finite("gain_weights", "s", s)
-    _check_finite("gain_weights", "b", b)
-    U, sigma, Vt = _thin_svd(s)
-    return _weights_from_svd(U, sigma, Vt, b)
-
-
-def sqrt_transform(s: Array) -> Array:
-    """The deterministic square-root update transform: the shared conditioning core.
-
-    A pure matrix function of its argument. For the thin SVD
-    :math:`s = U\\Sigma V^\\top` with :math:`\\rho = \\min(k, N)`,
-
-    .. math::
-
-        \\texttt{sqrt\\_transform}(s) = (I_k + s s^\\top)^{-1/2}
-        = I_k + U\\bigl((I_\\rho + \\Sigma^2)^{-1/2} - I_\\rho\\bigr)U^\\top ,
-
-    which is symmetric, and exact at every rank: the second form is how it
-    is computed, and it is what this function returns for any correct thin
-    SVD, elementwise.
-
-    In conditioning, ``s`` is the whitened factor :math:`S = (W F_v)^\\top`
-    of the observed block, and multiplying the other block's factor on the
-    right by the result gives the posterior covariance exactly,
-
-    .. math::
-
-        \\bigl(F_u T\\bigr)\\bigl(F_u T\\bigr)^\\top = C_{uu} - K C_{vu} ,
-
-    an identity in exact arithmetic rather than an approximation. Neither
-    :math:`s s^\\top` nor :math:`s^\\top s` is formed.
-
-    Parameters
-    ----------
-    s
-        Array of shape ``(k, N)``, exactly 2-D, both sizes at least 1. No
-        batch axes, and no centering requirement: on general ``s`` the result
-        is still :math:`(I + ss^\\top)^{-1/2}`.
-
-    Returns
-    -------
-    Array
-        Shape ``(k, k)``, symmetric to round-off.
-
-    Raises
-    ------
-    ValueError
-        If ``s`` is not 2-D with positive sizes. In debug mode, also if it
-        is not finite.
-
-    Notes
-    -----
-    :math:`T\\mathbf{1} = \\mathbf{1}` — so a centered factor stays centered
-    and the posterior mean is not silently shifted — follows from
-    :math:`s^\\top \\mathbf{1} = 0`, which holds exactly when the factor the
-    whitening came from is centered. A factor read off a sample set is, which
-    is what makes :meth:`EmpiricalJoint.transform_update` a sample-to-sample
-    map. On general ``s``, :math:`T\\mathbf{1}` is whatever that matrix makes
-    it.
-
-    Differentiability carries the caveat documented on
-    :func:`gain_weights`; restoring gradients everywhere would need a
-    Fréchet derivative of :math:`A \\mapsto A^{-1/2}`, materially more work
-    than that function's rational form, and no conditioning path in this
-    layer requires it.
-    """
-    s = jnp.asarray(s)
-    if s.ndim != 2 or any(size < 1 for size in s.shape):
-        raise ValueError(
-            f"sqrt_transform: expected s of shape (k, N), exactly 2-D with both "
-            f"sizes at least 1, got shape {s.shape}"
-        )
-    _check_finite("sqrt_transform", "s", s)
-    U, sigma, _ = _thin_svd(s)
-    return _transform_from_svd(U, sigma, s.shape[0])
-
-
-# ---------------------------------------------------------------------------
 # a single Gaussian distribution
 # ---------------------------------------------------------------------------
 
@@ -1237,7 +1081,6 @@ class GaussianJoint:
         return mean, self.u_factor.matmat(transform)
 
 
-
 # ---------------------------------------------------------------------------
 # paired samples, and the two updates that carry them forward
 # ---------------------------------------------------------------------------
@@ -1576,6 +1419,162 @@ class EmpiricalJoint:
         except Exception:
             return "<EmpiricalJoint (unprintable leaves)>"
         return f"vmapped({base}, batch={batch})" if batch != () else base
+
+
+# ---------------------------------------------------------------------------
+# the conditioning primitives
+# ---------------------------------------------------------------------------
+
+
+def gain_weights(s: Array, b: Array) -> Array:
+    """Sample weights for a whitened residual: the shared conditioning core.
+
+    A pure matrix function of its arguments — no divisor, no whitening and no
+    randomness folded in. For the thin SVD :math:`s = U\\Sigma V^\\top`,
+
+    .. math::
+
+        \\texttt{gain\\_weights}(s, b)
+        = U \\operatorname{diag}\\!\\Bigl(\\frac{\\sigma_i}{1+\\sigma_i^2}\\Bigr)
+          V^\\top b
+        = s\\,(s^\\top s + I_N)^{-1} b ,
+
+    the second form showing that the result is a function of ``s`` alone,
+    invariant to the SVD's sign and degenerate-rotation freedom.
+
+    In conditioning, ``s`` is the whitened factor
+    :math:`S = (W F_v)^\\top` of the observed block and ``b`` a whitened
+    residual :math:`W r`, and the returned weights give the gain applied to
+    that residual as a combination of the other block's factor columns,
+    :math:`K r = F_u w`. The multipliers are bounded by
+    :math:`\\sigma/(1+\\sigma^2) \\le 1/2` for every :math:`\\sigma \\ge 0`,
+    so the gain cannot blow up however collapsed or ill-conditioned
+    :math:`s` becomes, and there is no regularization parameter to tune.
+
+    Parameters
+    ----------
+    s
+        Array of shape ``(k, N)``, exactly 2-D, both sizes at least 1. It
+        plays the operator's role and carries no batch axes; a family of
+        local analyses is a :func:`jax.vmap` over this function.
+    b
+        Array of shape ``(..., N)`` — whitened residuals along the trailing
+        axis, any number of leading batch axes, carried through.
+
+    Returns
+    -------
+    Array
+        Shape ``(..., k)``, the batch axes of ``b`` preserved.
+
+    Raises
+    ------
+    ValueError
+        If ``s`` is not 2-D with positive sizes, or ``b``'s trailing axis is
+        not ``N``. In debug mode, also if either is not finite.
+
+    Notes
+    -----
+    One SVD per call: batch the residuals of an update into a single call
+    rather than looping, since the :math:`J` per-sample residuals of a
+    stochastic update are one ``(J, N)`` operand.
+
+    Callers own the semantics of ``s`` and ``b``. The function cannot check
+    that they are whitened and read off a single joint factor as
+    conditioning requires, which is why the methods of
+    :class:`GaussianJoint` — where those conventions are enforced — are the
+    default interface and this is the escape hatch.
+
+    Differentiable wherever the singular values of ``s`` are distinct and
+    nonzero. At exactly repeated or exactly zero singular values — an
+    exactly collapsed ``s``, or the zero-padded columns a masked local
+    analysis may produce — the SVD's gradient is ``nan`` even though this
+    function is smooth there, equaling the rational form above. The
+    float-generic degeneracy of mean-centering (:math:`\\sigma_{\\min} \\sim
+    10^{-16}` when :math:`N \\ge k`) is not an exact tie and differentiates
+    finitely.
+    """
+    s = jnp.asarray(s)
+    if s.ndim != 2 or any(size < 1 for size in s.shape):
+        raise ValueError(
+            f"gain_weights: expected s of shape (k, N), exactly 2-D with both "
+            f"sizes at least 1, got shape {s.shape}"
+        )
+    b = _check_batched_operand("gain_weights", "b", b, s.shape[1])
+    _check_finite("gain_weights", "s", s)
+    _check_finite("gain_weights", "b", b)
+    U, sigma, Vt = _thin_svd(s)
+    return _weights_from_svd(U, sigma, Vt, b)
+
+
+def sqrt_transform(s: Array) -> Array:
+    """The deterministic square-root update transform: the shared conditioning core.
+
+    A pure matrix function of its argument. For the thin SVD
+    :math:`s = U\\Sigma V^\\top` with :math:`\\rho = \\min(k, N)`,
+
+    .. math::
+
+        \\texttt{sqrt\\_transform}(s) = (I_k + s s^\\top)^{-1/2}
+        = I_k + U\\bigl((I_\\rho + \\Sigma^2)^{-1/2} - I_\\rho\\bigr)U^\\top ,
+
+    which is symmetric, and exact at every rank: the second form is how it
+    is computed, and it is what this function returns for any correct thin
+    SVD, elementwise.
+
+    In conditioning, ``s`` is the whitened factor :math:`S = (W F_v)^\\top`
+    of the observed block, and multiplying the other block's factor on the
+    right by the result gives the posterior covariance exactly,
+
+    .. math::
+
+        \\bigl(F_u T\\bigr)\\bigl(F_u T\\bigr)^\\top = C_{uu} - K C_{vu} ,
+
+    an identity in exact arithmetic rather than an approximation. Neither
+    :math:`s s^\\top` nor :math:`s^\\top s` is formed.
+
+    Parameters
+    ----------
+    s
+        Array of shape ``(k, N)``, exactly 2-D, both sizes at least 1. No
+        batch axes, and no centering requirement: on general ``s`` the result
+        is still :math:`(I + ss^\\top)^{-1/2}`.
+
+    Returns
+    -------
+    Array
+        Shape ``(k, k)``, symmetric to round-off.
+
+    Raises
+    ------
+    ValueError
+        If ``s`` is not 2-D with positive sizes. In debug mode, also if it
+        is not finite.
+
+    Notes
+    -----
+    :math:`T\\mathbf{1} = \\mathbf{1}` — so a centered factor stays centered
+    and the posterior mean is not silently shifted — follows from
+    :math:`s^\\top \\mathbf{1} = 0`, which holds exactly when the factor the
+    whitening came from is centered. A factor read off a sample set is, which
+    is what makes :meth:`EmpiricalJoint.transform_update` a sample-to-sample
+    map. On general ``s``, :math:`T\\mathbf{1}` is whatever that matrix makes
+    it.
+
+    Differentiability carries the caveat documented on
+    :func:`gain_weights`; restoring gradients everywhere would need a
+    Fréchet derivative of :math:`A \\mapsto A^{-1/2}`, materially more work
+    than that function's rational form, and no conditioning path in this
+    layer requires it.
+    """
+    s = jnp.asarray(s)
+    if s.ndim != 2 or any(size < 1 for size in s.shape):
+        raise ValueError(
+            f"sqrt_transform: expected s of shape (k, N), exactly 2-D with both "
+            f"sizes at least 1, got shape {s.shape}"
+        )
+    _check_finite("sqrt_transform", "s", s)
+    U, sigma, _ = _thin_svd(s)
+    return _transform_from_svd(U, sigma, s.shape[0])
 
 
 # ---------------------------------------------------------------------------
@@ -1921,4 +1920,3 @@ def _transform_from_svd(U: Array, sigma: Array, latent_dim: int) -> Array:
     # (k, rho) @ (rho, k): both operands are exactly 2-D, so this is the
     # plain matrix product, not a batch of vectors.
     return jnp.eye(latent_dim, dtype=U.dtype) + (U * modifier) @ U.swapaxes(-1, -2)
-

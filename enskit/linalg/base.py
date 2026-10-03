@@ -100,469 +100,6 @@ __all__ = [
 ]
 
 
-class UnsupportedOpError(NotImplementedError):
-    """Raised when an operator has no cheap implementation of an operation.
-
-    The message names the operator type, the operation, and the operations
-    the operator does support. For an explicit dense fallback, use
-    ``densify(op)``.
-
-    Parameters
-    ----------
-    name
-        The operation that was requested.
-    operator_type
-        Name of the operator's class.
-    capabilities
-        Names of the optional operations the operator does support.
-
-    Notes
-    -----
-    The constructor takes only strings and a tuple of strings, so the
-    exception pickles and rebuilds from ``args`` — it must survive the
-    worker-process boundary that parallel forward-model evaluation crosses.
-    """
-
-    def __init__(
-        self, name: str, operator_type: str, capabilities: tuple[str, ...] = ()
-    ) -> None:
-        capabilities = tuple(capabilities)
-        super().__init__(name, operator_type, capabilities)
-        self.name = name
-        self.operator_type = operator_type
-        self.capabilities = capabilities
-
-    def __str__(self) -> str:
-        have = ", ".join(sorted(self.capabilities)) or "none"
-        return (
-            f"{self.operator_type} has no cheap `{self.name}`. It supports: {have}. "
-            f"Use densify(op) for an explicit dense fallback."
-        )
-
-
-# ---------------------------------------------------------------------------
-# debug switch for value-level checks
-# ---------------------------------------------------------------------------
-
-_debug_checks_enabled = False
-
-
-def set_debug_checks(enabled: bool) -> bool:
-    """Enable or disable value-level validation; return the previous setting.
-
-    When enabled, operator constructors and alternate constructors assert
-    value preconditions — positivity of diagonal entries, positive
-    definiteness of factorized matrices — on concrete inputs. The checks are
-    always skipped on tracers, so enabling them does not affect ``jit``-ed
-    code. When disabled (the default), violated preconditions produce ``nan``
-    or ``inf`` downstream rather than an exception.
-
-    Parameters
-    ----------
-    enabled
-        The new process-global setting.
-
-    Returns
-    -------
-    bool
-        The previous setting, so callers can restore it.
-    """
-    global _debug_checks_enabled
-    previous = _debug_checks_enabled
-    _debug_checks_enabled = bool(enabled)
-    return previous
-
-
-@contextmanager
-def debug_checks(enabled: bool = True):
-    """Context manager form of :func:`set_debug_checks`.
-
-    Sets the flag on entry and restores the previous setting on exit.
-    """
-    previous = set_debug_checks(enabled)
-    try:
-        yield
-    finally:
-        set_debug_checks(previous)
-
-
-def value_check(x, predicate, message: str) -> None:
-    """Assert a value-level precondition when debug checks are enabled.
-
-    The helper operator authors use inside constructors and alternate
-    constructors for preconditions that are values rather than shapes —
-    positivity, finiteness, definiteness.
-
-    Skipped when debug checks are off, when ``x`` is not array-like, and
-    whenever the check cannot be evaluated concretely — value checks never
-    affect ``jit``-ed code.
-
-    Notes
-    -----
-    Two skip conditions are needed, not one. A tracer operand is the obvious
-    case. The subtle case is a *concrete* operand inspected while a trace is
-    live — a closed-over constant inside :func:`jax.jit`, the usual way a
-    caller supplies fixed data to a traced computation. JAX stages a
-    primitive into the live trace regardless of whether its operands are
-    tracers, so the predicate's array work is staged there and reading its
-    result as a bool raises ``TracerBoolConversionError`` from inside a debug
-    check. Both spellings of the predicate are handled: one that returns the
-    comparison for this helper to read, and one that converts to ``bool``
-    itself, as the operators in this package do.
-    """
-    if not _debug_checks_enabled:
-        return
-    if getattr(x, "ndim", None) is None or isinstance(x, jax.core.Tracer):
-        return
-    try:
-        outcome = predicate(x)
-    except jax.errors.ConcretizationTypeError:
-        return
-    if isinstance(outcome, jax.core.Tracer):
-        return
-    if not bool(outcome):
-        raise ValueError(message)
-
-
-# ---------------------------------------------------------------------------
-# dataclass / pytree plumbing
-# ---------------------------------------------------------------------------
-
-
-def static_field(**kwargs):
-    """Declare a dataclass field as pytree *metadata* rather than a child.
-
-    Static metadata must be hashable and cheap to compare — ints, bools,
-    strings, tuples of those — never arrays.
-    """
-    metadata = dict(kwargs.pop("metadata", {}))
-    metadata["static"] = True
-    return field(metadata=metadata, **kwargs)
-
-
-def _is_data_annotation(ann) -> bool:
-    """Return True if this annotation is allowed to be pytree data."""
-    if ann is Array:
-        return True
-    if isinstance(ann, type) and issubclass(ann, LinOp):
-        return True
-    if typing.get_origin(ann) is tuple:
-        args = [a for a in typing.get_args(ann) if a is not Ellipsis]
-        return bool(args) and all(_is_data_annotation(a) for a in args)
-    return False
-
-
-def _pytree_dataclass(cls: type) -> type:
-    """Frozen dataclass plus JAX pytree registration, for any class.
-
-    The implementation behind :func:`linop`, under a name that does not imply
-    the decorated class is a linear operator: ``enskit.gauss`` declares its
-    distribution classes with this. Not exported — :func:`linop` is the public
-    name, and the behavior is documented there.
-    """
-    cls = dataclass(frozen=True, eq=False, repr=False)(cls)
-    try:
-        hints = typing.get_type_hints(cls)
-    except NameError as e:
-        raise TypeError(
-            f"{cls.__name__}: field annotations must resolve at class definition "
-            f"time ({e}). Avoid TYPE_CHECKING-only names and forward references."
-        ) from e
-
-    data_fields, meta_fields = [], []
-    for f in dataclasses.fields(cls):
-        if f.metadata.get("static", False):
-            meta_fields.append(f.name)
-        elif _is_data_annotation(hints.get(f.name)):
-            data_fields.append(f.name)
-        else:
-            raise TypeError(
-                f"{cls.__name__}.{f.name}: only `Array`, `LinOp` subtypes, and "
-                f"tuples of those may be pytree data. Mark this field with "
-                f"static_field(), or store it as an array."
-            )
-    data_names, meta_names = tuple(data_fields), tuple(meta_fields)
-
-    def flatten_with_keys(obj):
-        children = [
-            (jax.tree_util.GetAttrKey(name), getattr(obj, name))
-            for name in data_names
-        ]
-        return children, tuple(getattr(obj, name) for name in meta_names)
-
-    def flatten(obj):
-        children = [getattr(obj, name) for name in data_names]
-        return children, tuple(getattr(obj, name) for name in meta_names)
-
-    def unflatten(aux, children):
-        # Deliberately bypasses __init__/__post_init__: reconstruction is
-        # not construction, and must accept batched leaves (vmap exit) and
-        # placeholder leaves (JAX internals) that validation would reject.
-        obj = object.__new__(cls)
-        for name, value in zip(data_names, children, strict=True):
-            object.__setattr__(obj, name, value)
-        for name, value in zip(meta_names, aux, strict=True):
-            object.__setattr__(obj, name, value)
-        return obj
-
-    jax.tree_util.register_pytree_with_keys(cls, flatten_with_keys, unflatten, flatten)
-    return cls
-
-
-def linop(cls: type) -> type:
-    """Class decorator: make ``cls`` a frozen dataclass and a JAX pytree.
-
-    Fields are classified by an allowlist: a field is a pytree *child*
-    (data) if and only if its annotation is ``jax.Array``, a :class:`LinOp`
-    subtype, or a tuple of those. Every other field must be declared with
-    :func:`static_field`.
-
-    Raises
-    ------
-    TypeError
-        If a field is neither allowlisted data nor marked static, or if a
-        field annotation cannot be resolved at class definition time.
-
-    Notes
-    -----
-    - **Pytree unflattening bypasses the constructor.** The registered
-      unflatten allocates the instance and sets its fields directly, so
-      ``__init__``/``__post_init__`` run only where code constructs an
-      instance explicitly. Constructor validation therefore runs exactly
-      once per object, never at JAX's reconstruction boundaries — which
-      is what lets constructors demand exact core ranks while ``vmap``
-      still rebuilds batched families at its exit boundary.
-    - Instances compare by identity (``eq=False``): dataclass equality would
-      compare arrays elementwise and raise on the ambiguous truth value.
-      They hash by identity, which makes them usable as dictionary keys but
-      never as ``static_argnums`` — every call would retrace silently.
-    - No ``__repr__`` is generated (``repr=False``), so the class's own
-      ``__repr__`` applies; a generated one would print whole arrays into
-      tracebacks and test identifiers.
-    - Annotations are resolved with ``typing.get_type_hints``, so they must
-      name types importable in the defining module at class definition time:
-      no ``TYPE_CHECKING``-only names and no self- or forward-references.
-    """
-    return _pytree_dataclass(cls)
-
-
-# ---------------------------------------------------------------------------
-# array helpers honoring the batch contract
-# ---------------------------------------------------------------------------
-
-
-def dense_matvec(M: Array, x: Array) -> Array:
-    """Apply an unbatched dense matrix to ``x``, contracting its trailing axis.
-
-    ``(m, n) x (..., n) -> (..., m)``. Use this rather than ``M @ x`` when
-    implementing ``_matvec``: for operands with two or more dimensions the
-    ``@`` operator contracts the second-to-last axis, which silently returns
-    a wrong answer when ``M`` is square.
-    """
-    return jnp.einsum("ij,...j->...i", M, x)
-
-
-def tri_solve(L: Array, x: Array, *, lower: bool, trans: int = 0) -> Array:
-    """Solve a triangular system, contracting the trailing axis of ``x``.
-
-    ``L`` is an unbatched square triangular matrix; ``x`` may carry any
-    number of leading batch axes. ``trans=1`` solves against ``L.T``.
-    """
-    flat = x.reshape(-1, x.shape[-1]).swapaxes(-1, -2)  # (n, m)
-    out = jax.scipy.linalg.solve_triangular(L, flat, lower=lower, trans=trans)
-    return out.swapaxes(-1, -2).reshape(x.shape)
-
-
-# ---------------------------------------------------------------------------
-# validation helpers
-# ---------------------------------------------------------------------------
-
-
-def _check_vec(op: LinOp, method: str, x, size: int) -> Array:
-    """Validate a vector operand: rank at least 1, trailing axis ``size``."""
-    x = jnp.asarray(x)
-    if x.ndim < 1 or x.shape[-1] != size:
-        raise ValueError(
-            f"{op!r}.{method}: expected core shape (..., {size}), "
-            f"got operand shape {x.shape}"
-        )
-    return x
-
-
-def _check_mat(op: LinOp, method: str, X, size: int) -> Array:
-    """Validate a matrix operand: rank at least 2, axis ``-2`` of ``size``."""
-    X = jnp.asarray(X)
-    if X.ndim < 2 or X.shape[-2] != size:
-        raise ValueError(
-            f"{op!r}.{method}: expected core shape (..., {size}, k), "
-            f"got operand shape {X.shape}"
-        )
-    return X
-
-
-def _check_core_rank(cls_name: str, field_name: str, value, core_ndim: int) -> None:
-    """Reject an array field whose rank is not exactly its core rank, or
-    whose core sizes are not positive.
-
-    Operators are unbatched; a batched family is built with ``jax.vmap``
-    over the operator pytree, never by passing arrays with extra leading
-    axes. Enforcing this in the constructor is safe because pytree
-    unflattening bypasses it (:func:`linop`). Fields without ``ndim`` pass
-    untouched.
-    """
-    ndim = getattr(value, "ndim", None)
-    if ndim is None:
-        return
-    if ndim != core_ndim:
-        raise ValueError(
-            f"{cls_name}.{field_name}: expected an array of rank {core_ndim}, "
-            f"got rank {ndim}. Operators are unbatched; batch with jax.vmap "
-            f"over the operator pytree, not with extra leading axes."
-        )
-    if any(size < 1 for size in value.shape):
-        raise ValueError(
-            f"{cls_name}.{field_name}: core sizes must be positive, got shape "
-            f"{value.shape}. Empty operators are rejected at construction."
-        )
-
-
-def _check_real(cls_name: str, field_name: str, value) -> None:
-    """Reject an array field whose dtype is not real: complex or boolean.
-
-    A dtype is static, so this runs always, under ``jit`` included. Values
-    without a ``dtype`` pass untouched.
-    """
-    dtype = getattr(value, "dtype", None)
-    if dtype is None:
-        return
-    if not (jnp.issubdtype(dtype, jnp.floating) or jnp.issubdtype(dtype, jnp.integer)):
-        raise TypeError(
-            f"{cls_name}.{field_name} must be real, got dtype {dtype}"
-        )
-
-
-def _check_not_family(cls_name: str, op) -> None:
-    """Reject a vmapped family passed as a composite's child operator.
-
-    Inside ``jax.vmap`` the child is presented unbatched and passes; a family
-    reaching a constructor outside ``vmap`` would build an inert wrapper
-    with mixed batching.
-    """
-    if isinstance(op, LinOp) and op.batch_shape != ():
-        raise ValueError(
-            f"{cls_name}: {op!r} is a vmapped family; build the composite "
-            f"inside jax.vmap, from one member at a time"
-        )
-
-
-def _check_finite(
-    cls_name: str, field_name: str, value, *, hint: str = ""
-) -> None:
-    """Debug check that an array field has only finite entries.
-
-    ``hint``, if given, is appended to the error message. A
-    :func:`value_check`, so it runs only when debug checks are enabled and
-    never under a trace.
-    """
-    message = f"{cls_name}.{field_name} must be finite"
-    value_check(
-        value,
-        lambda a: bool(jnp.all(jnp.isfinite(a))),
-        f"{message}. {hint}" if hint else message,
-    )
-
-
-def _check_triangular(
-    cls_name: str, field_name: str, value, *, lower: bool, hint: str = ""
-) -> None:
-    """Debug check that a stored square-matrix field is triangular.
-
-    ``lower`` selects the triangle that may be nonzero; entries outside it
-    must be zero to within ``jnp.allclose``. ``hint``, if given, is appended
-    to the error message. A :func:`value_check`, so it runs only when debug
-    checks are enabled and never under a trace.
-    """
-    side = "lower" if lower else "upper"
-    message = (
-        f"{cls_name}.{field_name} must be {side} triangular, but has nonzero "
-        f"entries outside that triangle"
-    )
-    value_check(
-        value,
-        lambda mat: bool(
-            jnp.allclose(mat, jnp.tril(mat) if lower else jnp.triu(mat))
-        ),
-        f"{message}. {hint}" if hint else message,
-    )
-
-
-def _construct_unchecked(cls: type, **fields):
-    """Build an operator instance without running ``__init__``.
-
-    The same path pytree unflattening uses. For internal reconstructions —
-    a structured transpose of a vmapped family — whose fields are known
-    valid, or deliberately batched.
-    """
-    obj = object.__new__(cls)
-    for name, value in fields.items():
-        object.__setattr__(obj, name, value)
-    return obj
-
-
-def _broadcast_batch(op_type: str, *shapes) -> tuple[int, ...]:
-    """Combine ``batch_shape`` contributions by broadcasting.
-
-    Raises ``ValueError`` when the contributions do not broadcast — a
-    hand-assembled pytree with inconsistently stacked leaves, diagnosed
-    here rather than by downstream shape wreckage.
-    """
-    try:
-        return tuple(jnp.broadcast_shapes(*shapes))
-    except ValueError as e:
-        raise ValueError(
-            f"{op_type}: stored leaves are inconsistently batched; the "
-            f"batch-shape contributions {shapes} do not broadcast"
-        ) from e
-
-
-def _as_scalar(op: LinOp, c) -> Array:
-    """Convert a scaling factor to a real 0-d array of at least float64.
-
-    Rejects non-scalars, and complex or boolean scalars. The promotion keeps
-    a low-precision scalar — ``np.float16(0.1)``, say — from pulling every
-    scaled operation down to its precision.
-    """
-    arr = jnp.asarray(c)
-    if arr.ndim != 0:
-        raise TypeError(
-            f"only a true scalar can scale {op!r}, got an array of shape "
-            f"{arr.shape}. For per-coordinate scaling of a PSD operator, "
-            f"use diag_congruence()."
-        )
-    _check_real(type(op).__name__, "scalar", arr)
-    return arr.astype(jnp.promote_types(arr.dtype, jnp.float64))
-
-
-def _scale(op: LinOp, c: Array) -> LinOp:
-    """Build the scaled composite matching ``op``'s hierarchy level.
-
-    Nested scalings fold into a single wrapper at the level of the outer
-    one, never of the operator inside it: a :class:`~.composite.SquareScaled`
-    of a PSD operator, which may hold a negative scalar, stays square.
-    """
-    from .composite import PSDScaled, Scaled, SquareScaled
-
-    if isinstance(op, PSDLinOp):
-        cls = PSDScaled
-    elif isinstance(op, SquareLinOp):
-        cls = SquareScaled
-    else:
-        cls = Scaled
-    if isinstance(op, Scaled):
-        return cls(op.op, op.c * c)
-    return cls(op, c)
-
-
 # ---------------------------------------------------------------------------
 # level 1 -- LinOp
 # ---------------------------------------------------------------------------
@@ -1200,40 +737,101 @@ class PSDLinOp(SquareLinOp):
 
 
 # ---------------------------------------------------------------------------
-# capability tables
+# defining an operator
 # ---------------------------------------------------------------------------
 
-#: Operations available on every operator, at every level.
-_ALWAYS_OPS = frozenset({"matvec", "rmatvec", "matmat", "rmatmat", "to_dense"})
 
-#: Operations that are not unconditionally available; `capabilities()` reports
-#: the supported subset of these.
-_OPTIONAL_OPS = ("solve", "solve_mat", "logdet", "diag", "factor", "whiten", "whiten_mat")
+def linop(cls: type) -> type:
+    """Class decorator: make ``cls`` a frozen dataclass and a JAX pytree.
 
-_KNOWN_OPS = _ALWAYS_OPS | frozenset(_OPTIONAL_OPS)
+    Fields are classified by an allowlist: a field is a pytree *child*
+    (data) if and only if its annotation is ``jax.Array``, a :class:`LinOp`
+    subtype, or a tuple of those. Every other field must be declared with
+    :func:`static_field`.
 
-#: Optional operations implemented directly: supported iff the class defines
-#: the hook.
-_PRIMITIVE_HOOKS = {
-    "solve": "_solve",
-    "logdet": "_logdet",
-    "diag": "_diag",
-    "factor": "_factor",
-    "whiten": "_whiten",
-}
+    Raises
+    ------
+    TypeError
+        If a field is neither allowlisted data nor marked static, or if a
+        field annotation cannot be resolved at class definition time.
 
-#: Derived operations: supported iff the dependency is, or the class
-#: overrides the derived hook with a direct implementation.
-_DERIVED_DEPS = {"solve_mat": "solve", "whiten_mat": "whiten"}
-_DERIVED_DEFAULTS = {
-    "solve_mat": SquareLinOp._solve_mat,
-    "whiten_mat": PSDLinOp._whiten_mat,
-}
+    Notes
+    -----
+    - **Pytree unflattening bypasses the constructor.** The registered
+      unflatten allocates the instance and sets its fields directly, so
+      ``__init__``/``__post_init__`` run only where code constructs an
+      instance explicitly. Constructor validation therefore runs exactly
+      once per object, never at JAX's reconstruction boundaries — which
+      is what lets constructors demand exact core ranks while ``vmap``
+      still rebuilds batched families at its exit boundary.
+    - Instances compare by identity (``eq=False``): dataclass equality would
+      compare arrays elementwise and raise on the ambiguous truth value.
+      They hash by identity, which makes them usable as dictionary keys but
+      never as ``static_argnums`` — every call would retrace silently.
+    - No ``__repr__`` is generated (``repr=False``), so the class's own
+      ``__repr__`` applies; a generated one would print whole arrays into
+      tracebacks and test identifiers.
+    - Annotations are resolved with ``typing.get_type_hints``, so they must
+      name types importable in the defining module at class definition time:
+      no ``TYPE_CHECKING``-only names and no self- or forward-references.
+    """
+    return _pytree_dataclass(cls)
+
+
+def static_field(**kwargs):
+    """Declare a dataclass field as pytree *metadata* rather than a child.
+
+    Static metadata must be hashable and cheap to compare — ints, bools,
+    strings, tuples of those — never arrays.
+    """
+    metadata = dict(kwargs.pop("metadata", {}))
+    metadata["static"] = True
+    return field(metadata=metadata, **kwargs)
 
 
 # ---------------------------------------------------------------------------
-# explicit densification
+# unsupported operations, and explicit densification
 # ---------------------------------------------------------------------------
+
+
+class UnsupportedOpError(NotImplementedError):
+    """Raised when an operator has no cheap implementation of an operation.
+
+    The message names the operator type, the operation, and the operations
+    the operator does support. For an explicit dense fallback, use
+    ``densify(op)``.
+
+    Parameters
+    ----------
+    name
+        The operation that was requested.
+    operator_type
+        Name of the operator's class.
+    capabilities
+        Names of the optional operations the operator does support.
+
+    Notes
+    -----
+    The constructor takes only strings and a tuple of strings, so the
+    exception pickles and rebuilds from ``args`` — it must survive the
+    worker-process boundary that parallel forward-model evaluation crosses.
+    """
+
+    def __init__(
+        self, name: str, operator_type: str, capabilities: tuple[str, ...] = ()
+    ) -> None:
+        capabilities = tuple(capabilities)
+        super().__init__(name, operator_type, capabilities)
+        self.name = name
+        self.operator_type = operator_type
+        self.capabilities = capabilities
+
+    def __str__(self) -> str:
+        have = ", ".join(sorted(self.capabilities)) or "none"
+        return (
+            f"{self.operator_type} has no cheap `{self.name}`. It supports: {have}. "
+            f"Use densify(op) for an explicit dense fallback."
+        )
 
 
 def densify(op: LinOp, *, max_n: int = 4096) -> LinOp:
@@ -1276,3 +874,418 @@ def densify(op: LinOp, *, max_n: int = 4096) -> LinOp:
     if isinstance(op, SquareLinOp):
         return DenseSquare(A)
     return Dense(A)
+
+
+# ---------------------------------------------------------------------------
+# array helpers honoring the batch contract
+# ---------------------------------------------------------------------------
+
+
+def dense_matvec(M: Array, x: Array) -> Array:
+    """Apply an unbatched dense matrix to ``x``, contracting its trailing axis.
+
+    ``(m, n) x (..., n) -> (..., m)``. Use this rather than ``M @ x`` when
+    implementing ``_matvec``: for operands with two or more dimensions the
+    ``@`` operator contracts the second-to-last axis, which silently returns
+    a wrong answer when ``M`` is square.
+    """
+    return jnp.einsum("ij,...j->...i", M, x)
+
+
+def tri_solve(L: Array, x: Array, *, lower: bool, trans: int = 0) -> Array:
+    """Solve a triangular system, contracting the trailing axis of ``x``.
+
+    ``L`` is an unbatched square triangular matrix; ``x`` may carry any
+    number of leading batch axes. ``trans=1`` solves against ``L.T``.
+    """
+    flat = x.reshape(-1, x.shape[-1]).swapaxes(-1, -2)  # (n, m)
+    out = jax.scipy.linalg.solve_triangular(L, flat, lower=lower, trans=trans)
+    return out.swapaxes(-1, -2).reshape(x.shape)
+
+
+# ---------------------------------------------------------------------------
+# debug switch for value-level checks
+# ---------------------------------------------------------------------------
+
+
+_debug_checks_enabled = False
+
+
+def set_debug_checks(enabled: bool) -> bool:
+    """Enable or disable value-level validation; return the previous setting.
+
+    When enabled, operator constructors and alternate constructors assert
+    value preconditions — positivity of diagonal entries, positive
+    definiteness of factorized matrices — on concrete inputs. The checks are
+    always skipped on tracers, so enabling them does not affect ``jit``-ed
+    code. When disabled (the default), violated preconditions produce ``nan``
+    or ``inf`` downstream rather than an exception.
+
+    Parameters
+    ----------
+    enabled
+        The new process-global setting.
+
+    Returns
+    -------
+    bool
+        The previous setting, so callers can restore it.
+    """
+    global _debug_checks_enabled
+    previous = _debug_checks_enabled
+    _debug_checks_enabled = bool(enabled)
+    return previous
+
+
+@contextmanager
+def debug_checks(enabled: bool = True):
+    """Context manager form of :func:`set_debug_checks`.
+
+    Sets the flag on entry and restores the previous setting on exit.
+    """
+    previous = set_debug_checks(enabled)
+    try:
+        yield
+    finally:
+        set_debug_checks(previous)
+
+
+def value_check(x, predicate, message: str) -> None:
+    """Assert a value-level precondition when debug checks are enabled.
+
+    The helper operator authors use inside constructors and alternate
+    constructors for preconditions that are values rather than shapes —
+    positivity, finiteness, definiteness.
+
+    Skipped when debug checks are off, when ``x`` is not array-like, and
+    whenever the check cannot be evaluated concretely — value checks never
+    affect ``jit``-ed code.
+
+    Notes
+    -----
+    Two skip conditions are needed, not one. A tracer operand is the obvious
+    case. The subtle case is a *concrete* operand inspected while a trace is
+    live — a closed-over constant inside :func:`jax.jit`, the usual way a
+    caller supplies fixed data to a traced computation. JAX stages a
+    primitive into the live trace regardless of whether its operands are
+    tracers, so the predicate's array work is staged there and reading its
+    result as a bool raises ``TracerBoolConversionError`` from inside a debug
+    check. Both spellings of the predicate are handled: one that returns the
+    comparison for this helper to read, and one that converts to ``bool``
+    itself, as the operators in this package do.
+    """
+    if not _debug_checks_enabled:
+        return
+    if getattr(x, "ndim", None) is None or isinstance(x, jax.core.Tracer):
+        return
+    try:
+        outcome = predicate(x)
+    except jax.errors.ConcretizationTypeError:
+        return
+    if isinstance(outcome, jax.core.Tracer):
+        return
+    if not bool(outcome):
+        raise ValueError(message)
+
+
+# ---------------------------------------------------------------------------
+# private: dataclass / pytree plumbing
+# ---------------------------------------------------------------------------
+
+
+def _is_data_annotation(ann) -> bool:
+    """Return True if this annotation is allowed to be pytree data."""
+    if ann is Array:
+        return True
+    if isinstance(ann, type) and issubclass(ann, LinOp):
+        return True
+    if typing.get_origin(ann) is tuple:
+        args = [a for a in typing.get_args(ann) if a is not Ellipsis]
+        return bool(args) and all(_is_data_annotation(a) for a in args)
+    return False
+
+
+def _pytree_dataclass(cls: type) -> type:
+    """Frozen dataclass plus JAX pytree registration, for any class.
+
+    The implementation behind :func:`linop`, under a name that does not imply
+    the decorated class is a linear operator: ``enskit.gauss`` declares its
+    distribution classes with this. Not exported — :func:`linop` is the public
+    name, and the behavior is documented there.
+    """
+    cls = dataclass(frozen=True, eq=False, repr=False)(cls)
+    try:
+        hints = typing.get_type_hints(cls)
+    except NameError as e:
+        raise TypeError(
+            f"{cls.__name__}: field annotations must resolve at class definition "
+            f"time ({e}). Avoid TYPE_CHECKING-only names and forward references."
+        ) from e
+
+    data_fields, meta_fields = [], []
+    for f in dataclasses.fields(cls):
+        if f.metadata.get("static", False):
+            meta_fields.append(f.name)
+        elif _is_data_annotation(hints.get(f.name)):
+            data_fields.append(f.name)
+        else:
+            raise TypeError(
+                f"{cls.__name__}.{f.name}: only `Array`, `LinOp` subtypes, and "
+                f"tuples of those may be pytree data. Mark this field with "
+                f"static_field(), or store it as an array."
+            )
+    data_names, meta_names = tuple(data_fields), tuple(meta_fields)
+
+    def flatten_with_keys(obj):
+        children = [
+            (jax.tree_util.GetAttrKey(name), getattr(obj, name))
+            for name in data_names
+        ]
+        return children, tuple(getattr(obj, name) for name in meta_names)
+
+    def flatten(obj):
+        children = [getattr(obj, name) for name in data_names]
+        return children, tuple(getattr(obj, name) for name in meta_names)
+
+    def unflatten(aux, children):
+        # Deliberately bypasses __init__/__post_init__: reconstruction is
+        # not construction, and must accept batched leaves (vmap exit) and
+        # placeholder leaves (JAX internals) that validation would reject.
+        obj = object.__new__(cls)
+        for name, value in zip(data_names, children, strict=True):
+            object.__setattr__(obj, name, value)
+        for name, value in zip(meta_names, aux, strict=True):
+            object.__setattr__(obj, name, value)
+        return obj
+
+    jax.tree_util.register_pytree_with_keys(cls, flatten_with_keys, unflatten, flatten)
+    return cls
+
+
+# ---------------------------------------------------------------------------
+# private: validation helpers
+# ---------------------------------------------------------------------------
+
+
+def _check_vec(op: LinOp, method: str, x, size: int) -> Array:
+    """Validate a vector operand: rank at least 1, trailing axis ``size``."""
+    x = jnp.asarray(x)
+    if x.ndim < 1 or x.shape[-1] != size:
+        raise ValueError(
+            f"{op!r}.{method}: expected core shape (..., {size}), "
+            f"got operand shape {x.shape}"
+        )
+    return x
+
+
+def _check_mat(op: LinOp, method: str, X, size: int) -> Array:
+    """Validate a matrix operand: rank at least 2, axis ``-2`` of ``size``."""
+    X = jnp.asarray(X)
+    if X.ndim < 2 or X.shape[-2] != size:
+        raise ValueError(
+            f"{op!r}.{method}: expected core shape (..., {size}, k), "
+            f"got operand shape {X.shape}"
+        )
+    return X
+
+
+def _check_core_rank(cls_name: str, field_name: str, value, core_ndim: int) -> None:
+    """Reject an array field whose rank is not exactly its core rank, or
+    whose core sizes are not positive.
+
+    Operators are unbatched; a batched family is built with ``jax.vmap``
+    over the operator pytree, never by passing arrays with extra leading
+    axes. Enforcing this in the constructor is safe because pytree
+    unflattening bypasses it (:func:`linop`). Fields without ``ndim`` pass
+    untouched.
+    """
+    ndim = getattr(value, "ndim", None)
+    if ndim is None:
+        return
+    if ndim != core_ndim:
+        raise ValueError(
+            f"{cls_name}.{field_name}: expected an array of rank {core_ndim}, "
+            f"got rank {ndim}. Operators are unbatched; batch with jax.vmap "
+            f"over the operator pytree, not with extra leading axes."
+        )
+    if any(size < 1 for size in value.shape):
+        raise ValueError(
+            f"{cls_name}.{field_name}: core sizes must be positive, got shape "
+            f"{value.shape}. Empty operators are rejected at construction."
+        )
+
+
+def _check_real(cls_name: str, field_name: str, value) -> None:
+    """Reject an array field whose dtype is not real: complex or boolean.
+
+    A dtype is static, so this runs always, under ``jit`` included. Values
+    without a ``dtype`` pass untouched.
+    """
+    dtype = getattr(value, "dtype", None)
+    if dtype is None:
+        return
+    if not (jnp.issubdtype(dtype, jnp.floating) or jnp.issubdtype(dtype, jnp.integer)):
+        raise TypeError(
+            f"{cls_name}.{field_name} must be real, got dtype {dtype}"
+        )
+
+
+def _check_not_family(cls_name: str, op) -> None:
+    """Reject a vmapped family passed as a composite's child operator.
+
+    Inside ``jax.vmap`` the child is presented unbatched and passes; a family
+    reaching a constructor outside ``vmap`` would build an inert wrapper
+    with mixed batching.
+    """
+    if isinstance(op, LinOp) and op.batch_shape != ():
+        raise ValueError(
+            f"{cls_name}: {op!r} is a vmapped family; build the composite "
+            f"inside jax.vmap, from one member at a time"
+        )
+
+
+def _check_finite(
+    cls_name: str, field_name: str, value, *, hint: str = ""
+) -> None:
+    """Debug check that an array field has only finite entries.
+
+    ``hint``, if given, is appended to the error message. A
+    :func:`value_check`, so it runs only when debug checks are enabled and
+    never under a trace.
+    """
+    message = f"{cls_name}.{field_name} must be finite"
+    value_check(
+        value,
+        lambda a: bool(jnp.all(jnp.isfinite(a))),
+        f"{message}. {hint}" if hint else message,
+    )
+
+
+def _check_triangular(
+    cls_name: str, field_name: str, value, *, lower: bool, hint: str = ""
+) -> None:
+    """Debug check that a stored square-matrix field is triangular.
+
+    ``lower`` selects the triangle that may be nonzero; entries outside it
+    must be zero to within ``jnp.allclose``. ``hint``, if given, is appended
+    to the error message. A :func:`value_check`, so it runs only when debug
+    checks are enabled and never under a trace.
+    """
+    side = "lower" if lower else "upper"
+    message = (
+        f"{cls_name}.{field_name} must be {side} triangular, but has nonzero "
+        f"entries outside that triangle"
+    )
+    value_check(
+        value,
+        lambda mat: bool(
+            jnp.allclose(mat, jnp.tril(mat) if lower else jnp.triu(mat))
+        ),
+        f"{message}. {hint}" if hint else message,
+    )
+
+
+def _construct_unchecked(cls: type, **fields):
+    """Build an operator instance without running ``__init__``.
+
+    The same path pytree unflattening uses. For internal reconstructions —
+    a structured transpose of a vmapped family — whose fields are known
+    valid, or deliberately batched.
+    """
+    obj = object.__new__(cls)
+    for name, value in fields.items():
+        object.__setattr__(obj, name, value)
+    return obj
+
+
+def _broadcast_batch(op_type: str, *shapes) -> tuple[int, ...]:
+    """Combine ``batch_shape`` contributions by broadcasting.
+
+    Raises ``ValueError`` when the contributions do not broadcast — a
+    hand-assembled pytree with inconsistently stacked leaves, diagnosed
+    here rather than by downstream shape wreckage.
+    """
+    try:
+        return tuple(jnp.broadcast_shapes(*shapes))
+    except ValueError as e:
+        raise ValueError(
+            f"{op_type}: stored leaves are inconsistently batched; the "
+            f"batch-shape contributions {shapes} do not broadcast"
+        ) from e
+
+
+def _as_scalar(op: LinOp, c) -> Array:
+    """Convert a scaling factor to a real 0-d array of at least float64.
+
+    Rejects non-scalars, and complex or boolean scalars. The promotion keeps
+    a low-precision scalar — ``np.float16(0.1)``, say — from pulling every
+    scaled operation down to its precision.
+    """
+    arr = jnp.asarray(c)
+    if arr.ndim != 0:
+        raise TypeError(
+            f"only a true scalar can scale {op!r}, got an array of shape "
+            f"{arr.shape}. For per-coordinate scaling of a PSD operator, "
+            f"use diag_congruence()."
+        )
+    _check_real(type(op).__name__, "scalar", arr)
+    return arr.astype(jnp.promote_types(arr.dtype, jnp.float64))
+
+
+def _scale(op: LinOp, c: Array) -> LinOp:
+    """Build the scaled composite matching ``op``'s hierarchy level.
+
+    Nested scalings fold into a single wrapper at the level of the outer
+    one, never of the operator inside it: a :class:`~.composite.SquareScaled`
+    of a PSD operator, which may hold a negative scalar, stays square.
+    """
+    from .composite import PSDScaled, Scaled, SquareScaled
+
+    if isinstance(op, PSDLinOp):
+        cls = PSDScaled
+    elif isinstance(op, SquareLinOp):
+        cls = SquareScaled
+    else:
+        cls = Scaled
+    if isinstance(op, Scaled):
+        return cls(op.op, op.c * c)
+    return cls(op, c)
+
+
+# ---------------------------------------------------------------------------
+# private: capability tables
+# ---------------------------------------------------------------------------
+
+
+#: Operations available on every operator, at every level.
+_ALWAYS_OPS = frozenset({"matvec", "rmatvec", "matmat", "rmatmat", "to_dense"})
+
+
+#: Operations that are not unconditionally available; `capabilities()` reports
+#: the supported subset of these.
+_OPTIONAL_OPS = ("solve", "solve_mat", "logdet", "diag", "factor", "whiten", "whiten_mat")
+
+
+_KNOWN_OPS = _ALWAYS_OPS | frozenset(_OPTIONAL_OPS)
+
+
+#: Optional operations implemented directly: supported iff the class defines
+#: the hook.
+_PRIMITIVE_HOOKS = {
+    "solve": "_solve",
+    "logdet": "_logdet",
+    "diag": "_diag",
+    "factor": "_factor",
+    "whiten": "_whiten",
+}
+
+
+#: Derived operations: supported iff the dependency is, or the class
+#: overrides the derived hook with a direct implementation.
+_DERIVED_DEPS = {"solve_mat": "solve", "whiten_mat": "whiten"}
+
+
+_DERIVED_DEFAULTS = {
+    "solve_mat": SquareLinOp._solve_mat,
+    "whiten_mat": PSDLinOp._whiten_mat,
+}

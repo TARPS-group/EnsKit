@@ -92,42 +92,6 @@ OnFailure = Literal["repair", "raise"]
 _STATUSES = (SCHEDULE_EXHAUSTED, STOPPING_RULE, INTERRUPTED)
 
 
-class EKIError(RuntimeError):
-    """A run cannot continue.
-
-    Raised on four conditions: ``max_steps`` exceeded, fewer than two valid
-    members, any invalid member under ``on_failure="raise"``, and a
-    non-finite updated ensemble. A run is long and expensive enough that a
-    caller wants to catch its failures specifically, to checkpoint and
-    investigate, without catching every :class:`RuntimeError` in the process.
-
-    Attributes
-    ----------
-    state : EKIState
-        The last good state, populated on every raise path.
-    history : tuple of HistoryRecord
-        The records accumulated up to the failure.
-
-    Notes
-    -----
-    The two attributes are what make a caught error recoverable::
-
-        try:
-            result = run(state, forward, y, noise_cov, schedule=sched)
-        except EKIError as exc:
-            checkpoint(exc.state)          # resume from here
-            diagnose(exc.history)
-
-    Resuming from ``exc.state`` continues the run exactly, so nothing beyond
-    the two attributes is needed to make the recovery exact.
-    """
-
-    def __init__(self, message: str, *, state=None, history=()) -> None:
-        super().__init__(message)
-        self.state = state
-        self.history = tuple(history)
-
-
 # ---------------------------------------------------------------------------
 # the loop-carried state
 # ---------------------------------------------------------------------------
@@ -601,22 +565,6 @@ class HistoryRecord:
         return f"vmapped({base}, batch={batch})" if batch != () else base
 
 
-#: The declaration order of :class:`HistoryRecord`'s fields.
-_RECORD_FIELDS = (
-    "step",
-    "n_valid",
-    "beta",
-    "increment",
-    "beta_next",
-    "misfit_mean",
-    "misfit_min",
-    "misfit_max",
-    "center_misfit",
-    "spread",
-    "ess",
-)
-
-
 # ---------------------------------------------------------------------------
 # the report
 # ---------------------------------------------------------------------------
@@ -822,8 +770,65 @@ class EKIResult:
 
 
 # ---------------------------------------------------------------------------
+# the error a run raises
+# ---------------------------------------------------------------------------
+
+
+class EKIError(RuntimeError):
+    """A run cannot continue.
+
+    Raised on four conditions: ``max_steps`` exceeded, fewer than two valid
+    members, any invalid member under ``on_failure="raise"``, and a
+    non-finite updated ensemble. A run is long and expensive enough that a
+    caller wants to catch its failures specifically, to checkpoint and
+    investigate, without catching every :class:`RuntimeError` in the process.
+
+    Attributes
+    ----------
+    state : EKIState
+        The last good state, populated on every raise path.
+    history : tuple of HistoryRecord
+        The records accumulated up to the failure.
+
+    Notes
+    -----
+    The two attributes are what make a caught error recoverable::
+
+        try:
+            result = run(state, forward, y, noise_cov, schedule=sched)
+        except EKIError as exc:
+            checkpoint(exc.state)          # resume from here
+            diagnose(exc.history)
+
+    Resuming from ``exc.state`` continues the run exactly, so nothing beyond
+    the two attributes is needed to make the recovery exact.
+    """
+
+    def __init__(self, message: str, *, state=None, history=()) -> None:
+        super().__init__(message)
+        self.state = state
+        self.history = tuple(history)
+
+
+# ---------------------------------------------------------------------------
 # private
 # ---------------------------------------------------------------------------
+
+
+#: The declaration order of :class:`HistoryRecord`'s fields.
+_RECORD_FIELDS = (
+    "step",
+    "n_valid",
+    "beta",
+    "increment",
+    "beta_next",
+    "misfit_mean",
+    "misfit_min",
+    "misfit_max",
+    "center_misfit",
+    "spread",
+    "ess",
+)
 
 
 def _zero_record() -> HistoryRecord:

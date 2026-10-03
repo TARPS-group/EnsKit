@@ -103,57 +103,6 @@ __all__ = [
 # ---------------------------------------------------------------------------
 
 
-class EnsembleUpdate(Protocol):
-    """One step of the ladder: the move that an increment produces.
-
-    An implementation maps an ensemble, its predictions, the observation, the
-    **base** noise covariance and a 0-d increment to a new ensemble. The two
-    shipped rules do so by conditioning with ``noise_cov / increment``.
-
-    Requirements on any implementation:
-
-    - It receives both the increment and the absolute level, and the two mean
-      different things: ``increment`` is how far this step moves,
-      ``beta`` is where the step starts, and ``step`` is which step
-      it is. The shipped rules use only the increment.
-    - It consumes the key whole and is a deterministic function of its
-      arguments including the key. A deterministic rule ignores the key.
-    - It is ``jit``- and ``vmap``-safe with static shapes, and holds any
-      arrays it needs as pytree data so that it can be passed through a trace
-      boundary.
-
-    Notes
-    -----
-    A rule that varies with ``beta`` or ``step`` — an annealed threshold, a
-    decaying damping — breaks the telescoping identity the layer's exactness
-    claim rests on, and the layer states that consequence rather than
-    preventing it. Withholding the arguments would only push callers into
-    keeping a counter inside the rule, which violates purity and silently
-    breaks resumption.
-
-    The base noise covariance and the increment are passed separately, rather
-    than as the pre-scaled per-step operator, so that a rule needing the
-    increment as a step size in its own right — a Langevin-type sampler — has
-    it.
-    """
-
-    def __call__(
-        self,
-        key,
-        *,
-        ensemble: Array,
-        predictions: Array,
-        y: Array,
-        noise_cov: PSDLinOp,
-        increment: Array,
-        step: int,
-        beta: Array,
-        **_,
-    ) -> Array:
-        """Return the new ``(J, P)`` ensemble."""
-        ...
-
-
 class Schedule(Protocol):
     """One method and two declarative attributes: how far each step moves.
 
@@ -212,6 +161,57 @@ class StoppingRule(Protocol):
 
     def __call__(self, evaluation: Evaluation) -> bool:
         """Return whether the run should end now."""
+        ...
+
+
+class EnsembleUpdate(Protocol):
+    """One step of the ladder: the move that an increment produces.
+
+    An implementation maps an ensemble, its predictions, the observation, the
+    **base** noise covariance and a 0-d increment to a new ensemble. The two
+    shipped rules do so by conditioning with ``noise_cov / increment``.
+
+    Requirements on any implementation:
+
+    - It receives both the increment and the absolute level, and the two mean
+      different things: ``increment`` is how far this step moves,
+      ``beta`` is where the step starts, and ``step`` is which step
+      it is. The shipped rules use only the increment.
+    - It consumes the key whole and is a deterministic function of its
+      arguments including the key. A deterministic rule ignores the key.
+    - It is ``jit``- and ``vmap``-safe with static shapes, and holds any
+      arrays it needs as pytree data so that it can be passed through a trace
+      boundary.
+
+    Notes
+    -----
+    A rule that varies with ``beta`` or ``step`` — an annealed threshold, a
+    decaying damping — breaks the telescoping identity the layer's exactness
+    claim rests on, and the layer states that consequence rather than
+    preventing it. Withholding the arguments would only push callers into
+    keeping a counter inside the rule, which violates purity and silently
+    breaks resumption.
+
+    The base noise covariance and the increment are passed separately, rather
+    than as the pre-scaled per-step operator, so that a rule needing the
+    increment as a step size in its own right — a Langevin-type sampler — has
+    it.
+    """
+
+    def __call__(
+        self,
+        key,
+        *,
+        ensemble: Array,
+        predictions: Array,
+        y: Array,
+        noise_cov: PSDLinOp,
+        increment: Array,
+        step: int,
+        beta: Array,
+        **_,
+    ) -> Array:
+        """Return the new ``(J, P)`` ensemble."""
         ...
 
 
@@ -331,20 +331,6 @@ class PathwiseUpdate:
     def __repr__(self) -> str:
         """As ``PathwiseUpdate()``."""
         return "PathwiseUpdate()"
-
-
-@jax.jit
-def _transform_update(ensemble, predictions, y, noise_cov, increment) -> Array:
-    return EmpiricalJoint(
-        u_samples=ensemble, v_samples=predictions
-    ).transform_update(y, noise_cov / increment)
-
-
-@jax.jit
-def _pathwise_update(key, ensemble, predictions, y, noise_cov, increment) -> Array:
-    return EmpiricalJoint(
-        u_samples=ensemble, v_samples=predictions
-    ).pathwise_update(key, y, noise_cov / increment)
 
 
 # ---------------------------------------------------------------------------
@@ -922,6 +908,25 @@ class AdditiveInflation:
             return "<AdditiveInflation (unprintable leaves)>"
 
 
+# ---------------------------------------------------------------------------
+# private: the updates' array work, the clamp, the criteria, the field checks
+# ---------------------------------------------------------------------------
+
+
+@jax.jit
+def _transform_update(ensemble, predictions, y, noise_cov, increment) -> Array:
+    return EmpiricalJoint(
+        u_samples=ensemble, v_samples=predictions
+    ).transform_update(y, noise_cov / increment)
+
+
+@jax.jit
+def _pathwise_update(key, ensemble, predictions, y, noise_cov, increment) -> Array:
+    return EmpiricalJoint(
+        u_samples=ensemble, v_samples=predictions
+    ).pathwise_update(key, y, noise_cov / increment)
+
+
 @jax.jit
 def _multiplicative_inflate(ensemble: Array, anomaly_factor: Array) -> Array:
     return jnp.mean(ensemble, axis=-2) + anomaly_factor * _anomalies(ensemble)
@@ -931,11 +936,6 @@ def _multiplicative_inflate(ensemble: Array, anomaly_factor: Array) -> Array:
 def _additive_inflate(cov, key, ensemble, n_members: int, u_dim: int) -> Array:
     pert = Gaussian(jnp.zeros(u_dim), cov).sample(key, n_members)
     return ensemble + (pert - pert.mean(axis=0))
-
-
-# ---------------------------------------------------------------------------
-# private: the clamp, the two criteria, and the shared field checks
-# ---------------------------------------------------------------------------
 
 
 def _bracket_top(schedule, beta: Array) -> Array:

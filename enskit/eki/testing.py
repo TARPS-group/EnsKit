@@ -80,68 +80,6 @@ __all__ = [
 _ATOL = 1e-9
 
 
-def _close(got, want, what: str, atol: float = _ATOL) -> None:
-    got, want = np.asarray(got), np.asarray(want)
-    assert got.shape == want.shape, f"{what}: shape {got.shape} != {want.shape}"
-    err = np.abs(got - want).max() if got.size else 0.0
-    assert err <= atol, f"{what}: max abs err {err:.3e}"
-
-
-def _identical(got, want, what: str) -> None:
-    got, want = np.asarray(got), np.asarray(want)
-    assert got.shape == want.shape, f"{what}: shape {got.shape} != {want.shape}"
-    assert np.array_equal(got, want), f"{what}: not bit-identical"
-
-
-def synthetic_evaluation(
-    *,
-    n_members: int = 6,
-    u_dim: int = 3,
-    v_dim: int = 4,
-    step: int = 0,
-    beta: float = 0.25,
-    seed: int = 0,
-) -> Evaluation:
-    """A small :class:`~enskit.eki.Evaluation` to run the checks against.
-
-    A user testing their own schedule should not have to run a forward model
-    to get one. The arrays are pseudo-random and independent of one another —
-    there is no observation to make the residuals agree with the predictions —
-    so this is a shape-and-purity fixture, not a physically consistent step.
-    The residuals do have spread, so a schedule's criterion has something to
-    measure.
-
-    Parameters
-    ----------
-    n_members, u_dim, v_dim
-        The sizes :math:`J`, :math:`P` and :math:`N`. Keyword-only.
-    step, beta
-        The step index and the level entering the step. Keyword-only.
-    seed
-        Seeds the NumPy generator that fills the arrays. Keyword-only.
-
-    Returns
-    -------
-    Evaluation
-        Unbatched, with every member valid.
-    """
-    rng = np.random.default_rng(seed)
-    ensemble = rng.normal(size=(n_members, u_dim))
-    predictions = rng.normal(size=(n_members, v_dim))
-    residuals = rng.normal(size=(n_members, v_dim))
-    anomalies = ensemble - ensemble.mean(axis=0)
-    spread = np.linalg.norm(anomalies) / np.sqrt((n_members - 1) * u_dim)
-    return Evaluation(
-        step=step,
-        beta=beta,
-        ensemble=jnp.asarray(ensemble),
-        predictions=jnp.asarray(predictions),
-        whitened_residuals=jnp.asarray(residuals),
-        rms_parameter_spread=jnp.asarray(spread),
-        n_valid=n_members,
-    )
-
-
 def check_schedule(schedule, evaluation: Evaluation | None = None) -> None:
     """Check a :class:`~enskit.eki.Schedule` against its protocol.
 
@@ -551,6 +489,68 @@ def check_forward_model(
         f"on row j of the argument alone. A model that normalizes across the "
         f"ensemble does this, and a run cannot detect it",
     )
+
+
+def synthetic_evaluation(
+    *,
+    n_members: int = 6,
+    u_dim: int = 3,
+    v_dim: int = 4,
+    step: int = 0,
+    beta: float = 0.25,
+    seed: int = 0,
+) -> Evaluation:
+    """A small :class:`~enskit.eki.Evaluation` to run the checks against.
+
+    A user testing their own schedule should not have to run a forward model
+    to get one. The arrays are pseudo-random and independent of one another —
+    there is no observation to make the residuals agree with the predictions —
+    so this is a shape-and-purity fixture, not a physically consistent step.
+    The residuals do have spread, so a schedule's criterion has something to
+    measure.
+
+    Parameters
+    ----------
+    n_members, u_dim, v_dim
+        The sizes :math:`J`, :math:`P` and :math:`N`. Keyword-only.
+    step, beta
+        The step index and the level entering the step. Keyword-only.
+    seed
+        Seeds the NumPy generator that fills the arrays. Keyword-only.
+
+    Returns
+    -------
+    Evaluation
+        Unbatched, with every member valid.
+    """
+    rng = np.random.default_rng(seed)
+    ensemble = rng.normal(size=(n_members, u_dim))
+    predictions = rng.normal(size=(n_members, v_dim))
+    residuals = rng.normal(size=(n_members, v_dim))
+    anomalies = ensemble - ensemble.mean(axis=0)
+    spread = np.linalg.norm(anomalies) / np.sqrt((n_members - 1) * u_dim)
+    return Evaluation(
+        step=step,
+        beta=beta,
+        ensemble=jnp.asarray(ensemble),
+        predictions=jnp.asarray(predictions),
+        whitened_residuals=jnp.asarray(residuals),
+        rms_parameter_spread=jnp.asarray(spread),
+        n_valid=n_members,
+    )
+
+
+def _close(got, want, what: str, atol: float = _ATOL) -> None:
+    got, want = np.asarray(got), np.asarray(want)
+    assert got.shape == want.shape, f"{what}: shape {got.shape} != {want.shape}"
+    err = np.abs(got - want).max() if got.size else 0.0
+    assert err <= atol, f"{what}: max abs err {err:.3e}"
+
+
+def _identical(got, want, what: str) -> None:
+    got, want = np.asarray(got), np.asarray(want)
+    assert got.shape == want.shape, f"{what}: shape {got.shape} != {want.shape}"
+    assert np.array_equal(got, want), f"{what}: not bit-identical"
 
 
 def _forward_call(forward, ensemble, name: str, u_dim: int, v_dim: int):

@@ -109,174 +109,76 @@ _MAX_POSTERIOR_ELEMENTS = 20_000_000
 
 
 # ---------------------------------------------------------------------------
-# shared validation and per-member models
-# ---------------------------------------------------------------------------
-
-
-def _check_array_field(cls_name: str, field_name: str, value, shape: tuple) -> None:
-    """Require an array of exactly ``shape``, finite in debug mode.
-
-    A field that cannot be inspected is rejected rather than waved through:
-    a Python list passes a shape check and then fails inside the model, with
-    an error naming a tracer rather than the field.
-    """
-    if getattr(value, "shape", None) is None:
-        raise TypeError(
-            f"{cls_name}.{field_name}: expected an array of shape {shape}, got "
-            f"{type(value).__name__}, which has no shape to check. Pass a JAX "
-            f"array — jnp.asarray() on a nested list."
-        )
-    if tuple(value.shape) != shape:
-        raise ValueError(
-            f"{cls_name}.{field_name}: expected an array of shape {shape}, got "
-            f"shape {tuple(value.shape)}"
-        )
-    value_check(
-        value,
-        lambda arr: bool(jnp.all(jnp.isfinite(arr))),
-        f"{cls_name}.{field_name}: must be finite",
-    )
-
-
-def _check_not_family(cls_name: str, field_name: str, value) -> None:
-    """Reject a vmapped family, naming the object being built.
-
-    A family field is accepted by every size check here and diagnosed much
-    later, by the operator, in a message about the operator rather than about
-    the problem.
-    """
-    if value.batch_shape != ():
-        raise ValueError(
-            f"{cls_name}.{field_name}: {value!r} is a vmapped family with batch "
-            f"shape {value.batch_shape}; build a family of problems with "
-            f"jax.vmap over a function that constructs one, not from a family "
-            f"field."
-        )
-
-
-def _check_problem(
-    cls_name: str,
-    *,
-    u_dim: int,
-    v_dim: int,
-    prior: Gaussian,
-    noise_cov: PSDLinOp,
-    y: Array,
-    u_true: Array,
-) -> None:
-    """Validate the four fields every problem carries against its sizes."""
-    if not isinstance(prior, Gaussian):
-        raise TypeError(
-            f"{cls_name}.prior: must be a enskit.gauss.Gaussian, got "
-            f"{type(prior).__name__}. Build one as "
-            f"Gaussian(mean, PSDDiagonal(variances))."
-        )
-    if not isinstance(noise_cov, PSDLinOp):
-        raise TypeError(
-            f"{cls_name}.noise_cov: must be a enskit.linalg.PSDLinOp, got "
-            f"{type(noise_cov).__name__}. Wrap a dense matrix as "
-            f"enskit.linalg.DensePSD(matrix)."
-        )
-    _check_not_family(cls_name, "prior", prior)
-    _check_not_family(cls_name, "noise_cov", noise_cov)
-    if prior.dim != u_dim:
-        raise ValueError(
-            f"{cls_name}: the prior has dimension {prior.dim}, but the model "
-            f"takes {u_dim} parameters"
-        )
-    if noise_cov.shape[0] != v_dim:
-        raise ValueError(
-            f"{cls_name}: {noise_cov!r} has side {noise_cov.shape[0]}, but the "
-            f"model returns {v_dim} predictions"
-        )
-    _check_array_field(cls_name, "y", y, (v_dim,))
-    _check_array_field(cls_name, "u_true", u_true, (u_dim,))
-
-
-def _check_dim(where: str, name: str, value) -> None:
-    """Require a positive Python ``int``, excluding ``bool``."""
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise TypeError(
-            f"{where}: {name} must be an int, got {type(value).__name__}"
-        )
-    if value < 1:
-        raise ValueError(f"{where}: {name} must be at least 1, got {value}")
-
-
-def _check_scale(where: str, name: str, value) -> None:
-    """Require a positive finite scalar: ``nan`` and ``inf`` both fail.
-
-    ``not (value > 0)`` alone catches ``nan`` and lets ``inf`` through, which
-    would build a problem whose every array is non-finite.
-    """
-    try:
-        scale = float(value)
-    except (TypeError, ValueError) as exc:
-        raise TypeError(
-            f"{where}: {name} must be a real scalar, got "
-            f"{type(value).__name__}"
-        ) from exc
-    if not (scale > 0.0) or not math.isfinite(scale):
-        raise ValueError(
-            f"{where}: {name} must be positive and finite, got {value}"
-        )
-
-
-def _check_ensemble(cls_name: str, ensemble, u_dim: int):
-    """Require exactly ``(J, u_dim)``: the whole ensemble, one member per row.
-
-    The generalized-ufunc convention would carry any leading batch rank
-    through, so a single parameter vector returns a plausible ``(N,)`` and a
-    stack of ensembles a plausible ``(B, J, N)``. Neither is what a run passes
-    — a run binds one ensemble — and the first is the mistake the forward-model
-    guide calls the most common one, so the models say so rather than
-    answering. ``jax.vmap`` over the method still works: it passes each slice
-    as a two-dimensional ensemble.
-    """
-    shape = getattr(ensemble, "shape", None)
-    if shape is None:
-        raise TypeError(
-            f"{cls_name}.forward: expected a (J, {u_dim}) array, got "
-            f"{type(ensemble).__name__}, which has no shape"
-        )
-    if len(shape) != 2 or shape[1] != u_dim:
-        raise ValueError(
-            f"{cls_name}.forward: expected a (J, {u_dim}) ensemble, got shape "
-            f"{tuple(shape)}. The model is called once with the whole "
-            f"ensemble, one member per row — not with a single parameter "
-            f"vector, and never with a further leading axis."
-        )
-    return ensemble
-
-
-def _decay(member: Array, times: Array) -> Array:
-    """One member of the decay model: ``(2,) -> (N,)``.
-
-    .. math::
-
-        v_i = u_0 \\, e^{-u_1 t_i} .
-    """
-    return member[0] * jnp.exp(-member[1] * times)
-
-
-def _restricted_decay(member: Array, times: Array, rate_floor: float) -> Array:
-    """One member of the decay model, outside its domain returning ``nan``.
-
-    The rate is clamped inside the valid branch as well as selected outside
-    it. ``jnp.where`` evaluates both branches, and for a very negative rate
-    the discarded one overflows to ``inf``; the derivative then multiplies
-    that by a zero cotangent and returns ``nan``. Clamping first keeps the
-    discarded branch finite, so the model differentiates.
-    """
-    valid = member[1] > rate_floor
-    safe = jnp.where(valid, member[1], rate_floor + 1.0)
-    prediction = member[0] * jnp.exp(-safe * times)
-    return jnp.where(valid, prediction, jnp.nan)
-
-
-# ---------------------------------------------------------------------------
 # the linear-Gaussian problem
 # ---------------------------------------------------------------------------
+
+
+def linear_gaussian(
+    *,
+    u_dim: int = 4,
+    v_dim: int = 8,
+    prior_std: float = 1.0,
+    noise_std: float = 0.1,
+    seed: int = 0,
+) -> LinearGaussian:
+    """A :class:`LinearGaussian` problem at a chosen pair of dimensions.
+
+    The map's entries are drawn :math:`N(0, 1/P)`, so a prediction is of the
+    same order as ``prior_std`` whatever ``P`` is, and the signal-to-noise
+    ratio is about ``prior_std / noise_std`` at every size. The true
+    parameters are a draw from the prior, and the observation is
+    :math:`G u_\\star` plus a draw from the observation error — so the problem
+    is well specified, and the posterior really does concentrate near
+    ``u_true`` where the data can see it.
+
+    Parameters
+    ----------
+    u_dim, v_dim
+        The number of parameters :math:`P` and predictions :math:`N`.
+        Keyword-only.
+    prior_std, noise_std
+        The prior standard deviation, the same in every parameter, and the
+        observation error standard deviation, the same in every prediction.
+        Both positive. Keyword-only.
+    seed
+        Seeds the map, the true parameters and the observation error.
+        Keyword-only.
+
+    Returns
+    -------
+    LinearGaussian
+
+    Raises
+    ------
+    ValueError
+        If a dimension is below 1, or a standard deviation is not positive.
+
+    Notes
+    -----
+    Pass ``u_dim=2000, v_dim=40`` for a problem where the parameter dimension
+    far exceeds any affordable ensemble size — the regime in which a run can
+    only represent a :math:`J-1`-dimensional subspace of the answer, and in
+    which comparing against :meth:`LinearGaussian.posterior` is the only way
+    to see that.
+    """
+    _check_dim("linear_gaussian", "u_dim", u_dim)
+    _check_dim("linear_gaussian", "v_dim", v_dim)
+    _check_scale("linear_gaussian", "prior_std", prior_std)
+    _check_scale("linear_gaussian", "noise_std", noise_std)
+    key_map, key_truth, key_noise = jax.random.split(jax.random.key(seed), 3)
+    G = Dense(jax.random.normal(key_map, (v_dim, u_dim)) / jnp.sqrt(u_dim))
+    prior = Gaussian(
+        jnp.zeros(u_dim), PSDDiagonal(jnp.full(u_dim, float(prior_std) ** 2))
+    )
+    u_true = prior.sample(key_truth, 1)[0]
+    error = noise_std * jax.random.normal(key_noise, (v_dim,))
+    return LinearGaussian(
+        G=G,
+        prior=prior,
+        noise_cov=PSDDiagonal(jnp.full(v_dim, float(noise_std) ** 2)),
+        y=G.matvec(u_true) + error,
+        u_true=u_true,
+    )
 
 
 @dataclass(frozen=True, eq=False, repr=False)
@@ -479,77 +381,72 @@ class LinearGaussian:
         return joint.condition(self.y, self.noise_cov / beta)
 
 
-def linear_gaussian(
-    *,
-    u_dim: int = 4,
-    v_dim: int = 8,
-    prior_std: float = 1.0,
-    noise_std: float = 0.1,
-    seed: int = 0,
-) -> LinearGaussian:
-    """A :class:`LinearGaussian` problem at a chosen pair of dimensions.
-
-    The map's entries are drawn :math:`N(0, 1/P)`, so a prediction is of the
-    same order as ``prior_std`` whatever ``P`` is, and the signal-to-noise
-    ratio is about ``prior_std / noise_std`` at every size. The true
-    parameters are a draw from the prior, and the observation is
-    :math:`G u_\\star` plus a draw from the observation error — so the problem
-    is well specified, and the posterior really does concentrate near
-    ``u_true`` where the data can see it.
-
-    Parameters
-    ----------
-    u_dim, v_dim
-        The number of parameters :math:`P` and predictions :math:`N`.
-        Keyword-only.
-    prior_std, noise_std
-        The prior standard deviation, the same in every parameter, and the
-        observation error standard deviation, the same in every prediction.
-        Both positive. Keyword-only.
-    seed
-        Seeds the map, the true parameters and the observation error.
-        Keyword-only.
-
-    Returns
-    -------
-    LinearGaussian
-
-    Raises
-    ------
-    ValueError
-        If a dimension is below 1, or a standard deviation is not positive.
-
-    Notes
-    -----
-    Pass ``u_dim=2000, v_dim=40`` for a problem where the parameter dimension
-    far exceeds any affordable ensemble size — the regime in which a run can
-    only represent a :math:`J-1`-dimensional subspace of the answer, and in
-    which comparing against :meth:`LinearGaussian.posterior` is the only way
-    to see that.
-    """
-    _check_dim("linear_gaussian", "u_dim", u_dim)
-    _check_dim("linear_gaussian", "v_dim", v_dim)
-    _check_scale("linear_gaussian", "prior_std", prior_std)
-    _check_scale("linear_gaussian", "noise_std", noise_std)
-    key_map, key_truth, key_noise = jax.random.split(jax.random.key(seed), 3)
-    G = Dense(jax.random.normal(key_map, (v_dim, u_dim)) / jnp.sqrt(u_dim))
-    prior = Gaussian(
-        jnp.zeros(u_dim), PSDDiagonal(jnp.full(u_dim, float(prior_std) ** 2))
-    )
-    u_true = prior.sample(key_truth, 1)[0]
-    error = noise_std * jax.random.normal(key_noise, (v_dim,))
-    return LinearGaussian(
-        G=G,
-        prior=prior,
-        noise_cov=PSDDiagonal(jnp.full(v_dim, float(noise_std) ** 2)),
-        y=G.matvec(u_true) + error,
-        u_true=u_true,
-    )
-
-
 # ---------------------------------------------------------------------------
 # the decay problem, and its restricted variant
 # ---------------------------------------------------------------------------
+
+
+def exponential_decay(
+    *,
+    n_times: int = 12,
+    t_max: float = 3.0,
+    noise_std: float = 0.02,
+    seed: int = 0,
+) -> ExponentialDecay:
+    """An :class:`ExponentialDecay` problem on an evenly spaced set of points.
+
+    The points are ``n_times`` values evenly spaced over ``(0, t_max]``, the
+    true parameters are ``(2.0, 1.5)``, and the prior is
+    :math:`\\mathcal{N}\\bigl((1, 1), I\\bigr)`. The same functional form as
+    the user guide's "Writing a forward model" page, at a faster true rate, a
+    wider prior over the rate, a five times narrower observation error and
+    twelve observation points rather than three.
+
+    Parameters
+    ----------
+    n_times
+        The number of observation points :math:`N`. Keyword-only.
+    t_max
+        The last point. Keyword-only.
+    noise_std
+        The observation error standard deviation, the same at every point.
+        Keyword-only.
+    seed
+        Seeds the observation error. Keyword-only.
+
+    Returns
+    -------
+    ExponentialDecay
+
+    Raises
+    ------
+    TypeError
+        If ``n_times`` is not an ``int``.
+    ValueError
+        If ``n_times`` is below 1, or ``t_max`` or ``noise_std`` is not
+        positive and finite.
+
+    Notes
+    -----
+    The defaults are chosen so that assimilating the observation in one unit
+    step and assimilating it gradually reach *reliably* different answers
+    rather than coincidentally different ones. Measured over the eight
+    observation seeds 0 to 7, against
+    :class:`~enskit.eki.AdaptiveESSSchedule` at 64 members: the two posterior
+    means differ by between 0.10 and 0.25 in the rate, and the gradual answer
+    is nearer ``u_true`` at every seed, by a factor between 2.7 and 41.
+    ``tests/test_toy.py`` asserts both over all eight.
+    """
+    times, prior, noise_cov, y, u_true = _decay_problem(
+        n_times=n_times,
+        t_max=t_max,
+        noise_std=noise_std,
+        seed=seed,
+        where="exponential_decay",
+    )
+    return ExponentialDecay(
+        times=times, prior=prior, noise_cov=noise_cov, y=y, u_true=u_true
+    )
 
 
 @dataclass(frozen=True, eq=False, repr=False)
@@ -658,6 +555,59 @@ class ExponentialDecay:
             return f"ExponentialDecay(v_dim={self.v_dim})"
         except Exception:
             return "<ExponentialDecay (unprintable fields)>"
+
+
+def restricted_decay(
+    *,
+    n_times: int = 12,
+    t_max: float = 3.0,
+    noise_std: float = 0.02,
+    rate_floor: float = 0.0,
+    seed: int = 0,
+) -> RestrictedDecay:
+    """A :class:`RestrictedDecay` problem: :func:`exponential_decay`'s, with a domain.
+
+    The same problem in every other respect, so a run against it can be
+    compared with one against :func:`exponential_decay` directly. At the
+    default floor the prior puts about 16% of its mass outside the valid
+    domain, so a few members of any ensemble drawn from the prior fail, and
+    none once the ensemble has concentrated above the floor.
+
+    Parameters
+    ----------
+    n_times, t_max, noise_std, seed
+        As :func:`exponential_decay`. Keyword-only.
+    rate_floor
+        The domain boundary; the model is defined where the rate exceeds it.
+        Raise it toward the prior mean to fail more members. It must stay
+        strictly below the true rate of 1.5, or the observation would have
+        been generated where the model does not evaluate. Keyword-only.
+
+    Returns
+    -------
+    RestrictedDecay
+
+    Raises
+    ------
+    ValueError
+        As :func:`exponential_decay`, and if ``rate_floor`` is at or above the
+        true rate.
+    """
+    times, prior, noise_cov, y, u_true = _decay_problem(
+        n_times=n_times,
+        t_max=t_max,
+        noise_std=noise_std,
+        seed=seed,
+        where="restricted_decay",
+    )
+    return RestrictedDecay(
+        times=times,
+        prior=prior,
+        noise_cov=noise_cov,
+        y=y,
+        u_true=u_true,
+        rate_floor=float(rate_floor),
+    )
 
 
 @dataclass(frozen=True, eq=False, repr=False)
@@ -825,6 +775,172 @@ class RestrictedDecay:
             return "<RestrictedDecay (unprintable fields)>"
 
 
+# ---------------------------------------------------------------------------
+# private: shared validation and per-member models
+# ---------------------------------------------------------------------------
+
+
+def _check_array_field(cls_name: str, field_name: str, value, shape: tuple) -> None:
+    """Require an array of exactly ``shape``, finite in debug mode.
+
+    A field that cannot be inspected is rejected rather than waved through:
+    a Python list passes a shape check and then fails inside the model, with
+    an error naming a tracer rather than the field.
+    """
+    if getattr(value, "shape", None) is None:
+        raise TypeError(
+            f"{cls_name}.{field_name}: expected an array of shape {shape}, got "
+            f"{type(value).__name__}, which has no shape to check. Pass a JAX "
+            f"array — jnp.asarray() on a nested list."
+        )
+    if tuple(value.shape) != shape:
+        raise ValueError(
+            f"{cls_name}.{field_name}: expected an array of shape {shape}, got "
+            f"shape {tuple(value.shape)}"
+        )
+    value_check(
+        value,
+        lambda arr: bool(jnp.all(jnp.isfinite(arr))),
+        f"{cls_name}.{field_name}: must be finite",
+    )
+
+
+def _check_not_family(cls_name: str, field_name: str, value) -> None:
+    """Reject a vmapped family, naming the object being built.
+
+    A family field is accepted by every size check here and diagnosed much
+    later, by the operator, in a message about the operator rather than about
+    the problem.
+    """
+    if value.batch_shape != ():
+        raise ValueError(
+            f"{cls_name}.{field_name}: {value!r} is a vmapped family with batch "
+            f"shape {value.batch_shape}; build a family of problems with "
+            f"jax.vmap over a function that constructs one, not from a family "
+            f"field."
+        )
+
+
+def _check_problem(
+    cls_name: str,
+    *,
+    u_dim: int,
+    v_dim: int,
+    prior: Gaussian,
+    noise_cov: PSDLinOp,
+    y: Array,
+    u_true: Array,
+) -> None:
+    """Validate the four fields every problem carries against its sizes."""
+    if not isinstance(prior, Gaussian):
+        raise TypeError(
+            f"{cls_name}.prior: must be a enskit.gauss.Gaussian, got "
+            f"{type(prior).__name__}. Build one as "
+            f"Gaussian(mean, PSDDiagonal(variances))."
+        )
+    if not isinstance(noise_cov, PSDLinOp):
+        raise TypeError(
+            f"{cls_name}.noise_cov: must be a enskit.linalg.PSDLinOp, got "
+            f"{type(noise_cov).__name__}. Wrap a dense matrix as "
+            f"enskit.linalg.DensePSD(matrix)."
+        )
+    _check_not_family(cls_name, "prior", prior)
+    _check_not_family(cls_name, "noise_cov", noise_cov)
+    if prior.dim != u_dim:
+        raise ValueError(
+            f"{cls_name}: the prior has dimension {prior.dim}, but the model "
+            f"takes {u_dim} parameters"
+        )
+    if noise_cov.shape[0] != v_dim:
+        raise ValueError(
+            f"{cls_name}: {noise_cov!r} has side {noise_cov.shape[0]}, but the "
+            f"model returns {v_dim} predictions"
+        )
+    _check_array_field(cls_name, "y", y, (v_dim,))
+    _check_array_field(cls_name, "u_true", u_true, (u_dim,))
+
+
+def _check_dim(where: str, name: str, value) -> None:
+    """Require a positive Python ``int``, excluding ``bool``."""
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError(
+            f"{where}: {name} must be an int, got {type(value).__name__}"
+        )
+    if value < 1:
+        raise ValueError(f"{where}: {name} must be at least 1, got {value}")
+
+
+def _check_scale(where: str, name: str, value) -> None:
+    """Require a positive finite scalar: ``nan`` and ``inf`` both fail.
+
+    ``not (value > 0)`` alone catches ``nan`` and lets ``inf`` through, which
+    would build a problem whose every array is non-finite.
+    """
+    try:
+        scale = float(value)
+    except (TypeError, ValueError) as exc:
+        raise TypeError(
+            f"{where}: {name} must be a real scalar, got "
+            f"{type(value).__name__}"
+        ) from exc
+    if not (scale > 0.0) or not math.isfinite(scale):
+        raise ValueError(
+            f"{where}: {name} must be positive and finite, got {value}"
+        )
+
+
+def _check_ensemble(cls_name: str, ensemble, u_dim: int):
+    """Require exactly ``(J, u_dim)``: the whole ensemble, one member per row.
+
+    The generalized-ufunc convention would carry any leading batch rank
+    through, so a single parameter vector returns a plausible ``(N,)`` and a
+    stack of ensembles a plausible ``(B, J, N)``. Neither is what a run passes
+    — a run binds one ensemble — and the first is the mistake the forward-model
+    guide calls the most common one, so the models say so rather than
+    answering. ``jax.vmap`` over the method still works: it passes each slice
+    as a two-dimensional ensemble.
+    """
+    shape = getattr(ensemble, "shape", None)
+    if shape is None:
+        raise TypeError(
+            f"{cls_name}.forward: expected a (J, {u_dim}) array, got "
+            f"{type(ensemble).__name__}, which has no shape"
+        )
+    if len(shape) != 2 or shape[1] != u_dim:
+        raise ValueError(
+            f"{cls_name}.forward: expected a (J, {u_dim}) ensemble, got shape "
+            f"{tuple(shape)}. The model is called once with the whole "
+            f"ensemble, one member per row — not with a single parameter "
+            f"vector, and never with a further leading axis."
+        )
+    return ensemble
+
+
+def _decay(member: Array, times: Array) -> Array:
+    """One member of the decay model: ``(2,) -> (N,)``.
+
+    .. math::
+
+        v_i = u_0 \\, e^{-u_1 t_i} .
+    """
+    return member[0] * jnp.exp(-member[1] * times)
+
+
+def _restricted_decay(member: Array, times: Array, rate_floor: float) -> Array:
+    """One member of the decay model, outside its domain returning ``nan``.
+
+    The rate is clamped inside the valid branch as well as selected outside
+    it. ``jnp.where`` evaluates both branches, and for a very negative rate
+    the discarded one overflows to ``inf``; the derivative then multiplies
+    that by a zero cotangent and returns ``nan``. Clamping first keeps the
+    discarded branch finite, so the model differentiates.
+    """
+    valid = member[1] > rate_floor
+    safe = jnp.where(valid, member[1], rate_floor + 1.0)
+    prediction = member[0] * jnp.exp(-safe * times)
+    return jnp.where(valid, prediction, jnp.nan)
+
+
 def _check_times(cls_name: str, times) -> None:
     """Require a rank-1 array of at least one point, finite in debug mode.
 
@@ -869,119 +985,3 @@ def _decay_problem(
     noise_cov = PSDDiagonal(jnp.full(n_times, float(noise_std) ** 2))
     error = noise_std * jax.random.normal(jax.random.key(seed), (n_times,))
     return times, prior, noise_cov, _decay(u_true, times) + error, u_true
-
-
-def exponential_decay(
-    *,
-    n_times: int = 12,
-    t_max: float = 3.0,
-    noise_std: float = 0.02,
-    seed: int = 0,
-) -> ExponentialDecay:
-    """An :class:`ExponentialDecay` problem on an evenly spaced set of points.
-
-    The points are ``n_times`` values evenly spaced over ``(0, t_max]``, the
-    true parameters are ``(2.0, 1.5)``, and the prior is
-    :math:`\\mathcal{N}\\bigl((1, 1), I\\bigr)`. The same functional form as
-    the user guide's "Writing a forward model" page, at a faster true rate, a
-    wider prior over the rate, a five times narrower observation error and
-    twelve observation points rather than three.
-
-    Parameters
-    ----------
-    n_times
-        The number of observation points :math:`N`. Keyword-only.
-    t_max
-        The last point. Keyword-only.
-    noise_std
-        The observation error standard deviation, the same at every point.
-        Keyword-only.
-    seed
-        Seeds the observation error. Keyword-only.
-
-    Returns
-    -------
-    ExponentialDecay
-
-    Raises
-    ------
-    TypeError
-        If ``n_times`` is not an ``int``.
-    ValueError
-        If ``n_times`` is below 1, or ``t_max`` or ``noise_std`` is not
-        positive and finite.
-
-    Notes
-    -----
-    The defaults are chosen so that assimilating the observation in one unit
-    step and assimilating it gradually reach *reliably* different answers
-    rather than coincidentally different ones. Measured over the eight
-    observation seeds 0 to 7, against
-    :class:`~enskit.eki.AdaptiveESSSchedule` at 64 members: the two posterior
-    means differ by between 0.10 and 0.25 in the rate, and the gradual answer
-    is nearer ``u_true`` at every seed, by a factor between 2.7 and 41.
-    ``tests/test_toy.py`` asserts both over all eight.
-    """
-    times, prior, noise_cov, y, u_true = _decay_problem(
-        n_times=n_times,
-        t_max=t_max,
-        noise_std=noise_std,
-        seed=seed,
-        where="exponential_decay",
-    )
-    return ExponentialDecay(
-        times=times, prior=prior, noise_cov=noise_cov, y=y, u_true=u_true
-    )
-
-
-def restricted_decay(
-    *,
-    n_times: int = 12,
-    t_max: float = 3.0,
-    noise_std: float = 0.02,
-    rate_floor: float = 0.0,
-    seed: int = 0,
-) -> RestrictedDecay:
-    """A :class:`RestrictedDecay` problem: :func:`exponential_decay`'s, with a domain.
-
-    The same problem in every other respect, so a run against it can be
-    compared with one against :func:`exponential_decay` directly. At the
-    default floor the prior puts about 16% of its mass outside the valid
-    domain, so a few members of any ensemble drawn from the prior fail, and
-    none once the ensemble has concentrated above the floor.
-
-    Parameters
-    ----------
-    n_times, t_max, noise_std, seed
-        As :func:`exponential_decay`. Keyword-only.
-    rate_floor
-        The domain boundary; the model is defined where the rate exceeds it.
-        Raise it toward the prior mean to fail more members. It must stay
-        strictly below the true rate of 1.5, or the observation would have
-        been generated where the model does not evaluate. Keyword-only.
-
-    Returns
-    -------
-    RestrictedDecay
-
-    Raises
-    ------
-    ValueError
-        As :func:`exponential_decay`, and if ``rate_floor`` is at or above the
-        true rate.
-    """
-    times, prior, noise_cov, y, u_true = _decay_problem(
-        n_times=n_times,
-        t_max=t_max,
-        noise_std=noise_std,
-        seed=seed,
-        where="restricted_decay",
-    )
-    return RestrictedDecay(
-        times=times,
-        prior=prior,
-        noise_cov=noise_cov,
-        y=y,
-        u_true=u_true,
-        rate_floor=float(rate_floor),
-    )
