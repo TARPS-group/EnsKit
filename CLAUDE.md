@@ -98,6 +98,59 @@ no `u_dim`/`v_dim` in the layers (the toy problems take `parameter_dim` and
 is preceded by one **evaluation** of the forward model. "Rung" and
 "iteration" as a countable noun are retired.
 
+## Pull requests and handoffs
+
+The redesign is built one pull request at a time, each in its own fresh
+session. Sessions do not carry state for each other: **the repository and its
+GitHub issues are the source of truth.** Anything a later session needs goes
+into one of these, never only into a chat or a prompt:
+
+| what | where |
+| --- | --- |
+| the design and the plan | `docs/redesign/index.md`; the normative contracts in `docs/` as they are written, which supersede the design where they differ |
+| a PR's scope, completion criteria and exceptions | its tracking issue in the "EnsKit 0.1" milestone |
+| project rules | this file |
+| current state, gotchas, notes for upcoming PRs | `HANDOFF.md` |
+| a design tension with concrete instances | a new GitHub issue, with the numbers and the options |
+
+**Starting a PR.**
+1. Read this file, `docs/redesign/index.md`, the redesign section and
+   "Next steps" of `HANDOFF.md`, and the tracking issue (`gh issue view N`).
+2. Run `git fetch --all` and branch `dev/<topic>` off `origin/main`, never
+   local `main`, which is often stale.
+3. The issue defines the scope. If the issue and the docs disagree, or the
+   scope is unclear, ask the maintainer before writing code.
+
+**During a PR.**
+- `uv run pytest`, `uv run ruff check .` and
+  `uv run sphinx-build -b html -W docs docs/_build/html` all pass before every
+  commit.
+- Before opening the PR, run an adversarial review with a subagent. Split
+  its findings: a design tension with concrete instances becomes an issue; a
+  trivial defect is fixed in the PR.
+- If the implementation must depart from the design, change the contract or
+  the design page in the same PR and say so in the PR body.
+  `docs/redesign/design.html` and the rest of `docs/redesign/` are a frozen
+  record and are not edited.
+
+**Finishing a PR.**
+1. Open it against `main` in the milestone, with `Closes #N`, the checks run,
+   and any exceptions listed. The maintainer reviews and merges; never merge.
+2. In the same PR, update `HANDOFF.md`: the current state, and anything the
+   next PRs need that their issues do not already say.
+3. Comment on the issue of any later PR that a finding affects.
+4. Hand off by offering the next PR, or PRs, whose dependencies are met as a
+   suggested task (the desktop app's task chip, which the maintainer starts
+   with "start with worktree"). If a dependency is still in review, the
+   prompt says to start only after it merges. The prompt carries pointers
+   only, because everything else is already in the repository:
+
+   > Implement PR N of the EnsKit plan, tracking issue #M. Follow "Pull
+   > requests and handoffs" in `CLAUDE.md`.
+
+   Without the desktop app, the maintainer pastes the same line into a new
+   session.
+
 ## Package management
 
 `uv`. Use `uv sync` and `uv sync --group dev`; never `pip install` into the

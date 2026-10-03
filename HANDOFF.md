@@ -224,9 +224,10 @@ pyEKI. Nothing domain-specific should come back across.
 
 ## Next steps
 
-Follow the plan in `docs/redesign/index.md`, one pull request at a time.
-PR 1 is next. The notes below, written before the redesign, still apply to
-the pull requests they name.
+Follow the plan in `docs/redesign/index.md`, one pull request at a time, in
+a fresh session for each, as described in "Pull requests and handoffs" in
+`CLAUDE.md`. PR 1 (#35) is next. The notes below, written before the redesign,
+still apply to the pull requests they name.
 
 ### Notes for PR 10, the `Kronecker` family
 
