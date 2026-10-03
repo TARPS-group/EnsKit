@@ -1,14 +1,14 @@
 # Forward model requirements
 
-pyEKI supplies everything in a run except the forward model. This page is what
+EnsKit supplies everything in a run except the forward model. This page is what
 that callable must satisfy; {ref}`eki-failures` is the normative statement.
-There is nothing to subclass and nothing to register: pyEKI ships no forward
+There is nothing to subclass and nothing to register: EnsKit ships no forward
 models for real use and defines no base class, protocol or registry for one.
 
 ## The interface
 
 ```python
-import pyeki  # enables float64; import before creating arrays
+import enskit  # enables float64; import before creating arrays
 import jax.numpy as jnp
 
 times = jnp.array([0.5, 1.0, 2.0])
@@ -102,7 +102,7 @@ The dtype must be a real floating one; an integer or complex return is a
 run's — in practice `float32` — is promoted to the run's working dtype and
 warns once per run.
 
-pyEKI enables `float64` because ensemble anomalies are formed by subtraction
+EnsKit enables `float64` because ensemble anomalies are formed by subtraction
 and lose digits to cancellation, and a model that computes or reports in single
 precision has already lost them before the array arrives; promoting prevents a
 *second* loss in the conditioning arithmetic and nothing more. A `float32`
@@ -147,7 +147,7 @@ This is the only requirement beyond the shapes and the failure signal. From
 *outside* a run it is detectable, and worth checking once:
 
 ```python
-from pyeki.eki.testing import check_forward_model
+from enskit.eki.testing import check_forward_model
 
 check_forward_model(forward, u_dim=2, v_dim=3)
 ```
@@ -239,9 +239,9 @@ Driving it is unremarkable:
 
 ```python
 import jax, jax.numpy as jnp
-from pyeki.eki import AdaptiveESSSchedule, EKIState, run
-from pyeki.gauss import Gaussian
-from pyeki.linalg import PSDDiagonal
+from enskit.eki import AdaptiveESSSchedule, EKIState, run
+from enskit.gauss import Gaussian
+from enskit.linalg import PSDDiagonal
 
 times = jnp.array([0.5, 1.0, 2.0])
 truth = jnp.array([2.0, 0.7])

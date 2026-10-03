@@ -1,6 +1,6 @@
 # Writing an operator
 
-Adding a structure pyEKI does not ship takes a class, a decorator, and a few
+Adding a structure EnsKit does not ship takes a class, a decorator, and a few
 short methods. Operator authors implement `_`-prefixed **hooks**; the public
 methods (`matvec`, `solve`, ...) are defined once on the base classes, where
 they validate the operand and check support before dispatching to your hook.
@@ -13,7 +13,7 @@ multiple of the identity plus a rank-one update.
 ```python
 import jax.numpy as jnp
 from jax import Array
-from pyeki.linalg import PSDLinOp, linop
+from enskit.linalg import PSDLinOp, linop
 
 @linop
 class IdentityPlusRankOne(PSDLinOp):
@@ -79,7 +79,7 @@ same applies to every other hook.
 Do not write `self.A @ x` inside a hook. For arrays with two or more
 dimensions, `@` contracts the second-to-last axis; when the operator is
 square, that returns a wrong answer without raising. Use
-`pyeki.linalg.dense_matvec`, which does the right contraction.
+`enskit.linalg.dense_matvec`, which does the right contraction.
 :::
 
 **`_to_dense`** must not route through `matvec` — build the array from the
@@ -87,7 +87,7 @@ stored fields directly. The conformance suite compares `matvec` against
 `to_dense`, and it verifies the independence mechanically by stubbing out
 `matvec` and calling `to_dense()`.
 
-**`check_operator`** from `pyeki.linalg.testing` is the executable contract:
+**`check_operator`** from `enskit.linalg.testing` is the executable contract:
 run it on a small instance of every new operator type. It checks
 application at several batch shapes and column counts, transposition,
 solves, square roots, whitening, capability honesty, that a PSD type really
@@ -98,7 +98,7 @@ here — so a NumPy result or a single-precision one fails even when its values
 are close.
 
 ```python
-from pyeki.linalg.testing import check_operator
+from enskit.linalg.testing import check_operator
 
 check_operator(IdentityPlusRankOne(jnp.asarray(0.5), jnp.arange(1.0, 5.0)))
 ```
@@ -137,12 +137,12 @@ For the example above, the Sherman–Morrison formula gives a cheap solve:
         )
 ```
 
-The factor is a horizontal stack, which composes from operators pyEKI
+The factor is a horizontal stack, which composes from operators EnsKit
 already provides:
 
 ```python
     def _factor(self):
-        from pyeki.linalg import Dense, Identity, hstack
+        from enskit.linalg import Dense, Identity, hstack
         n = self.shape[0]
         return hstack(
             jnp.sqrt(self.sigma2) * Identity(n),
@@ -189,5 +189,5 @@ tracers. JAX's pytree reconstruction (at every `jit`/`vmap` boundary)
 bypasses the constructor entirely, so validation neither slows those
 boundaries nor ever sees their batched or placeholder leaves. Value-level
 preconditions (positivity, definiteness) belong in
-`pyeki.linalg.value_check` assertions, which run only under
-`pyeki.linalg.debug_checks()`.
+`enskit.linalg.value_check` assertions, which run only under
+`enskit.linalg.debug_checks()`.

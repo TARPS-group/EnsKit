@@ -2,7 +2,7 @@
 
 Call the check matching your policy's axis on an instance of it, or
 :func:`check_forward_model` on a model, to verify it against the requirements
-:mod:`pyeki.eki` places on that axis.
+:mod:`enskit.eki` places on that axis.
 
 ============================= ==============================================
 function                      checks
@@ -16,7 +16,7 @@ function                      checks
 :func:`check_stopping_rule`   a Python ``bool`` is returned, and purity
 :func:`check_forward_model`   shape, dtype, row independence and determinism
                               of a forward model
-:func:`synthetic_evaluation`  a small :class:`~pyeki.eki.Evaluation` to run
+:func:`synthetic_evaluation`  a small :class:`~enskit.eki.Evaluation` to run
                               the checks against
 ============================= ==============================================
 
@@ -45,7 +45,7 @@ The behaviour these checks verify is specified by the "Ensemble Kalman
 Inversion contract" page of the documentation.
 
 The four policy checks each take a policy and a small
-:class:`~pyeki.eki.Evaluation`, which :func:`synthetic_evaluation` builds, so
+:class:`~enskit.eki.Evaluation`, which :func:`synthetic_evaluation` builds, so
 testing a schedule never means running a forward model.
 :func:`check_forward_model` is the exception, and is here for two reasons. A
 forward model is not a policy and has no protocol to conform to — the layer
@@ -102,7 +102,7 @@ def synthetic_evaluation(
     beta: float = 0.25,
     seed: int = 0,
 ) -> Evaluation:
-    """A small :class:`~pyeki.eki.Evaluation` to run the checks against.
+    """A small :class:`~enskit.eki.Evaluation` to run the checks against.
 
     A user testing their own schedule should not have to run a forward model
     to get one. The arrays are pseudo-random and independent of one another —
@@ -143,7 +143,7 @@ def synthetic_evaluation(
 
 
 def check_schedule(schedule, evaluation: Evaluation | None = None) -> None:
-    """Check a :class:`~pyeki.eki.Schedule` against its protocol.
+    """Check a :class:`~enskit.eki.Schedule` against its protocol.
 
     Verifies that ``n_steps`` and ``beta_target`` are present, of the right
     types, and unchanged by reads; that ``next_increment`` returns either
@@ -219,7 +219,7 @@ def check_update(
     step: int = 0,
     beta=0.25,
 ) -> None:
-    """Check an :class:`~pyeki.eki.EnsembleUpdate` against its protocol.
+    """Check an :class:`~enskit.eki.EnsembleUpdate` against its protocol.
 
     Verifies that the result is ``(J, P)`` with the incoming dtype; that the
     rule is deterministic given its key; that new members lie in the
@@ -302,7 +302,7 @@ def check_update(
 
 
 def check_inflation(inflation, key=None, ensemble=None, *, step: int = 0, beta=0.25):
-    """Check an :class:`~pyeki.eki.Inflation` against its protocol.
+    """Check an :class:`~enskit.eki.Inflation` against its protocol.
 
     Verifies shape and dtype preservation; purity, by calling twice on the
     same arguments and comparing bit-exactly; and that the ensemble mean is
@@ -358,7 +358,7 @@ def check_inflation(inflation, key=None, ensemble=None, *, step: int = 0, beta=0
 
 
 def check_stopping_rule(stop, evaluation: Evaluation | None = None) -> None:
-    """Check a :class:`~pyeki.eki.StoppingRule` against its protocol.
+    """Check a :class:`~enskit.eki.StoppingRule` against its protocol.
 
     Verifies that a Python ``bool`` is returned — not a 0-d array, which is
     truthy in a way that hides a traced value — and that the rule is pure.

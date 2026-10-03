@@ -1,11 +1,11 @@
 # Joint Gaussian contract
 
-This page specifies `pyeki.gauss`: the classes it provides, the contract of
+This page specifies `enskit.gauss`: the classes it provides, the contract of
 every method, and the conditioning mathematics that all of them share. It is
 normative — an implementation that violates a rule here is defective even if
 its tests pass — and it is the reference for two audiences: contributors
 implementing or reviewing the layer, and users who want a more precise
-account of Gaussian conditioning in pyEKI than the user guide gives.
+account of Gaussian conditioning in EnsKit than the user guide gives.
 
 Throughout, *must* and *never* state requirements, *should* states a strong
 default that a documented reason may override, and *may* states a permission.
@@ -113,13 +113,13 @@ Conventions, each normative:
   `Gaussian.log_density`, and the three realization arguments of
   `GaussianJoint.pathwise` ({ref}`gauss-pathwise`).
 - **Noise covariances are `PSDLinOp`s.** Every `noise_cov` argument must be
-  a {class}`~pyeki.linalg.PSDLinOp` of side $N$; a non-operator or an
+  a {class}`~enskit.linalg.PSDLinOp` of side $N$; a non-operator or an
   operator of the wrong shape is a `TypeError` / `ValueError` at call time.
   The conditioning methods use it only through `whiten` — by design, the one
   operation the noise covariance must support ({doc}`design`) — so a noise
   operator with no factorization at all still drives every update, and
   a scaled covariance such as `noise_cov / dbeta` (a
-  {class}`~pyeki.linalg.PSDScaled`) whitens as cheaply as the base operator.
+  {class}`~enskit.linalg.PSDScaled`) whitens as cheaply as the base operator.
 
 (gauss-objects)=
 ## The objects
@@ -149,12 +149,12 @@ Four rules govern the set:
    no `condition` on `EmpiricalJoint`: a method of that name on a class
    named for the empirical distribution reads like conditioning the
    empirical measure, which is not what it would do.
-3. **The set is closed.** Unlike the operator layer, `pyeki.gauss` has no
+3. **The set is closed.** Unlike the operator layer, `enskit.gauss` has no
    extension story: users do not subclass these classes. User extensibility
    lives one layer down, in the operators supplied as covariances and as
    factor row blocks — a custom operator that passes `check_operator` works
    here unchanged. There is consequently no public class decorator and no
-   `pyeki.gauss.testing` module ({ref}`gauss-conformance`).
+   `enskit.gauss.testing` module ({ref}`gauss-conformance`).
 4. **Objects are unbatched frozen pytrees, exactly like operators.** The
    construction, validation, and JAX-integration rules of the operator
    contract apply verbatim ({ref}`gauss-jax`); a family of joints is a
@@ -360,11 +360,11 @@ pristine.
 (gauss-primitives)=
 ## Conditioning primitives
 
-The two pieces above are public functions in `pyeki.gauss`, defined as pure
+The two pieces above are public functions in `enskit.gauss`, defined as pure
 matrix functions of their array arguments — no divisor, no whitening, and no
 randomness folded in. They exist as the layer's *advanced tier*: the class
 methods cover the global update, and domain localization (the planned
-`pyeki.localize`) calls these directly, once per local analysis, under
+`enskit.localize`) calls these directly, once per local analysis, under
 `jax.vmap` over fixed-size neighbourhoods.
 
 | function | signature | returns |
@@ -429,7 +429,7 @@ supplies, and the posterior that `GaussianJoint.condition` returns
 ({ref}`gauss-condition`).
 
 **Fields.** `mean`, a `(n,)` array, and `cov`, a
-{class}`~pyeki.linalg.PSDLinOp` of side `n`. Construction validates the rank
+{class}`~enskit.linalg.PSDLinOp` of side `n`. Construction validates the rank
 of `mean`, the operator type of `cov`, and their agreement
 (tier 2, shape-only — {ref}`gauss-validation`). `dim` is a property computed from `mean`.
 
@@ -438,7 +438,7 @@ The size properties across the layer follow one rule: a dimension is named
 against `EmpiricalJoint`'s `u_dim` and `v_dim` and `GaussianJoint`'s `u_dim`,
 `v_dim` and `latent_dim`. Counts keep the `n_` prefix, as `n_samples` does.
 The operator layer one level down names a single dimension `n`
-({class}`~pyeki.linalg.SquareLinOp`); this layer does not follow it, because
+({class}`~enskit.linalg.SquareLinOp`); this layer does not follow it, because
 `dim` is the name its multi-block objects already needed.
 
 **Capabilities delegate to the covariance.** `Gaussian` defines no
@@ -452,7 +452,7 @@ is a public field, so callers gate exactly as they do on operators:
 
 The Gaussian fit to a `(J, n)` array of samples, $J \ge 2$: mean the sample
 mean, covariance the empirical covariance with this layer's fixed $J-1$
-divisor, held as a {class}`~pyeki.linalg.PSDLowRank` whose factor is
+divisor, held as a {class}`~enskit.linalg.PSDLowRank` whose factor is
 $A^\top/\sqrt{J-1}$. A classmethod rather than logic in the constructor,
 because samples are a different kind of input from the mean and covariance
 the constructor takes ({ref}`contract-jax`).
@@ -477,7 +477,7 @@ than round-off.
 
 :::{note}
 This is a **fit**, not a conditioning result, and the distinction is the
-caller's to keep. `pyeki.eki` uses it to report the moments of a terminal
+caller's to keep. `enskit.eki` uses it to report the moments of a terminal
 ensemble, and states there what such an ensemble does and does not represent;
 nothing here licenses calling the result a posterior.
 :::
@@ -545,7 +545,7 @@ FF^\top\right)$ for the joint factor $F$ of {ref}`gauss-kernel`.
 
 **Fields.** `u_mean` and `v_mean`, arrays of shapes `(P,)` and `(N,)`; and
 `u_factor` and `v_factor`, the row blocks $F_u$ and $F_v$, both
-{class}`~pyeki.linalg.LinOp` s, of shapes `(P, k)` and `(N, k)`. All four
+{class}`~enskit.linalg.LinOp` s, of shapes `(P, k)` and `(N, k)`. All four
 are **keyword-only**: the two means, and the two factors, are pairs of
 like-shaped objects agreeing on their trailing size, so exchanging a pair is
 valid whenever $P = N$ and no check can detect it. Construction validates
@@ -578,7 +578,7 @@ therefore the documented routes, and `from_factors` is the escape hatch.
 | `from_factors(*, u_mean, v_mean, u_factor, v_factor)` | row blocks supplied directly | as given |
 
 `from_linear_map` takes a `Gaussian` whose covariance supports `factor` and
-a {class}`~pyeki.linalg.LinOp` $G$ of shape `(N, P)`, and builds
+a {class}`~enskit.linalg.LinOp` $G$ of shape `(N, P)`, and builds
 
 $$
 \bar u = m_0, \quad \bar v = G m_0, \quad
@@ -614,7 +614,7 @@ because anomalies sum to zero — the property {ref}`gauss-empirical` depends
 on. The result is a Gaussian *fit to* the samples, not the equal-weight
 point-mass distribution of the samples themselves.
 
-`from_factors` wraps a bare array as a {class}`~pyeki.linalg.Dense` and
+`from_factors` wraps a bare array as a {class}`~enskit.linalg.Dense` and
 leaves an operator alone, so a caller mixing the two gets one
 representation.
 
@@ -676,7 +676,7 @@ posterior is typically full-rank and the density exists mathematically — the
 static capability choice still raises, and a caller wanting that density
 densifies the covariance deliberately.
 
-:::{admonition} `PSDLowRank` in `pyeki.linalg`
+:::{admonition} `PSDLowRank` in `enskit.linalg`
 :class: note
 
 This method's return type is specified by the operator contract, at
@@ -933,11 +933,11 @@ decision, not this layer's.
 - The two draws in the layer are **pinned by this contract**:
   `Gaussian.sample` draws `normal(key, (n_samples, k))` with `k` the factor
   width, and `pathwise_update` draws `normal(key, (J, N))`. Same key, same
-  arguments, same representation ⇒ identical output arrays across *pyEKI*
+  arguments, same representation ⇒ identical output arrays across *EnsKit*
   releases, **for a fixed JAX version and PRNG configuration** — the bit
   stream itself belongs to JAX and has changed across JAX releases and
   flags (`jax_threefry_partitionable`, x64 mode, PRNG implementation).
-  pyEKI never changes the draw on its side; doing so is a breaking change.
+  EnsKit never changes the draw on its side; doing so is a breaking change.
   The test suite snapshots both draws so a JAX-side stream change is
   detected rather than silently absorbed. The pinning is over evaluation
   in one mode: `jit`-compiled and eager evaluation of the same call may
@@ -993,7 +993,7 @@ constructor below it. Three points fix its scope:
   :math:`v`, and a computation that returns finite nonsense for `nan` inputs
   launders it beyond recovery. An operator's result goes back to the caller who
   asked for it. The asymmetry is deliberate, and is not an argument for adding
-  output checks to `pyeki.linalg`.
+  output checks to `enskit.linalg`.
 - **It is the only cheap detection of a singular `noise_cov`.** Every
   conditioning method behaves identically under it. Before this rule
   `condition` alone raised, because it happened to route its mean through a
@@ -1002,8 +1002,8 @@ constructor below it. Three points fix its scope:
 - **`sample` is deliberately excluded**, and `log_density` with it. Their
   covariance arrives already constructed, so a non-finite result implicates
   the operator rather than this call, and the operator layer validates its
-  own fields at construction — which {class}`~pyeki.linalg.PSDLowRank` and
-  {class}`~pyeki.linalg.DensePSD` both do for their factors. The gap this
+  own fields at construction — which {class}`~enskit.linalg.PSDLowRank` and
+  {class}`~enskit.linalg.DensePSD` both do for their factors. The gap this
   leaves is deliberate and worth naming: a *singular* covariance with
   entirely finite fields makes `log_density` return `nan` with no check
   firing, in debug mode or out. Every shipped operator rejects that at
@@ -1069,7 +1069,7 @@ machinery as operators, and every rule of the operator contract's JAX section
   materializes $GL$; the plain constructor only stores.
   {ref}`gauss-joint` records why the SVD cannot live at construction either
   way.
-- **`pyeki.gauss` exports no class decorator.** The class set is closed
+- **`enskit.gauss` exports no class decorator.** The class set is closed
   (rule 3 of {ref}`gauss-objects`), so there is nothing for users to
   declare; internally the classes may reuse the operator layer's
   registration machinery, generalized as needed, without exposing it.
@@ -1115,10 +1115,10 @@ per-class; here is its gauss instantiation:
 (gauss-consumers)=
 ## How the layers above consume this one
 
-Not normative for `pyeki.gauss` itself, but the design was shaped against
+Not normative for `enskit.gauss` itself, but the design was shaped against
 these call sites, and a change that breaks them is a change to reconsider.
 
-**The EKI driver** (`pyeki.eki`) is a loop over tempering steps.
+**The EKI driver** (`enskit.eki`) is a loop over tempering steps.
 Per step: hold the ensemble and its predictions as a sample pair, update,
 re-evaluate the forward model. It consumes `EmpiricalJoint`'s two updates
 and nothing else; `GaussianJoint` is reached only inside them.
@@ -1172,14 +1172,14 @@ $u$ and $v$ (differing masks corrupt $\widehat{C}_{uv}$ with no
 exception).
 
 :::{important}
-**`pyeki.eki` does not ship this construction, and the reason is worth
+**`enskit.eki` does not ship this construction, and the reason is worth
 recording here rather than only there.** The rescaling is applied to the
 *surviving* members too, so each is moved outward from the centre by a
 data-dependent factor at every step — $\sqrt{99/89} \approx 1.055$ at
 $J = 100$ with a tenth of the members failing, which is larger than the
 multiplicative inflation practitioners actually use, applied silently and by
 default. The pair $(u_j, v_j)$ also stops being forward-model-consistent.
-`pyeki.eki` therefore uses the undamped map
+`enskit.eki` therefore uses the undamped map
 $u_j \mapsto \hat u + m_j (u_j - \hat u)$, accepting a covariance damped by
 $(J_v-1)/(J-1)$ in exchange for leaving valid members bit-identical.
 
@@ -1193,7 +1193,7 @@ than the scaling.
 This is why the anomaly divisor stays fixed
 ({ref}`gauss-excluded`).
 
-**Domain localization** (`pyeki.localize`, planned) runs one small analysis
+**Domain localization** (`enskit.localize`, planned) runs one small analysis
 per parameter block against its nearby observations, with per-observation
 noise inflation by the reciprocal taper. It consumes the conditioning
 primitives under `vmap`, not the classes: per block, slice the local
@@ -1263,12 +1263,12 @@ raising.
 (gauss-surface)=
 ## Public surface
 
-`pyeki.gauss` exports exactly: the classes `Gaussian`, `GaussianJoint` and
+`enskit.gauss` exports exactly: the classes `Gaussian`, `GaussianJoint` and
 `EmpiricalJoint`, including `Gaussian.from_samples` and `GaussianJoint`'s
 three constructors, and the conditioning primitives `gain_weights` and
 `sqrt_transform`.
 Anything else is private, and no consumer may depend on it. There is no
-`pyeki.gauss.testing`: the conformance obligations below bind the package's
+`enskit.gauss.testing`: the conformance obligations below bind the package's
 own test suite, since the class set is closed.
 
 (gauss-conformance)=
@@ -1492,9 +1492,9 @@ arithmetic and the measured error.
 
 **A configurable anomaly divisor.** $J - 1$ everywhere. A $1/J$ convention
 changes every formula's scaling for no consumer — the masked-sample
-consumer is served by sample preprocessing in `pyeki.eki`
+consumer is served by sample preprocessing in `enskit.eki`
 ({ref}`gauss-consumers`); inflation, which is the principled way to widen
-a set of samples, belongs to `pyeki.eki`.
+a set of samples, belongs to `enskit.eki`.
 
 **A marginal-likelihood accessor.**
 $\log\det(C_{vv} + R) = \log\det R + \sum_i \log(1 + \sigma_i^2)$

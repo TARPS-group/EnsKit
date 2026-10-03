@@ -34,7 +34,7 @@ is not enough on its own.
 so a documentation build with warnings as errors fails on a figure whose code
 raises. Regeneration is skipped when every output is newer than both this
 module and every source file of the package, so an unchanged build is not
-slowed by it; set ``PYEKI_DOCS_FIGURES=force`` to override.
+slowed by it; set ``ENSKIT_DOCS_FIGURES=force`` to override.
 
 *A test pins the numbers.* ``tests/test_tutorials.py`` calls each function and
 asserts the values in the returned dictionary, which is why the dictionary
@@ -48,7 +48,7 @@ Pixels are deliberately not compared. Two machines with different fonts
 rasterize the same figure differently, so a pixel comparison would be either
 flaky or vacuous, and it would not catch a wrong number in a legible plot.
 
-**A grid, not a closed form.** :func:`pyeki.toy.exponential_decay` has no
+**A grid, not a closed form.** :func:`enskit.toy.exponential_decay` has no
 closed-form posterior, but it has two parameters, so its tempered densities
 can be evaluated on a grid up to a constant, which is all a contour plot
 needs. Grid quadrature also gives the reference moments the tutorials compare
@@ -77,9 +77,9 @@ import jax.numpy as jnp  # noqa: E402
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 
-import pyeki  # noqa: E402, F401  -- enables float64 before any array exists
-from pyeki import toy  # noqa: E402
-from pyeki.eki import (  # noqa: E402
+import enskit  # noqa: E402, F401  -- enables float64 before any array exists
+from enskit import toy  # noqa: E402
+from enskit.eki import (  # noqa: E402
     AdaptiveESSSchedule,
     DiscrepancyStop,
     EKIState,
@@ -1204,7 +1204,7 @@ def build(output_dir=OUTPUT_DIR, *, only=None) -> dict[str, dict]:
 
 def _newest_source_time() -> float:
     """The most recent modification time of this module and the package."""
-    package = Path(pyeki.__file__).parent
+    package = Path(enskit.__file__).parent
     sources = [Path(__file__), *package.rglob("*.py")]
     return max(path.stat().st_mtime for path in sources)
 
@@ -1222,13 +1222,13 @@ def setup(app):
     """Register the build-time hook. Called by Sphinx; see the module notes."""
 
     def generate(_app):
-        force = os.environ.get("PYEKI_DOCS_FIGURES") == "force"
+        force = os.environ.get("ENSKIT_DOCS_FIGURES") == "force"
         if not force and is_current():
             return
         build()
 
     app.connect("builder-inited", generate)
-    return {"version": pyeki.__version__, "parallel_read_safe": True}
+    return {"version": enskit.__version__, "parallel_read_safe": True}
 
 
 if __name__ == "__main__":

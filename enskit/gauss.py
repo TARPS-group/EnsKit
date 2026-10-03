@@ -9,7 +9,7 @@ described below, so nothing here forms a matrix of either block's dimension.
 object                       represents
 ============================ ==================================================
 :class:`Gaussian`            one Gaussian distribution: a mean vector and a
-                             :class:`~pyeki.linalg.PSDLinOp` covariance
+                             :class:`~enskit.linalg.PSDLinOp` covariance
 :class:`GaussianJoint`       a joint Gaussian over the two blocks, held as a
                              mean pair and a joint factor; the home of every
                              conditioning identity
@@ -47,7 +47,7 @@ Conventions shared by everything in the module:
   stored batch axes. The two conditioning primitives are the exception —
   they are array-level and follow the operator layer's batch contract — as
   is the evaluation point of :meth:`Gaussian.log_density`.
-- **Noise covariances are** :class:`~pyeki.linalg.PSDLinOp` **s**, used only
+- **Noise covariances are** :class:`~enskit.linalg.PSDLinOp` **s**, used only
   through ``whiten``, so a noise operator with no factorization at all
   drives every update.
 
@@ -299,7 +299,7 @@ class Gaussian:
 
     Each method requires specific operations of the covariance, and an
     unsupported one raises the operator layer's
-    :class:`~pyeki.linalg.UnsupportedOpError` from the inner call. ``cov`` is
+    :class:`~enskit.linalg.UnsupportedOpError` from the inner call. ``cov`` is
     a public field, so gate on ``gaussian.cov.supports("factor")`` exactly as
     you would on an operator.
 
@@ -308,7 +308,7 @@ class Gaussian:
     mean
         The mean, a ``(n,)`` array.
     cov
-        The covariance, a :class:`~pyeki.linalg.PSDLinOp` of side ``n``.
+        The covariance, a :class:`~enskit.linalg.PSDLinOp` of side ``n``.
 
     Raises
     ------
@@ -317,7 +317,7 @@ class Gaussian:
         ``cov`` is a vmapped family. In debug mode, also if ``mean`` is not
         finite.
     TypeError
-        If ``cov`` is not a :class:`~pyeki.linalg.PSDLinOp`.
+        If ``cov`` is not a :class:`~enskit.linalg.PSDLinOp`.
     """
 
     mean: Array
@@ -327,7 +327,7 @@ class Gaussian:
         _check_field_rank("Gaussian", "mean", self.mean, 1)
         if not isinstance(self.cov, PSDLinOp):
             raise TypeError(
-                f"Gaussian.cov: must be a pyeki.linalg.PSDLinOp, got "
+                f"Gaussian.cov: must be a enskit.linalg.PSDLinOp, got "
                 f"{type(self.cov).__name__}"
             )
         if self.cov.batch_shape != ():
@@ -371,7 +371,7 @@ class Gaussian:
         Gaussian
             Mean the sample mean; covariance the empirical covariance with
             the package's :math:`J-1` divisor, held as a
-            :class:`~pyeki.linalg.PSDLowRank` whose factor is
+            :class:`~enskit.linalg.PSDLowRank` whose factor is
             :math:`A^\\top/\\sqrt{J-1}`.
 
         Raises
@@ -391,10 +391,10 @@ class Gaussian:
 
         Its rank is at most :math:`J-1`, so it is singular whenever
         :math:`J - 1 < n` — the usual regime for this layer — and
-        :class:`~pyeki.linalg.PSDLowRank` accordingly provides ``diag`` and
+        :class:`~enskit.linalg.PSDLowRank` accordingly provides ``diag`` and
         ``factor`` and withholds ``solve``, ``whiten`` and ``logdet``.
         :meth:`log_density` therefore raises
-        :class:`~pyeki.linalg.UnsupportedOpError` on the result, which is
+        :class:`~enskit.linalg.UnsupportedOpError` on the result, which is
         correct rather than restrictive: a density against a singular
         covariance is not defined.
 
@@ -614,7 +614,7 @@ class GaussianJoint:
     chosen independently, one of :math:`C_{uu}` and one of :math:`C_{vv}`,
     would say nothing at all about :math:`C_{uv}`.
 
-    Both row blocks are :class:`~pyeki.linalg.LinOp` s, so a structured
+    Both row blocks are :class:`~enskit.linalg.LinOp` s, so a structured
     covariance stays structured: :meth:`condition` applies :math:`F_u` only
     through ``matvec`` and ``matmat``, and materializes :math:`F_v` as an
     ``(N, k)`` array, which the singular value decomposition needs.
@@ -642,10 +642,10 @@ class GaussianJoint:
         The mean :math:`\\bar v` of the observed block, a ``(N,)`` array.
         Keyword-only.
     u_factor
-        The row block :math:`F_u`, a :class:`~pyeki.linalg.LinOp` of shape
+        The row block :math:`F_u`, a :class:`~enskit.linalg.LinOp` of shape
         ``(P, k)``. Keyword-only.
     v_factor
-        The row block :math:`F_v`, a :class:`~pyeki.linalg.LinOp` of shape
+        The row block :math:`F_v`, a :class:`~enskit.linalg.LinOp` of shape
         ``(N, k)``, sharing the latent width ``k``. Keyword-only.
 
     Raises
@@ -655,7 +655,7 @@ class GaussianJoint:
         own mean, if the two factors disagree on ``k``, or if any field is a
         vmapped family. In debug mode, also if either mean is not finite.
     TypeError
-        If either factor is not a :class:`~pyeki.linalg.LinOp`, or either mean
+        If either factor is not a :class:`~enskit.linalg.LinOp`, or either mean
         has no shape to check.
 
     Notes
@@ -722,8 +722,8 @@ class GaussianJoint:
             The two means, ``(P,)`` and ``(N,)`` arrays.
         u_factor, v_factor
             The two row blocks, of shapes ``(P, k)`` and ``(N, k)``. A
-            :class:`~pyeki.linalg.LinOp`, or an array, which is wrapped as a
-            :class:`~pyeki.linalg.Dense`.
+            :class:`~enskit.linalg.LinOp`, or an array, which is wrapped as a
+            :class:`~enskit.linalg.Dense`.
 
         Returns
         -------
@@ -848,7 +848,7 @@ class GaussianJoint:
             The marginal over :math:`u`, a :class:`Gaussian` whose
             covariance supports ``factor``.
         linear_map
-            The map :math:`G`, a :class:`~pyeki.linalg.LinOp` of shape
+            The map :math:`G`, a :class:`~enskit.linalg.LinOp` of shape
             ``(N, P)``.
 
         Returns
@@ -863,7 +863,7 @@ class GaussianJoint:
             If ``u_marginal.cov`` does not support ``factor``.
         TypeError
             If ``u_marginal`` is not a :class:`Gaussian`, or ``linear_map``
-            is not a :class:`~pyeki.linalg.LinOp`.
+            is not a :class:`~enskit.linalg.LinOp`.
         ValueError
             If ``linear_map``'s input size is not ``u_marginal.dim``, or if
             either argument is a vmapped family.
@@ -884,12 +884,12 @@ class GaussianJoint:
         if not isinstance(u_marginal, Gaussian):
             raise TypeError(
                 f"GaussianJoint.from_linear_map: u_marginal must be a "
-                f"pyeki.gauss.Gaussian, got {type(u_marginal).__name__}"
+                f"enskit.gauss.Gaussian, got {type(u_marginal).__name__}"
             )
         if not isinstance(linear_map, LinOp):
             raise TypeError(
                 f"GaussianJoint.from_linear_map: linear_map must be a "
-                f"pyeki.linalg.LinOp, got {type(linear_map).__name__}"
+                f"enskit.linalg.LinOp, got {type(linear_map).__name__}"
             )
         _check_not_vmap_family(u_marginal, "as the u_marginal of a GaussianJoint")
         if linear_map.batch_shape != ():
@@ -944,7 +944,7 @@ class GaussianJoint:
     def u_marginal(self) -> Gaussian:
         """The marginal :math:`\\mathcal{N}(\\bar u, F_u F_u^\\top)` over :math:`u`.
 
-        The covariance is a :class:`~pyeki.linalg.PSDLowRank` holding
+        The covariance is a :class:`~enskit.linalg.PSDLowRank` holding
         :math:`F_u`, so its rank is at most :math:`k` and it materializes
         the factor as a ``(P, k)`` array. It supports
         :meth:`Gaussian.sample` and ``diag``, and not
@@ -960,7 +960,7 @@ class GaussianJoint:
         The *noise-free* marginal: it is the distribution of :math:`v`, not
         of an observation of it, so the observation noise :math:`R` does not
         appear. As with :attr:`u_marginal`, the covariance is a
-        :class:`~pyeki.linalg.PSDLowRank`.
+        :class:`~enskit.linalg.PSDLowRank`.
         """
         _check_not_vmap_family(self, "v_marginal")
         return Gaussian(self.v_mean, PSDLowRank(self.v_factor.to_dense()))
@@ -989,7 +989,7 @@ class GaussianJoint:
 
         So conditioning multiplies the joint factor's :math:`u` block on the
         right by :math:`T`, and the posterior is returned in that form: a
-        :class:`~pyeki.linalg.PSDLowRank` holding the ``(P, k)`` array
+        :class:`~enskit.linalg.PSDLowRank` holding the ``(P, k)`` array
         :math:`F_u T`, never a dense :math:`P \\times P` matrix.
 
         Parameters
@@ -998,7 +998,7 @@ class GaussianJoint:
             The observation, a ``(N,)`` array.
         noise_cov
             The observation-noise covariance :math:`R`, a
-            :class:`~pyeki.linalg.PSDLinOp` of side ``N`` supporting
+            :class:`~enskit.linalg.PSDLinOp` of side ``N`` supporting
             ``whiten``.
 
         Returns
@@ -1011,7 +1011,7 @@ class GaussianJoint:
         UnsupportedOpError
             If ``noise_cov`` does not support ``whiten``.
         TypeError
-            If ``noise_cov`` is not a :class:`~pyeki.linalg.PSDLinOp`.
+            If ``noise_cov`` is not a :class:`~enskit.linalg.PSDLinOp`.
         ValueError
             If ``y`` is not ``(N,)``, ``noise_cov``'s side is not ``N``,
             this or ``noise_cov`` is a vmapped family, or — in debug mode —
@@ -1024,7 +1024,7 @@ class GaussianJoint:
         it is singular whenever :math:`k < P`. The posterior therefore
         supports :meth:`Gaussian.sample` — the factor is the stored
         representation — but not :meth:`Gaussian.log_density`, which raises
-        :class:`~pyeki.linalg.UnsupportedOpError` from the covariance. When
+        :class:`~enskit.linalg.UnsupportedOpError` from the covariance. When
         :math:`k \\ge P` the density exists mathematically; the static
         capability choice still raises, and a caller wanting it densifies
         the covariance deliberately.
@@ -1103,7 +1103,7 @@ class GaussianJoint:
             The observation, a ``(N,)`` array. Keyword-only.
         noise_cov
             The observation-noise covariance :math:`R`, a
-            :class:`~pyeki.linalg.PSDLinOp` of side ``N`` supporting
+            :class:`~enskit.linalg.PSDLinOp` of side ``N`` supporting
             ``whiten``. Keyword-only.
 
         Returns
@@ -1117,7 +1117,7 @@ class GaussianJoint:
         UnsupportedOpError
             If ``noise_cov`` does not support ``whiten``.
         TypeError
-            If ``noise_cov`` is not a :class:`~pyeki.linalg.PSDLinOp`.
+            If ``noise_cov`` is not a :class:`~enskit.linalg.PSDLinOp`.
         ValueError
             If any operand's trailing size is wrong, if ``noise_cov``'s side
             is not ``N``, if this or ``noise_cov`` is a vmapped family, or —
@@ -1423,7 +1423,7 @@ class EmpiricalJoint:
             The observation, a ``(N,)`` array.
         noise_cov
             The observation-noise covariance :math:`R`, a
-            :class:`~pyeki.linalg.PSDLinOp` of side ``N`` supporting
+            :class:`~enskit.linalg.PSDLinOp` of side ``N`` supporting
             ``whiten``.
 
         Returns
@@ -1437,7 +1437,7 @@ class EmpiricalJoint:
         UnsupportedOpError
             If ``noise_cov`` does not support ``whiten``.
         TypeError
-            If ``noise_cov`` is not a :class:`~pyeki.linalg.PSDLinOp`.
+            If ``noise_cov`` is not a :class:`~enskit.linalg.PSDLinOp`.
         ValueError
             If ``y`` is not ``(N,)``, ``noise_cov``'s side is not ``N``,
             this or ``noise_cov`` is a vmapped family, or — in debug mode —
@@ -1497,7 +1497,7 @@ class EmpiricalJoint:
             The observation, a ``(N,)`` array.
         noise_cov
             The observation-noise covariance :math:`R`, a
-            :class:`~pyeki.linalg.PSDLinOp` of side ``N`` supporting
+            :class:`~enskit.linalg.PSDLinOp` of side ``N`` supporting
             ``whiten``.
 
         Returns
@@ -1511,7 +1511,7 @@ class EmpiricalJoint:
         UnsupportedOpError
             If ``noise_cov`` does not support ``whiten``.
         TypeError
-            If ``noise_cov`` is not a :class:`~pyeki.linalg.PSDLinOp`.
+            If ``noise_cov`` is not a :class:`~enskit.linalg.PSDLinOp`.
         ValueError
             If ``y`` is not ``(N,)``, ``noise_cov``'s side is not ``N``,
             this or ``noise_cov`` is a vmapped family, or — in debug mode —
@@ -1612,7 +1612,7 @@ def _check_field_rank(cls_name: str, field_name: str, value, core_ndim: int) -> 
     if ndim != core_ndim:
         raise ValueError(
             f"{cls_name}.{field_name}: expected an array of rank {core_ndim}, got "
-            f"shape {value.shape}. Objects in pyeki.gauss are unbatched; build a "
+            f"shape {value.shape}. Objects in enskit.gauss are unbatched; build a "
             f"family with jax.vmap over the pytree, not with extra leading axes."
         )
     if any(size < 1 for size in value.shape):
@@ -1630,7 +1630,7 @@ def _check_factor_field(
     Raises
     ------
     TypeError
-        If the field is not a :class:`~pyeki.linalg.LinOp`. The row blocks
+        If the field is not a :class:`~enskit.linalg.LinOp`. The row blocks
         of a joint factor are operators, so that a structured covariance
         keeps its structure; an array is wrapped by
         :meth:`GaussianJoint.from_factors`, not here.
@@ -1640,8 +1640,8 @@ def _check_factor_field(
     """
     if not isinstance(value, LinOp):
         raise TypeError(
-            f"{cls_name}.{field_name}: must be a pyeki.linalg.LinOp, got "
-            f"{type(value).__name__}. Wrap an array with pyeki.linalg.Dense, or "
+            f"{cls_name}.{field_name}: must be a enskit.linalg.LinOp, got "
+            f"{type(value).__name__}. Wrap an array with enskit.linalg.Dense, or "
             f"use {cls_name}.from_factors, which wraps it for you."
         )
     if value.batch_shape != ():
@@ -1686,7 +1686,7 @@ def _as_factor(where: str, name: str, value) -> LinOp:
         # the diagnosis. The base class of the category always accepts a string.
         kind = ValueError if isinstance(e, ValueError) else TypeError
         raise kind(
-            f"{where}: {name} must be a pyeki.linalg.LinOp of shape (n, k), "
+            f"{where}: {name} must be a enskit.linalg.LinOp of shape (n, k), "
             f"or an array of that shape"
         ) from e
 
@@ -1732,7 +1732,7 @@ def _validate_conditioning_call(where: str, y, noise_cov, v_dim: int) -> Array:
     """
     if not isinstance(noise_cov, PSDLinOp):
         raise TypeError(
-            f"{where}: noise_cov must be a pyeki.linalg.PSDLinOp, got "
+            f"{where}: noise_cov must be a enskit.linalg.PSDLinOp, got "
             f"{type(noise_cov).__name__}"
         )
     if noise_cov.batch_shape != ():

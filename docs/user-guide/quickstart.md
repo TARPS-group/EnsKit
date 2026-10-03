@@ -1,6 +1,6 @@
 # Quickstart
 
-This page introduces the operator layer, which everything else in pyEKI is
+This page introduces the operator layer, which everything else in EnsKit is
 built on. It takes about ten minutes. For the conditioning layer above it, see
 {doc}`conditioning`.
 
@@ -21,9 +21,9 @@ memory.
 ## Creating operators
 
 ```python
-import pyeki  # enables float64; import this before creating arrays
+import enskit  # enables float64; import this before creating arrays
 import jax.numpy as jnp
-from pyeki.linalg import PSDDiagonal, DensePSD, Identity
+from enskit.linalg import PSDDiagonal, DensePSD, Identity
 
 d = PSDDiagonal(jnp.array([1.0, 4.0, 9.0]))
 d.shape          # (3, 3)
@@ -75,7 +75,7 @@ Observation error covariances are usually block diagonal — independent errors
 in one data stream, correlated errors in another:
 
 ```python
-from pyeki.linalg import block_diag
+from enskit.linalg import block_diag
 
 noise = block_diag(
     PSDDiagonal(jnp.array([0.5, 0.5, 2.0])),
@@ -139,7 +139,7 @@ Calling an unsupported operation raises `UnsupportedOpError` rather than quietly
 falling back to dense linear algebra, so an accidental cubic cost is visible:
 
 ```python
-from pyeki.linalg import densify
+from enskit.linalg import densify
 
 densify(op).solve(b)         # explicit dense fallback, with a size guard
 ```

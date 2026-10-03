@@ -1,7 +1,7 @@
 """Ensemble Kalman Inversion: the ladder, the policies that shape it, and the run.
 
 The algorithmic top of the package. It turns the Gaussian conditioning of
-:mod:`pyeki.gauss` into a *run* — an initial ensemble, a ladder of tempered
+:mod:`enskit.gauss` into a *run* — an initial ensemble, a ladder of tempered
 targets, an ensemble update per step, and a record of what happened.
 
 For a prior :math:`\\pi_0` and the misfit
@@ -17,13 +17,13 @@ and increasingly concentrated on the minimizers of :math:`\\Phi \\circ G` as
 :math:`\\beta \\to \\infty`. Moving one increment up that ladder is an
 identity, not an approximation: it is conditioning on the same observation
 with the noise covariance divided by that increment. That is why this layer
-needs nothing from :mod:`pyeki.gauss` beyond its two update methods and
-:meth:`~pyeki.gauss.Gaussian.sample`.
+needs nothing from :mod:`enskit.gauss` beyond its two update methods and
+:meth:`~enskit.gauss.Gaussian.sample`.
 
 Two well-known modes of EKI fall out of the same driver, and neither is
 privileged — they are two schedules, not two drivers and not a flag::
 
-    from pyeki.eki import (
+    from enskit.eki import (
         AdaptiveESSSchedule, DiscrepancyStop, EKIState, FixedSchedule, run,
     )
 
@@ -64,16 +64,16 @@ The shipped policies are :class:`TransformUpdate` and :class:`PathwiseUpdate`;
 :class:`FixedSchedule`, :class:`AdaptiveESSSchedule` and
 :class:`AdaptiveMisfitSchedule`; :class:`DiscrepancyStop`; and
 :class:`MultiplicativeInflation` and :class:`AdditiveInflation`. This is the
-one place where pyEKI is deliberately open to extension at the algorithm
-level: :mod:`pyeki.linalg` is extended by writing an operator,
-:mod:`pyeki.gauss` is closed, and :mod:`pyeki.eki` is extended by writing a
-schedule, an update rule, or an inflation. :mod:`pyeki.eki.testing` holds the
+one place where EnsKit is deliberately open to extension at the algorithm
+level: :mod:`enskit.linalg` is extended by writing an operator,
+:mod:`enskit.gauss` is closed, and :mod:`enskit.eki` is extended by writing a
+schedule, an update rule, or an inflation. :mod:`enskit.eki.testing` holds the
 conformance checks for one.
 
 Conventions shared by everything in the layer:
 
 - **Ensembles are stored row-wise**, a ``(J, dim)`` array, and vectors passed
-  to the layer are exactly core-shaped, as in :mod:`pyeki.gauss`. The batched
+  to the layer are exactly core-shaped, as in :mod:`enskit.gauss`. The batched
   exception is :func:`misfits`.
 - **The tempering variable is a level, and steps take increments.** A state
   carries :math:`\\beta`; a step takes :math:`\\Delta\\beta` and conditions

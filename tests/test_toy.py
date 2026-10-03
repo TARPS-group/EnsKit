@@ -5,7 +5,7 @@ Four kinds of test, in the order the module's claims are made:
 1. **Contract conformance** — every model returns the documented shape at the
    documented input shape, in the run's dtype, is ``jit``-able and
    ``vmap``-pable, is row-independent and deterministic, and passes
-   :func:`pyeki.eki.testing.check_forward_model`. The checker gets its own
+   :func:`enskit.eki.testing.check_forward_model`. The checker gets its own
    negative tests, since a checker with no failing case is worthless.
 2. **Exactness** — the linear problem's closed form against a dense reference
    written here, at three tempering levels; and a full run from an
@@ -34,9 +34,9 @@ import numpy as np
 import pytest
 from conftest import prints_as
 
-import pyeki  # noqa: F401  -- enables x64 before any array exists
-from pyeki import toy
-from pyeki.eki import (
+import enskit  # noqa: F401  -- enables x64 before any array exists
+from enskit import toy
+from enskit.eki import (
     AdaptiveESSSchedule,
     EKIError,
     EKIState,
@@ -44,9 +44,9 @@ from pyeki.eki import (
     TransformUpdate,
     run,
 )
-from pyeki.eki.testing import check_forward_model
-from pyeki.gauss import Gaussian
-from pyeki.linalg import DensePSD, PSDDiagonal, PSDLowRank, UnsupportedOpError
+from enskit.eki.testing import check_forward_model
+from enskit.gauss import Gaussian
+from enskit.linalg import DensePSD, PSDDiagonal, PSDLowRank, UnsupportedOpError
 
 EPS = float(np.finfo(np.float64).eps)
 
@@ -696,7 +696,7 @@ def test_10_the_factories_and_classes_validate_as_documented():
     with pytest.raises(ValueError, match="outside the valid domain"):
         toy.restricted_decay(rate_floor=2.0)  # above the true rate of 1.5
 
-    with pytest.raises(TypeError, match="must be a pyeki.linalg.LinOp"):
+    with pytest.raises(TypeError, match="must be a enskit.linalg.LinOp"):
         dataclasses.replace(problem, G=np.zeros((8, 4)))
     with pytest.raises(ValueError, match=r"LinearGaussian.y: expected an array"):
         dataclasses.replace(problem, y=jnp.zeros(3))
@@ -979,7 +979,7 @@ def test_12_regression_the_size_guard_bounds_the_transform_too():
 def test_12_regression_every_problem_field_is_keyword_only():
     """`times` and `y` are both (N,) arrays, so a positional swap is silent.
 
-    The same hazard `pyeki.gauss` makes its sample and factor fields
+    The same hazard `enskit.gauss` makes its sample and factor fields
     keyword-only for — and worse here, since `times` and `y` collide at every
     N rather than only when P == N.
     """
@@ -1071,14 +1071,14 @@ def test_12_regression_the_factories_reject_infinite_scales():
 def test_12_regression_no_layer_imports_the_toy_module():
     """The architectural rule `CLAUDE.md` calls permanent, in one line.
 
-    `pyeki.toy` depends on two layers, so an import in the other direction
+    `enskit.toy` depends on two layers, so an import in the other direction
     would make toy problems load-bearing for the library. Checked in a fresh
     interpreter, since this one has already imported the module.
     """
     program = (
-        "import sys; import pyeki, pyeki.linalg, pyeki.gauss, pyeki.eki, "
-        "pyeki.eki.testing, pyeki.linalg.testing; "
-        "print('pyeki.toy' in sys.modules)"
+        "import sys; import enskit, enskit.linalg, enskit.gauss, enskit.eki, "
+        "enskit.eki.testing, enskit.linalg.testing; "
+        "print('enskit.toy' in sys.modules)"
     )
     result = subprocess.run(
         [sys.executable, "-c", program], capture_output=True, text=True, check=True

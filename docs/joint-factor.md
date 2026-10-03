@@ -1,6 +1,6 @@
 # The joint factor
 
-`pyeki.gauss` represents a joint Gaussian by a single factor of its
+`enskit.gauss` represents a joint Gaussian by a single factor of its
 covariance, cut into two row blocks. This page derives what follows from that
 choice: how conditioning becomes one matrix multiplication, why a set of
 samples and a factor of width $J$ are the same object, and where each
@@ -88,7 +88,7 @@ F = \frac{1}{\sqrt{J-1}}\begin{pmatrix} A_u^\top \\ A_v^\top \end{pmatrix},
 $$
 
 which reproduces the three empirical covariances exactly and forms none of
-them. This is {meth}`~pyeki.gauss.GaussianJoint.from_samples`.
+them. This is {meth}`~enskit.gauss.GaussianJoint.from_samples`.
 
 **From a linear map**, with $k$ the width of the prior's own factor: for $u
 \sim \mathcal{N}(m_0, C_0)$ with $C_0 = LL^\top$ and $v = Gu$,
@@ -98,7 +98,7 @@ F = \begin{pmatrix} L \\ GL \end{pmatrix},
 \qquad \bar u = m_0, \quad \bar v = Gm_0 .
 $$
 
-This is {meth}`~pyeki.gauss.GaussianJoint.from_linear_map`, and conditioning
+This is {meth}`~enskit.gauss.GaussianJoint.from_linear_map`, and conditioning
 it gives the closed-form linear-Gaussian posterior.
 
 ## Conditioning
@@ -212,7 +212,7 @@ Two consequences for the API.
 
 **The projection from samples to a joint loses nothing.** Running the
 equivalence backwards, $u_j = \bar u + \sqrt{J-1}(F_u)_{\cdot j}$, so
-{meth}`~pyeki.gauss.EmpiricalJoint.to_gaussian_joint` is a bijection onto
+{meth}`~enskit.gauss.EmpiricalJoint.to_gaussian_joint` is a bijection onto
 (mean, centred width-$J$ factor) pairs. Neither update needs its samples
 supplied a second time: everything they use is in the joint. What the
 projection drops is the *reading* of the latent index as a sample index.
@@ -252,7 +252,7 @@ $$
 because $K(C_{vv}+R) = C_{uv}$ by the definition of $K$.
 
 Two properties distinguish it from the square-root update, and both put it on
-{class}`~pyeki.gauss.GaussianJoint` with its realizations as arguments. It is
+{class}`~enskit.gauss.GaussianJoint` with its realizations as arguments. It is
 a **per-realization** map: each triple is transported independently, so a
 batch of them is one call rather than a loop. And it is correct for **any**
 realization of the joint, not only for realizations that produced the
@@ -266,14 +266,14 @@ $$
 \texttt{gain\_weights}\bigl(S,\, W(y - v) - \varepsilon\bigr),
 $$
 
-and {meth}`~pyeki.gauss.GaussianJoint.pathwise` takes $\varepsilon$ rather
+and {meth}`~enskit.gauss.GaussianJoint.pathwise` takes $\varepsilon$ rather
 than $\eta$. That is deliberate: $WL$ has orthonormal rows but is not the
 identity, so pushing one perturbation through both `whiten` and `factor()` in
 the same update corrupts the joint law while every marginal statistic still
 looks right. Pinning the argument to one representation, by name and by
 documented obligation, is what closes that off.
 
-{meth}`~pyeki.gauss.EmpiricalJoint.pathwise_update` is this map on the
+{meth}`~enskit.gauss.EmpiricalJoint.pathwise_update` is this map on the
 samples the joint was fitted to, and takes a cheaper route to them. Because
 those samples *are* the factor, $v_j = \bar v + \sqrt{J-1}(F_v)_{\cdot j}$
 and so
@@ -334,16 +334,16 @@ factorizing $C_{uu}$ and $C_{vv}$ separately yields the intended marginals
 and a wrong cross-block — and conditioning then answers correctly for a
 different joint. The shared-width check catches this whenever $P \ne N$, two
 square factorizations having widths $P$ and $N$; at $P = N$ it cannot, which
-is why {meth}`~pyeki.gauss.GaussianJoint.from_factors` is documented as the
+is why {meth}`~enskit.gauss.GaussianJoint.from_factors` is documented as the
 escape hatch and the two arithmetic constructors are the recommended routes.
 
 ## Where each operation lives
 
 The dividing line is what an operation returns.
 
-{class}`~pyeki.gauss.GaussianJoint` owns the mathematics: operations
+{class}`~enskit.gauss.GaussianJoint` owns the mathematics: operations
 determined by the moments, returning a distribution or transporting
-realizations handed to them. {class}`~pyeki.gauss.EmpiricalJoint` owns the
+realizations handed to them. {class}`~enskit.gauss.EmpiricalJoint` owns the
 samples: operations whose result is a set of samples aligned with the ones it
 holds.
 
@@ -405,7 +405,7 @@ order as a dense solve, with the advantages of inverting nothing and
 remaining valid for a singular $C_0$; the real gain is at $k \ll P$, and in
 `diag()` and `sample()` on the low-rank posterior, both $O(Pk)$.
 
-One limitation. {class}`~pyeki.linalg.PSDLowRank` holds a
+One limitation. {class}`~enskit.linalg.PSDLowRank` holds a
 dense array, so the posterior covariance factor $F_uT$ is materialized at
 $(P, k)$ even when $F_u$ is structured. For EKI that costs nothing — a
 $(J, P)$ ensemble is already held and $k \le J$ — but a caller with $P$ too

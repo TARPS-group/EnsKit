@@ -59,8 +59,8 @@ for the operator `AdditiveInflation` takes.
 ## API exercised
 
 `MultiplicativeInflation`, `AdditiveInflation`, `HistoryRecord.spread`,
-`HistoryRecord.ess`, `EKIState.n_members`, `pyeki.toy.linear_gaussian`,
-`pyeki.toy.LinearGaussian.posterior`.
+`HistoryRecord.ess`, `EKIState.n_members`, `enskit.toy.linear_gaussian`,
+`enskit.toy.LinearGaussian.posterior`.
 
 ## Notes for the writer
 

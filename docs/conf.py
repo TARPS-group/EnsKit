@@ -1,4 +1,4 @@
-"""Sphinx configuration for the pyEKI documentation."""
+"""Sphinx configuration for the EnsKit documentation."""
 
 import sys
 from pathlib import Path
@@ -6,7 +6,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # the `figures` module
 
-project = "pyEKI"
+project = "EnsKit"
 author = "Andrew Roberts"
 copyright = "2026, Andrew Roberts"
 release = "0.1.0.dev0"
@@ -66,7 +66,7 @@ nitpick_ignore_regex = [("py:class", r"jax.*"), ("py:class", r"Array")]
 # -- appearance --------------------------------------------------------------
 
 html_theme = "furo"
-html_title = "pyEKI"
+html_title = "EnsKit"
 html_static_path = ["_static"]
 html_css_files = ["custom.css"]
 

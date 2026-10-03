@@ -16,8 +16,8 @@ import numpy as np
 import pytest
 from jax import Array
 
-import pyeki  # noqa: F401  -- enables x64 before any array exists
-from pyeki.linalg import (
+import enskit  # noqa: F401  -- enables x64 before any array exists
+from enskit.linalg import (
     BlockDiag,
     Dense,
     DensePSD,
@@ -334,7 +334,7 @@ def test_psd_low_rank_validation_is_not_covered_by_conformance():
     *directly constructed* operator that reports a non-empty batch_shape,
     which the contract forbids) and k = 0 (an empty core axis).
     """
-    from pyeki.linalg.testing import check_operator
+    from enskit.linalg.testing import check_operator
 
     @linop
     class Unvalidated(PSDLinOp):  # PSDLowRank minus its __post_init__
@@ -376,7 +376,7 @@ def test_psd_low_rank_factor_finiteness_is_a_debug_check():
     """A non-finite factor makes every operation nan with no exception, the
     same hazard DensePSD guards its own factor against.
 
-    It matters most for the factors pyeki.gauss returns from conditioning,
+    It matters most for the factors enskit.gauss returns from conditioning,
     where a non-finite one means the conditioning itself failed — so the check
     turns a nan posterior into an exception at the point it was produced.
     """
@@ -940,7 +940,7 @@ def test_unresolvable_annotation_is_a_guided_type_error():
 def test_check_operator_rejects_broken_operators():
     """The harness is itself load-bearing: it must fail on operators that
     violate the contract, not only pass on ones that satisfy it."""
-    from pyeki.linalg.testing import check_operator
+    from enskit.linalg.testing import check_operator
 
     @linop
     class RoutedToDense(PSDLinOp):

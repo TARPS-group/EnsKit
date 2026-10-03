@@ -3,10 +3,10 @@
 Two layers ship a conformance harness, because two layers are open to
 extension. One instance per operator class — plus variants whose
 capabilities, structure depth, block count, size, or sign differ — runs
-through :func:`pyeki.linalg.testing.check_operator`, each paired with a
+through :func:`enskit.linalg.testing.check_operator`, each paired with a
 second instance of the same structure and different values to make up the
 family it is applied as under ``vmap``; and every shipped EKI policy runs
-through the check for its axis in :mod:`pyeki.eki.testing`, which is the
+through the check for its axis in :mod:`enskit.eki.testing`, which is the
 harness a user's own schedule, update rule or inflation is meant to be run
 through.
 """
@@ -17,8 +17,8 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-import pyeki  # noqa: F401  -- enables x64 before any array exists
-from pyeki.eki import (
+import enskit  # noqa: F401  -- enables x64 before any array exists
+from enskit.eki import (
     AdaptiveESSSchedule,
     AdaptiveMisfitSchedule,
     AdditiveInflation,
@@ -28,13 +28,13 @@ from pyeki.eki import (
     PathwiseUpdate,
     TransformUpdate,
 )
-from pyeki.eki.testing import (
+from enskit.eki.testing import (
     check_inflation,
     check_schedule,
     check_stopping_rule,
     check_update,
 )
-from pyeki.linalg import (
+from enskit.linalg import (
     BlockDiag,
     Dense,
     DensePSD,
@@ -50,7 +50,7 @@ from pyeki.linalg import (
     hstack,
     product,
 )
-from pyeki.linalg.testing import check_operator
+from enskit.linalg.testing import check_operator
 
 
 def _instances(rng: np.random.Generator) -> list[LinOp]:

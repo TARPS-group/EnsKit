@@ -57,7 +57,7 @@ dispatch to the hook, which receives the operand unchanged — batch axes
 included. Use :func:`dense_matvec` and :func:`tri_solve` for the array work
 so the shape convention is honoured, mark non-array fields with
 :func:`static_field`, and validate every new operator with
-:func:`pyeki.linalg.testing.check_operator`.
+:func:`enskit.linalg.testing.check_operator`.
 
 Unsupported operations
 ----------------------
@@ -256,7 +256,7 @@ def _pytree_dataclass(cls: type) -> type:
     """Frozen dataclass plus JAX pytree registration, for any class.
 
     The implementation behind :func:`linop`, under a name that does not imply
-    the decorated class is a linear operator: ``pyeki.gauss`` declares its
+    the decorated class is a linear operator: ``enskit.gauss`` declares its
     distribution classes with this. Not exported — :func:`linop` is the public
     name, and the behaviour is documented there.
     """

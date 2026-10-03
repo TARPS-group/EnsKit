@@ -16,8 +16,8 @@ Tutorials 1 to 8.
 
 ## What this page covers
 
-- Where the extension seams are, and why they are where they are: `pyeki.linalg`
-  is extended by writing an operator, `pyeki.gauss` is closed, and `pyeki.eki`
+- Where the extension seams are, and why they are where they are: `enskit.linalg`
+  is extended by writing an operator, `enskit.gauss` is closed, and `enskit.eki`
   is extended by writing a policy. One paragraph.
 - The three protocols — `Schedule`, `EnsembleUpdate`, `Inflation` — plus
   `StoppingRule`, and what the driver calls on each and when.
@@ -27,7 +27,7 @@ Tutorials 1 to 8.
   schedule that caps the increment by a target misfit reduction. Write it,
   then run it.
 - **Validate it**: `check_schedule`, `check_update`, `check_stopping_rule`,
-  `check_inflation` from `pyeki.eki.testing`, and `synthetic_evaluation` for
+  `check_inflation` from `enskit.eki.testing`, and `synthetic_evaluation` for
   constructing inputs without a forward model. Make clear this is the step that
   catches the errors that produce wrong numbers rather than exceptions.
 - The `**_` seam in the protocol signatures, and that it is what makes future
@@ -56,9 +56,9 @@ Tutorials 1 to 8.
 
 ## API exercised
 
-`pyeki.eki`: `Schedule`, `EnsembleUpdate`, `Inflation`, `StoppingRule`,
+`enskit.eki`: `Schedule`, `EnsembleUpdate`, `Inflation`, `StoppingRule`,
 `evaluate`, `assimilate`, `advance`, `misfits`, `effective_sample_size`.
-`pyeki.eki.testing`: `check_schedule`, `check_update`, `check_stopping_rule`,
+`enskit.eki.testing`: `check_schedule`, `check_update`, `check_stopping_rule`,
 `check_inflation`, `synthetic_evaluation`.
 
 ## Notes for the writer

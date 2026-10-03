@@ -4,7 +4,7 @@ A series to read in order. Each one builds on the last and ends where the next
 begins.
 
 The first tutorial runs a complete inversion and assumes nothing — no
-familiarity with EKI, and no knowledge of anything else in pyEKI. Structured
+familiarity with EKI, and no knowledge of anything else in EnsKit. Structured
 operators, tempering schedules and ensemble diagnostics are each introduced at
 the point where the problem needs them, not before.
 

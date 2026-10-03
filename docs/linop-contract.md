@@ -1,6 +1,6 @@
 # Linear operator contract
 
-This page specifies the operator layer of `pyeki.linalg`: the class
+This page specifies the operator layer of `enskit.linalg`: the class
 hierarchy, the contract of every method, and the rules an operator
 implementation must satisfy. It is normative — an implementation that
 violates a rule here is defective even if its tests pass — and it is the
@@ -630,7 +630,7 @@ it its `solve`.
 `PSDLowRank(F)` represents $F F^\top$ for a stored factor $F$. It is the
 layer's one shipped class subject to the singular-by-construction rule
 stated under `factor` above — its thin-factor instances are what that rule
-governs — and the covariance representation `pyeki.gauss` returns from
+governs — and the covariance representation `enskit.gauss` returns from
 conditioning, where the posterior's rank is bounded by the number of
 samples.
 
@@ -672,7 +672,7 @@ exactly 2, and both core sizes at least 1. Tier 4, in debug mode,
 additionally asserts that `F` is finite — the same check `DensePSD` applies
 to its own factor, and for the same reason: a non-finite factor makes every
 operation `nan` with no exception, and `PSDLowRank` is the class
-`pyeki.gauss` returns from conditioning, where a non-finite factor means the
+`enskit.gauss` returns from conditioning, where a non-finite factor means the
 conditioning itself failed. Neither violation is caught by
 the conformance suite, which is why they are named here — a rank-3 `F`
 produces a *directly constructed* operator reporting a non-empty
@@ -836,7 +836,7 @@ of `supports()`.
 
 ### Float64
 
-`import pyeki` enables JAX float64 for the process. Operators assume it:
+`import enskit` enables JAX float64 for the process. Operators assume it:
 the conditioning arithmetic this layer feeds loses several digits to
 cancellation in float32. Worker processes do not inherit the setting and
 need `JAX_ENABLE_X64=1` in their environment.
@@ -1048,7 +1048,7 @@ children's arrays.
 (contract-surface)=
 ## Public surface
 
-For the avoidance of doubt, `pyeki.linalg` exports exactly: the levels
+For the avoidance of doubt, `enskit.linalg` exports exactly: the levels
 `LinOp`, `SquareLinOp`, `PSDLinOp`; the elementary operators `Identity`,
 `PSDDiagonal`, `Dense`, `DenseSquare`, `Triangular`,
 `DensePSD`, `PSDLowRank`; the composites `Product`, `HStack`, `BlockDiag`,
@@ -1058,13 +1058,13 @@ For the avoidance of doubt, `pyeki.linalg` exports exactly: the levels
 helpers `dense_matvec` and `tri_solve`; `densify`, `UnsupportedOpError`,
 `linop`, `static_field`, and the debug switch (`set_debug_checks`, the
 `debug_checks` context manager, and the `value_check` helper it gates). The
-conformance suite lives in `pyeki.linalg.testing`. Anything else is private, and no consumer may
+conformance suite lives in `enskit.linalg.testing`. Anything else is private, and no consumer may
 depend on it.
 
 (contract-conformance)=
 ## Conformance
 
-`pyeki.linalg.testing.check_operator(op)` is the executable form of this
+`enskit.linalg.testing.check_operator(op)` is the executable form of this
 contract. **Every new operator type must pass it**, on an instance small
 enough to densify, before it is merged. It must verify at least:
 
@@ -1179,7 +1179,7 @@ low-rank plus diagonal) or a dedicated class per structured sum. A
 registry of such rules is machinery the current type count does not
 justify, and a generic sum class would advertise almost nothing. Structured
 sums get their own classes as EKI needs them; revisit `__add__` when
-`pyeki.gauss` exists and real call sites are visible.
+`enskit.gauss` exists and real call sites are visible.
 
 **`@` between an operator and an array.** Excluded with a guided error;
 the reasoning is in {ref}`contract-arithmetic`.

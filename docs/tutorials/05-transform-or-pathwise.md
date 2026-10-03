@@ -7,7 +7,7 @@ Not yet written. The scope below is settled; the prose is not.
 
 ## Goal
 
-The reader can choose between the two ways pyEKI moves an ensemble through a
+The reader can choose between the two ways EnsKit moves an ensemble through a
 step, and knows what each one costs.
 
 ## Prerequisites
@@ -41,7 +41,7 @@ how they produce the spread.
 - **Where the stochastic form is preferable**, stated as plainly as the case
   for the default. Its errors are unbiased across keys rather than systematic,
   and averaging over keys is available to it.
-- Both rules are two lines over `pyeki.gauss`, and the reason the square-root
+- Both rules are two lines over `enskit.gauss`, and the reason the square-root
   reading is valid only for a centred ensemble is in
   {doc}`../user-guide/conditioning` and {doc}`../joint-factor`. Link; do not
   reproduce.
@@ -56,7 +56,7 @@ how they produce the spread.
 ## API exercised
 
 `TransformUpdate`, `PathwiseUpdate`, `EKIState.key`,
-`pyeki.gauss.EmpiricalJoint`.
+`enskit.gauss.EmpiricalJoint`.
 
 ## Notes for the writer
 

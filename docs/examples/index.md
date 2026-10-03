@@ -52,7 +52,7 @@ page for the decisions that must be made first.
 `06_ensemble_size.ipynb` — **The subspace bound.**
 : A high-dimensional problem, $P \gg J$. Show the rank of the reachable
   subspace, sweep $J$, and show what inflation does and does not fix. This is
-  the notebook that will be revisited when `pyeki.localize` lands.
+  the notebook that will be revisited when `enskit.localize` lands.
 
 ## Build wiring
 

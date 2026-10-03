@@ -11,7 +11,7 @@ Two rules govern the reference throughout:
 
 - **The dense reference is hand-written here.** Plain dense linear algebra
   over means, anomalies and materialized operators, never routed through
-  ``pyeki.eki`` or ``pyeki.gauss``, so every comparison is between two
+  ``enskit.eki`` or ``enskit.gauss``, so every comparison is between two
   genuinely independent paths.
 - **Exactness tests compare against closed forms**, at a tolerance of a few
   machine epsilons times the natural scale of the quantity, never a tolerance
@@ -30,8 +30,8 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-import pyeki  # noqa: F401  -- enables x64 before any array exists
-from pyeki.eki import (
+import enskit  # noqa: F401  -- enables x64 before any array exists
+from enskit.eki import (
     INTERRUPTED,
     SCHEDULE_EXHAUSTED,
     STOPPING_RULE,
@@ -57,9 +57,9 @@ from pyeki.eki import (
     repair_failed_members,
     run,
 )
-from pyeki.eki.driver import _check_predictions
-from pyeki.gauss import EmpiricalJoint, Gaussian
-from pyeki.linalg import (
+from enskit.eki.driver import _check_predictions
+from enskit.gauss import EmpiricalJoint, Gaussian
+from enskit.linalg import (
     DensePSD,
     Identity,
     PSDDiagonal,
@@ -1283,7 +1283,7 @@ def test_14_a_run_compiles_a_bounded_number_of_times_whatever_its_length():
 
 def _jitted_functions():
     """Every ``jax.jit``-wrapped function the layer defines, across its modules."""
-    from pyeki.eki import driver, helpers, policies, values
+    from enskit.eki import driver, helpers, policies, values
 
     found = []
     for module in (helpers, values, policies, driver):
@@ -1972,7 +1972,7 @@ def test_23_a_no_op_run_says_so_at_warning_level(caplog):
         problem.state(), problem.forward, jnp.asarray(problem.y), problem.noise_cov,
         schedule=FixedSchedule.uniform(2),
     )
-    with caplog.at_level(logging.WARNING, logger="pyeki.eki"):
+    with caplog.at_level(logging.WARNING, logger="enskit.eki"):
         run(finished.state, problem.forward, jnp.asarray(problem.y),
             problem.noise_cov, schedule=FixedSchedule.uniform(2))
     assert "no forward evaluations" in caplog.text
@@ -2654,7 +2654,7 @@ def test_regression_misfits_are_computed_after_the_repair():
 
 def test_regression_a_schedule_that_counts_its_own_calls_is_caught():
     """Purity is what makes a run resumable, and the harness is what catches it."""
-    from pyeki.eki.testing import check_schedule, synthetic_evaluation
+    from enskit.eki.testing import check_schedule, synthetic_evaluation
 
     class _CountsItsCalls:
         n_steps, beta_target = None, 1.0
@@ -2767,7 +2767,7 @@ def test_regression_a_failing_step_logs_at_warning_level(caplog):
         v = jnp.asarray(u) @ jnp.asarray(problem.G).T
         return v.at[3, 0].set(jnp.nan)
 
-    with caplog.at_level(logging.WARNING, logger="pyeki.eki"), warnings.catch_warnings():
+    with caplog.at_level(logging.WARNING, logger="enskit.eki"), warnings.catch_warnings():
         warnings.simplefilter("ignore")
         run(
             problem.state(), failing, jnp.asarray(problem.y), problem.noise_cov,
@@ -2945,7 +2945,7 @@ def test_regression_the_anomalies_are_formed_stably():
     spurious anomalies of about eps*|xbar| — which the gain then amplifies
     into a finite, nan-free, wrong update once the members are large.
     """
-    from pyeki.eki.helpers import _anomalies
+    from enskit.eki.helpers import _anomalies
 
     for magnitude in (1.0, 6e23):
         collapsed = jnp.full((7, 3), magnitude)
@@ -3059,7 +3059,7 @@ def test_14_n_valid_is_data_so_a_jitted_policy_does_not_retrace_per_step():
     one is the obvious thing to do with it; a static field on the object it
     receives would retrace it once per distinct valid-member count.
     """
-    from pyeki.eki.testing import synthetic_evaluation
+    from enskit.eki.testing import synthetic_evaluation
 
     counts = {"traces": 0}
 
@@ -3113,7 +3113,7 @@ def test_4_the_entry_budget_check_measures_the_remaining_budget():
 
     # And the quotient is robust to its own round-off: 1e-9 / 1e-12 is 1000
     # steps, not the 1001 a naive ceil of the float division reports.
-    from pyeki.eki.driver import _steps_needed
+    from enskit.eki.driver import _steps_needed
 
     assert _steps_needed(1e-9, 1e-12) == 1000
     assert _steps_needed(1.0, 1e-3) == 1000

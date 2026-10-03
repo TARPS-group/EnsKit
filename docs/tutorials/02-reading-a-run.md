@@ -10,10 +10,10 @@ the initial ensemble of {doc}`01-first-inversion`, and with the library's
 default update rule rather than the pathwise one that page selects:
 
 ```python
-import pyeki
+import enskit
 import jax
-from pyeki import toy
-from pyeki.eki import AdaptiveESSSchedule, EKIState, run
+from enskit import toy
+from enskit.eki import AdaptiveESSSchedule, EKIState, run
 
 problem = toy.exponential_decay()
 state = EKIState.from_prior(jax.random.key(0), problem.prior, n_members=64)
@@ -251,7 +251,7 @@ will go looking for a bug.
 The ensemble is the answer, but a two-moment summary of it is one line:
 
 ```python
-from pyeki.gauss import Gaussian
+from enskit.gauss import Gaussian
 
 fitted = Gaussian.from_samples(result.ensemble)
 fitted.mean                    # [1.9802  1.4741]
@@ -270,7 +270,7 @@ The misfit and the effective sample size are both public functions, so a loop
 you drive yourself can compute them:
 
 ```python
-from pyeki.eki import effective_sample_size, misfits
+from enskit.eki import effective_sample_size, misfits
 
 phi = misfits(problem.y, problem.forward(result.ensemble), problem.noise_cov)
 phi.mean()                         # 5.7186

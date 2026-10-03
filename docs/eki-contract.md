@@ -1,10 +1,10 @@
 # Ensemble Kalman Inversion contract
 
-This page specifies `pyeki.eki`: the objects it provides, the contract of every
+This page specifies `enskit.eki`: the objects it provides, the contract of every
 method, and the step that all of them serve. It is normative — an
 implementation that violates a rule here is defective even if its tests pass —
 and it is the reference for two audiences: contributors implementing or
-reviewing the layer, and users who want a more precise account of what a pyEKI
+reviewing the layer, and users who want a more precise account of what a EnsKit
 run actually computes than the user guide gives.
 
 Throughout, *must* and *never* state requirements, *should* states a strong
@@ -17,7 +17,7 @@ them.
 :::{admonition} Status: implemented
 :class: note
 
-`pyeki.eki` implements this document, and the conformance suite of
+`enskit.eki` implements this document, and the conformance suite of
 {ref}`eki-conformance` is what checks that it does. This page remains the
 normative reference for the layer's behaviour: where the code and this page
 disagree, one of them is a defect.
@@ -36,7 +36,7 @@ what happened. It provides
 - **tempering schedules**, fixed and adaptive, which decide how far each step
   moves;
 - **ensemble updates**, stochastic and deterministic, which are thin
-  assemblies over `pyeki.gauss`;
+  assemblies over `enskit.gauss`;
 - **inflation**, which maintains ensemble spread;
 - **stopping rules** and **per-step diagnostics**.
 
@@ -52,7 +52,7 @@ designed so that neither is privileged ({ref}`eki-axes`):
 
 Deliberately outside the layer: the forward model (any callable, per the
 package's permanent scope boundary), parameter transformations and
-constraints, and localization (`pyeki.localize`, which plugs in as an update
+constraints, and localization (`enskit.localize`, which plugs in as an update
 rule). {ref}`eki-excluded` lists what else is left out and why.
 
 **This layer implements no covariance arithmetic of its own.** It *calls*
@@ -60,7 +60,7 @@ rule). {ref}`eki-excluded` lists what else is left out and why.
 diagnostics whiten a $(J, N)$ residual block every step
 ({ref}`eki-diagnostics`), and `AdditiveInflation` requires a factor
 ({ref}`eki-inflation`) — but every such operation is dispatched to
-`pyeki.linalg` or `pyeki.gauss`, and nothing here decomposes, inverts or
+`enskit.linalg` or `enskit.gauss`, and nothing here decomposes, inverts or
 assembles a covariance. What this layer computes itself is elementwise:
 whitened residuals' norms, log-space weight ratios, and mean-and-subtract on an
 ensemble. A step that assembled a covariance, or that re-derived any part of
@@ -77,7 +77,7 @@ remains the deeper reference.
 The notation of {doc}`gaussian-contract` carries over unchanged: $u$ is the
 parameter block of dimension $P$, $v$ the predicted-observation block of
 dimension $N$, $y$ the observation, $R$ the observation-noise covariance as a
-{class}`~pyeki.linalg.PSDLinOp`, $W$ a whitener of $R$, and $J$ the number of
+{class}`~enskit.linalg.PSDLinOp`, $W$ a whitener of $R$, and $J$ the number of
 ensemble members. Ensembles are stored row-wise as `(J, dim)` arrays.
 Additional symbols:
 
@@ -156,7 +156,7 @@ Conventions, each normative:
   noise $R/\Delta\beta$ — **never** $R/\beta$
   ({ref}`eki-algorithm`).
 - **Vectors passed to the layer are exactly core-shaped**, as in
-  `pyeki.gauss`: `y` is a `(N,)` array, an ensemble a `(J, P)` array. The
+  `enskit.gauss`: `y` is a `(N,)` array, an ensemble a `(J, P)` array. The
   batched exception is `misfits`, which follows the operator layer's
   batch contract.
 - **PRNG keys are typed keys** — the output of `jax.random.key`, of shape
@@ -198,9 +198,9 @@ $$
 
 so **moving one increment up the ladder is conditioning on the same
 observation with the noise covariance divided by that increment.** This is why
-`pyeki.gauss` needs nothing new to serve tempering, and why the noise
+`enskit.gauss` needs nothing new to serve tempering, and why the noise
 interface is `whiten` only: $R/\delta$ is a
-{class}`~pyeki.linalg.PSDScaled`, whose whitener is the base whitener scaled
+{class}`~enskit.linalg.PSDScaled`, whose whitener is the base whitener scaled
 by $\sqrt{\delta}$, so a traced increment flows through without refactorizing
 anything.
 
@@ -211,7 +211,7 @@ $\beta_{t+1} = \beta_t + \Delta\beta_t$:
 
 1. evaluate the forward model on every member, $v_j = G(u_j)$;
 2. hold the pairs $(u_j, v_j)$ as an
-   {class}`~pyeki.gauss.EmpiricalJoint`;
+   {class}`~enskit.gauss.EmpiricalJoint`;
 3. condition the joint Gaussian fitted to them on $y$ with noise
    $R/\Delta\beta_t$, obtaining an updated parameter ensemble.
 
@@ -276,7 +276,7 @@ layer's surface:
   only shipped mechanism that leaves it** ({ref}`eki-inflation`).
 - Localization escapes it a different way, by giving each parameter block its
   own weight vector, so the global update is no longer a single combination of
-  whole-ensemble anomalies (`pyeki.localize`).
+  whole-ensemble anomalies (`enskit.localize`).
 
 (eki-honesty)=
 ### What the layer does not promise
@@ -357,7 +357,7 @@ drivers, and not a flag**: they are two schedules.
 | interpretation | approximate posterior ensemble | collapsing ensemble around a regularized fit |
 
 ```python
-from pyeki.eki import (
+from enskit.eki import (
     AdaptiveESSSchedule, DiscrepancyStop, EKIState, FixedSchedule, run,
 )
 
@@ -383,9 +383,9 @@ all; naming either one `posterior` in a script invites reporting the second as
 though it were the first.
 
 Each axis is a **protocol**, not a base class, and each has shipped
-implementations. This is the one place where pyEKI is deliberately open to
-extension at the algorithm level: `pyeki.linalg` is extended by writing an
-operator, `pyeki.gauss` is closed, and `pyeki.eki` is extended by writing a
+implementations. This is the one place where EnsKit is deliberately open to
+extension at the algorithm level: `enskit.linalg` is extended by writing an
+operator, `enskit.gauss` is closed, and `enskit.eki` is extended by writing a
 schedule, an update rule, or an inflation. {ref}`eki-variants` works through
 what that buys.
 
@@ -484,7 +484,7 @@ because its input — a key and a prior — is a different kind of input from th
 fields the constructor takes, which is what the operator layer's rule reserves
 alternate constructors for ({ref}`contract-jax`).
 
-`prior` is a {class}`~pyeki.gauss.Gaussian`; the draw is pinned as
+`prior` is a {class}`~enskit.gauss.Gaussian`; the draw is pinned as
 
 ```python
 key_sample, key_state = jax.random.split(key)
@@ -689,7 +689,7 @@ operations 0 and 6–9 are `assimilate`.
 6. **Validate the increment.** It must be a scalar, finite, and **strictly
    positive**, converted to a 0-d float array; otherwise `ValueError`. A zero
    increment is rejected even though it raises nothing: $R/0$ is a
-   {class}`~pyeki.linalg.PSDScaled` with an infinite scalar, which whitens to
+   {class}`~enskit.linalg.PSDScaled` with an infinite scalar, which whitens to
    zero, so the gain vanishes and the ensemble is returned **unchanged** while
    $\beta$ never advances. An adaptive ladder would then spin until
    `max_steps`.
@@ -828,7 +828,7 @@ Requirements on any implementation:
   increment as a step size in its own right — a Langevin-type sampler, for
   instance — has it ({ref}`eki-variants`).
 
-Two rules ship, and both are two lines over `pyeki.gauss`:
+Two rules ship, and both are two lines over `enskit.gauss`:
 
 | rule | delegates to | character |
 | ---- | ------------ | --------- |
@@ -854,7 +854,7 @@ deterministic alternative descends from the perturbation-free ensemble
 square-root filters of Whitaker and Hamill and their successors
 ({ref}`eki-references`); {doc}`gaussian-contract` owns the transform itself.
 
-**The two rules are named for the `pyeki.gauss` methods they delegate to**, so
+**The two rules are named for the `enskit.gauss` methods they delegate to**, so
 that one vocabulary spans both layers: `TransformUpdate` calls
 `transform_update`, `PathwiseUpdate` calls `pathwise_update`. The alternative
 pairing — naming one for its mechanism, the square root, and the other for its
@@ -1083,7 +1083,7 @@ would carry the ensemble from one target to the next. The construction is the
 standard ESS-based adaptive tempering of the sequential Monte Carlo literature
 (Jasra and co-authors; convergence theory in Beskos and co-authors —
 {ref}`eki-references`), and is used here purely as a **step-size heuristic**:
-pyEKI computes no importance weights, does no resampling, and makes no
+EnsKit computes no importance weights, does no resampling, and makes no
 importance-sampling correctness claim. Its extra field is `ess_fraction`,
 the ESS level sought as a fraction of $J$, default `0.5`, required to lie in
 $(0,\ 1 - 10^{-6}]$ — bounded away from 1 because $\mathrm{ESS}(0)$ evaluates
@@ -1153,7 +1153,7 @@ clamped as {ref}`eki-adaptive` specifies. Three implementation requirements:
   the same quantity — and why the criterion remains meaningful when every
   misfit is enormous, as it is early in a run.
 
-`ess_fraction` defaults to `0.5`, which is pyEKI's choice rather than a
+`ess_fraction` defaults to `0.5`, which is EnsKit's choice rather than a
 canonical value; the tempering literature uses targets between about a third
 and a half. A smaller target takes longer steps and fewer of them.
 
@@ -1181,7 +1181,7 @@ than mathematical — the criterion is expressed in increments rather than in th
 inflation factors $\alpha_n$ that the multiple-data-assimilation literature
 uses, and the clamps are specified with an explicit precedence — and one is a
 genuine requirement the source does not need: the guarded divisions below,
-because pyEKI must not return `nan` on a collapsed ensemble.
+because EnsKit must not return `nan` on a collapsed ensemble.
 
 The criterion. Write $\chi_j = 2\,\delta\,\Phi_j$ for member $j$'s whitened
 misfit measured at *this step's own* noise level $R/\delta$, rather than at
@@ -1415,7 +1415,7 @@ pert = Gaussian(jnp.zeros(P), cov).sample(key, J)
 ensemble + (pert - pert.mean(axis=0))
 ```
 
-defined **by delegation** to {meth}`~pyeki.gauss.Gaussian.sample` rather than
+defined **by delegation** to {meth}`~enskit.gauss.Gaussian.sample` rather than
 by restating its factor-and-normal recipe. The draw is then pinned in exactly
 one place in the package, the gauss layer's snapshot test covers this one too,
 and the two cannot drift apart — which they could if this layer wrote out its
@@ -1445,9 +1445,9 @@ Composing two inflations is a three-line callable and is not packaged
 ## Forward models and failed members
 
 **The forward model is any callable** `(J, P) -> (J, N)`. That is the whole
-interface, and it is fixed by the package's permanent scope boundary: pyEKI
+interface, and it is fixed by the package's permanent scope boundary: EnsKit
 ships no forward models for real use and defines no forward-model base class,
-protocol or registry. (`pyeki.toy` holds a few toy problems, for this
+protocol or registry. (`enskit.toy` holds a few toy problems, for this
 package's tests and its documentation; nothing in this layer imports it, and
 they exemplify the callable rather than constituting an interface for one.)
 The callable
@@ -1479,7 +1479,7 @@ the person implementing one.
   it returns a **read-only zero-copy view**; a wrapper that needs to write into
   its input must copy with `np.array`.
 - **of dtype `state.ensemble.dtype`** — `float64` under the package's default,
-  which `pyeki/__init__.py` establishes at import.
+  which `enskit/__init__.py` establishes at import.
 - **the members that will be recorded.** When an inflation is configured, the
   argument is the *inflated* ensemble, not `state.ensemble`, and it is the
   ensemble carried on the resulting `Evaluation` ({ref}`eki-inflation`). An
@@ -1550,7 +1550,7 @@ something that is not a sample of the joint law of $(u, G(u))$ at all. **No
 run detects this**: from inside a step the shapes are right and the numbers
 are finite, and the layer never sees a second evaluation of the same members
 to compare against. From outside a run it is detectable, and
-`pyeki.eki.testing.check_forward_model` ({ref}`eki-testing`) does so, by
+`enskit.eki.testing.check_forward_model` ({ref}`eki-testing`) does so, by
 permuting the ensemble and by re-evaluating a subset of it. It is also what
 `repair_failed_members` presumes when it moves a
 member's pair as a unit, and what {ref}`eki-diagnostics` means by a pair being
@@ -1703,7 +1703,7 @@ u_j \;\longmapsto\; \hat u + m_j\,(u_j - \hat u)\,\sqrt{\tfrac{J-1}{J_v-1}} .
 $$
 
 It is the construction {doc}`gaussian-contract` anticipates as the reason its
-anomaly divisor is fixed, and on the moments it is strictly better. pyEKI does
+anomaly divisor is fixed, and on the moments it is strictly better. EnsKit does
 not use it, because of what it does to the members. The factor is applied to
 the *surviving* members too, so each one is moved outward from the centre; the
 pair $(u_j, v_j)$ is no longer forward-model-consistent; and the run's returned
@@ -1801,7 +1801,7 @@ Carrying a `(J,)` boolean field would fix that, and this is deliberately a
 "now or later" rather than a "now or never": the `**_` seam of
 {ref}`eki-updates` means the field can be added without breaking any existing
 rule, and adding it is the additive direction. It is not added now because no
-shipped policy reads it, `pyeki.localize` — the consumer that would — does not
+shipped policy reads it, `enskit.localize` — the consumer that would — does not
 exist yet and so cannot say what shape it wants, and the layer's own rule for
 new surface is that a feature waits for a consumer ({ref}`eki-excluded`).
 Revisit when localization lands.
@@ -1843,10 +1843,10 @@ class is otherwise an ordinary unbatched frozen pytree ({ref}`eki-jax`).
 **The whitening is computed twice per step, and the layer accepts that.** The
 driver whitens $y - v_j$ against the base $R$ to build this array, and the
 update then whitens the fitted factor against $R/\Delta\beta$ inside
-{class}`~pyeki.gauss.EmpiricalJoint`. The two are the same computation up to a
+{class}`~enskit.gauss.EmpiricalJoint`. The two are the same computation up to a
 factor: centring the rows of `whitened_residuals` gives $-A_v W^\top$ in exact
 arithmetic, and the tempered whitener is $\sqrt{\Delta\beta}\,W$. The two
-routes are **not** interchangeable in floating point: `pyeki.gauss` centres
+routes are **not** interchangeable in floating point: `enskit.gauss` centres
 before it whitens — structurally, since it whitens a factor that was centred
 when it was built — precisely because centring already-whitened predictions
 cancels a
@@ -1859,7 +1859,7 @@ For structured whiteners applying in $O(N)$ per vector this is absorbed by the
 update's own $O(NJ^2)$. For a **dense** whitener it is not: the $O(JN^2)$
 whitening dominates an update there, so the layer doubles the dominant cost of a
 step on exactly the worst-conditioned problems. The duplication buys a strict
-separation — diagnostics here, the conditioning kernel sealed in `pyeki.gauss`,
+separation — diagnostics here, the conditioning kernel sealed in `enskit.gauss`,
 no intermediate crossing between them. If a dense-whitener consumer ever makes
 the constant factor worth removing, the fix is to thread a precomputed whitened
 matrix through the update's signature, and it is a contract change rather than
@@ -2098,8 +2098,8 @@ fit.cov.diag()                       # (P,) per-coordinate variances
 fit.sample(key, 1000)                # draws from the fitted moments
 ```
 
-{meth}`~pyeki.gauss.Gaussian.from_samples` holds the covariance as a
-{class}`~pyeki.linalg.PSDLowRank` of width $J$, so nothing $P \times P$ is ever
+{meth}`~enskit.gauss.Gaussian.from_samples` holds the covariance as a
+{class}`~enskit.linalg.PSDLowRank` of width $J$, so nothing $P \times P$ is ever
 formed and the rank ceiling of {ref}`eki-subspace` is visible in the type. The
 result therefore carries `mean` for convenience and stops there.
 
@@ -2173,7 +2173,7 @@ silently returned an ensemble at $\beta = 0.7$ labelled as a posterior is
 the failure `stop_fired` and `budget_complete` exist to expose.
 
 **Progress reporting.** The driver emits one record per step at `INFO` on the
-logger named `pyeki.eki`, carrying the step, the level, the increment and the
+logger named `enskit.eki`, carrying the step, the level, the increment and the
 mean misfit, and one at `WARNING` when any member fails. This is the standard
 library's `logging` and nothing more: no handler is installed, no configuration
 is read, and a caller who does nothing sees nothing. A run of an expensive
@@ -2222,8 +2222,8 @@ evaluation.
 - **Policies consume their key whole**, per {doc}`gaussian-contract`. No
   policy stores a key or advances hidden state.
 - The pinning is subject to the same caveat as the gauss layer's: identical
-  arrays across pyEKI releases for a fixed JAX version and PRNG
-  configuration. pyEKI never changes the draw on its side; the test suite
+  arrays across EnsKit releases for a fixed JAX version and PRNG
+  configuration. EnsKit never changes the draw on its side; the test suite
   snapshots a short run so that a JAX-side stream change is detected rather
   than absorbed.
 - Resuming from a checkpointed state reproduces the tail exactly, which is
@@ -2321,9 +2321,9 @@ to dense linear algebra on the caller's behalf; the escape hatch is the same
 Every rule of {ref}`contract-jax` binds the value classes: the same field
 allowlist, `static_field()` for everything else, constructor-bypassing
 unflatten, `eq=False`, identity hashing, never `static_argnums`,
-constructors-store-classmethods-compute. `pyeki.eki` exports no class
+constructors-store-classmethods-compute. `enskit.eki` exports no class
 decorator; the classes reuse the operator layer's machinery internally, as
-`pyeki.gauss` does.
+`enskit.gauss` does.
 
 Beyond that, three requirements specific to a layer that owns a loop:
 
@@ -2384,7 +2384,7 @@ the design.
 | adaptive-regularization EKI (the EKI-DMC scheme of Iglesias and Yang) | `AdaptiveMisfitSchedule` with `stop=DiscrepancyStop()` |
 | inflation-stabilized variants | any of the above with `inflation=` |
 | Tikhonov-regularized EKI | an augmented problem; see below — no new code |
-| localized EKI | `update=` an update rule from `pyeki.localize` |
+| localized EKI | `update=` an update rule from `enskit.localize` |
 | a Langevin-type ensemble sampler (the ensemble Kalman sampler of Garbuno-Iñigo and co-authors) | a custom `EnsembleUpdate` holding the prior, using `increment` as its step size |
 
 **Two need detail.**
@@ -2403,7 +2403,7 @@ because the whitened residual of the appended block is exactly that. The prior
 returns as data, re-imposed at every step **in addition to** whatever it
 already contributes through the initial ensemble — which is the whole content
 of the variant. It requires `prior.cov` to support `whiten`, uses
-`pyeki.linalg`'s existing {func}`~pyeki.linalg.block_diag`, and needs nothing
+`enskit.linalg`'s existing {func}`~enskit.linalg.block_diag`, and needs nothing
 from this layer. The observation dimension becomes $N + P$, so the cost is the
 one the augmentation implies and nothing more.
 
@@ -2432,7 +2432,7 @@ the failure this warning exists to expose.
 The regularization weight is the noise block's scale: `block_diag(noise_cov, (1
 / lam) * prior.cov)` gives the penalty
 $\tfrac{\lambda}{2}\lVert C_0^{-1/2}(u - m_0)\rVert^2$, a
-{class}`~pyeki.linalg.PSDScaled` that whitens as cheaply as `prior.cov` does.
+{class}`~enskit.linalg.PSDScaled` that whitens as cheaply as `prior.cov` does.
 Centring at $m_0$ rather than at the origin is a choice, and the origin is
 recovered by passing a zero mean.
 
@@ -2469,7 +2469,7 @@ reason.
 
 Not normative, but the design was shaped against these call sites.
 
-**`pyeki.gauss` is consumed only through `EmpiricalJoint`'s two update
+**`enskit.gauss` is consumed only through `EmpiricalJoint`'s two update
 methods**, once per step, with the tempered operator `noise_cov / increment`.
 No other gauss surface is used by the shipped rules: not `GaussianJoint`
 directly, not `Gaussian.log_density`, not the conditioning primitives.
@@ -2477,13 +2477,13 @@ directly, not `Gaussian.log_density`, not the conditioning primitives.
 for `sample`. `Gaussian.from_samples` is *offered* to the caller for the
 terminal moment fit ({ref}`eki-honesty`), not called by this layer.
 
-**`pyeki.localize` will supply an `EnsembleUpdate`.** The driver needs no
+**`enskit.localize` will supply an `EnsembleUpdate`.** The driver needs no
 knowledge of localization and localization needs no change to the driver: the
 update signature gives it the ensemble, the predictions, the residual data and
 the increment; the conditioning primitives give it the per-block analyses;
 {ref}`contract-composites` gives it the noise operator's block anatomy. Two
 things it must bring itself, neither of which this layer supplies: observation
-**locations**, which appear nowhere in `pyeki.eki` and so live as static fields
+**locations**, which appear nowhere in `enskit.eki` and so live as static fields
 on the rule, and the neighbourhood and taper definitions.
 
 One real limit. A local analysis needs the noise covariance restricted to a
@@ -2492,7 +2492,7 @@ submatrix of a *correlated* block is not an operator-layer operation. So
 localization composes cleanly for **diagonal noise, or neighbourhoods aligned
 to the noise operator's blocks**, and not for arbitrary neighbourhoods cutting
 across a correlated block — which is the case {doc}`design` spends a section
-motivating. This is a constraint on `pyeki.localize`'s neighbourhood
+motivating. This is a constraint on `enskit.localize`'s neighbourhood
 construction, not a gap in this layer, but the claim that everything it needs
 is already contractual would be false without it.
 
@@ -2520,7 +2520,7 @@ never raises.
 (eki-surface)=
 ## Public surface
 
-`pyeki.eki` exports exactly: the value classes `EKIState`, `Evaluation`,
+`enskit.eki` exports exactly: the value classes `EKIState`, `Evaluation`,
 `HistoryRecord`, `EKIResult`; the protocols `EnsembleUpdate`, `Schedule`,
 `StoppingRule`, `Inflation`; the update rules `TransformUpdate`,
 `PathwiseUpdate`; the schedules `FixedSchedule`, `AdaptiveESSSchedule`,
@@ -2570,12 +2570,12 @@ precondition the helper checks, since at $J_v \le 1$ the valid-member mean is
 `nan`.
 
 (eki-testing)=
-### `pyeki.eki.testing`
+### `enskit.eki.testing`
 
-Unlike `pyeki.gauss`, this layer ships a conformance harness, because unlike
-`pyeki.gauss` it is open to extension: {ref}`eki-axes` names it the one place
-where pyEKI is deliberately extensible at the algorithm level, and the same
-asymmetry that gives `pyeki.linalg` a `check_operator` applies here.
+Unlike `enskit.gauss`, this layer ships a conformance harness, because unlike
+`enskit.gauss` it is open to extension: {ref}`eki-axes` names it the one place
+where EnsKit is deliberately extensible at the algorithm level, and the same
+asymmetry that gives `enskit.linalg` a `check_operator` applies here.
 
 | function | checks |
 | -------- | ------ |
@@ -2945,7 +2945,7 @@ written independently of the code under test. The suite must verify at least:
     `max_steps=k` makes exactly `k` forward calls before raising, so a caller's
     hard budget is $J k$ member evaluations.
 31. **`check_forward_model` accepts a conforming model and rejects each
-    defect it claims to catch.** The shipped toy problems of `pyeki.toy` pass
+    defect it claims to catch.** The shipped toy problems of `enskit.toy` pass
     it; a model that is order-dependent across rows fails the permutation
     comparison, one that normalizes across the ensemble fails the subset
     comparison, one written for a single member fails the shape check, and a
@@ -2962,7 +2962,7 @@ written independently of the code under test. The suite must verify at least:
     either comparison to mean anything is refused rather than passed.
 
     These cases live in `tests/test_toy.py`, with the toy problems as the
-    conforming fixtures; no test under `pyeki.eki` imports `pyeki.toy`.
+    conforming fixtures; no test under `enskit.eki` imports `enskit.toy`.
 
 Alongside conformance, targeted regression tests guard this layer's
 silent-failure classes under the same do-not-delete rule as the layers below.
@@ -3016,7 +3016,7 @@ tidy.
 | ---------- | ------ |
 | `AdaptiveMisfitSchedule` | M. A. Iglesias and Y. Yang, *Adaptive regularisation for ensemble Kalman inversion*, Inverse Problems, 2021; arXiv:2006.14980. The data misfit controller, its Jeffreys-divergence derivation, and the statistical discrepancy principle fixing $\theta = N/2$. |
 | `DiscrepancyStop` | V. A. Morozov, for the discrepancy principle itself; M. A. Iglesias, *A regularizing iterative ensemble Kalman method for PDE-constrained inverse problems*, Inverse Problems, 2016, for its use as a stopping rule in an ensemble Kalman method. |
-| `AdaptiveESSSchedule` | A. Jasra, D. A. Stephens, A. Doucet and T. Tsagaris, *Inference for Lévy-driven stochastic volatility models via adaptive sequential Monte Carlo*, Scandinavian Journal of Statistics 38(1):1–22, 2010, for ESS-based adaptive tempering; A. Beskos, A. Jasra, N. Kantas and A. H. Thiéry, *On the convergence of adaptive sequential Monte Carlo methods*, Annals of Applied Probability 26(2):1111–1146, 2016, for its convergence theory; Y. Zhou, A. M. Johansen and J. A. D. Aston, *Towards automatic model comparison: an adaptive sequential Monte Carlo approach*, Journal of Computational and Graphical Statistics 25(3):701–726, 2016, for the conditional-ESS generalization pyEKI does **not** implement. |
+| `AdaptiveESSSchedule` | A. Jasra, D. A. Stephens, A. Doucet and T. Tsagaris, *Inference for Lévy-driven stochastic volatility models via adaptive sequential Monte Carlo*, Scandinavian Journal of Statistics 38(1):1–22, 2010, for ESS-based adaptive tempering; A. Beskos, A. Jasra, N. Kantas and A. H. Thiéry, *On the convergence of adaptive sequential Monte Carlo methods*, Annals of Applied Probability 26(2):1111–1146, 2016, for its convergence theory; Y. Zhou, A. M. Johansen and J. A. D. Aston, *Towards automatic model comparison: an adaptive sequential Monte Carlo approach*, Journal of Computational and Graphical Statistics 25(3):701–726, 2016, for the conditional-ESS generalization EnsKit does **not** implement. |
 | the tempered ladder as an algorithm | A. A. Emerick and A. C. Reynolds, *Ensemble smoother with multiple data assimilation*, Computers & Geosciences 55:3–15, 2013. The inflation factors $\alpha_n$ of that literature are this contract's reciprocal increments, and the requirement that they sum appropriately is {ref}`eki-step`'s telescoping. |
 | `MultiplicativeInflation` | J. L. Anderson and S. L. Anderson, *A Monte Carlo implementation of the nonlinear filtering problem to produce ensemble assimilations and forecasts*, Monthly Weather Review 127:2741–2758, 1999. |
 | `TransformUpdate`'s lineage | J. S. Whitaker and T. M. Hamill, *Ensemble data assimilation without perturbed observations*, Monthly Weather Review 130:1913–1924, 2002. The transform this layer uses is specified in {doc}`gaussian-contract`, not here. |
@@ -3026,7 +3026,7 @@ Two notes on what is *not* claimed. The relaxation-to-prior inflation family and
 the damped iterative ensemble smoothers named in {ref}`eki-excluded` and
 {ref}`eki-step` are referred to by description rather than cited, because the
 layer does not ship them — it only undertakes not to foreclose them. And
-`AdaptiveESSSchedule`'s default target of `0.5` is pyEKI's choice, not a value
+`AdaptiveESSSchedule`'s default target of `0.5` is EnsKit's choice, not a value
 any of the above prescribes.
 
 (eki-excluded)=
@@ -3147,8 +3147,8 @@ distinguishes it from the two the evaluation carries.
 whitened anomaly matrix, and the marginal-likelihood term
 $\sum_i\log(1+\sigma_i^2)$ built from the same decomposition, would cost the
 driver a second $O(NJ^2)$ decomposition — the update's own order, for a
-diagnostic — because the update's SVD is internal to `pyeki.gauss`.
-{ref}`eki-diagnostics` gives the recovery route. Revisit if `pyeki.gauss` ever
+diagnostic — because the update's SVD is internal to `enskit.gauss`.
+{ref}`eki-diagnostics` gives the recovery route. Revisit if `enskit.gauss` ever
 grows a decomposition accessor, which it records as awaiting a consumer.
 
 **Wall-clock and profiling instrumentation.** The record holds the algorithmic

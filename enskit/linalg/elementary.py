@@ -16,8 +16,8 @@ Elementary operators at the PSD level whose unrestricted mathematical
 namesake is not PSD carry the ``PSD`` prefix; the generic names stay
 reserved for unrestricted classes, should one ever be needed.
 
-See :mod:`pyeki.linalg.base` for the shape convention shared by all
-operators, and :mod:`pyeki.linalg.composite` for operators built out of
+See :mod:`enskit.linalg.base` for the shape convention shared by all
+operators, and :mod:`enskit.linalg.composite` for operators built out of
 these.
 
 Notes
@@ -137,7 +137,7 @@ class PSDDiagonal(PSDLinOp):
     diagonal
         The diagonal entries, strictly positive. Their number sets the
         size. (Named ``diagonal`` rather than ``diag``, which would shadow
-        the inherited :meth:`~pyeki.linalg.SquareLinOp.diag` method.)
+        the inherited :meth:`~enskit.linalg.SquareLinOp.diag` method.)
 
     Notes
     -----
@@ -298,7 +298,7 @@ def _check_lu_factorizes(
 class DenseSquare(SquareLinOp):
     """A dense square matrix with no symmetry assumed, stored with its LU.
 
-    What :func:`~pyeki.linalg.densify` returns for a square non-PSD operator.
+    What :func:`~enskit.linalg.densify` returns for a square non-PSD operator.
     ``DenseSquare(A)`` computes the LU factorization once, at construction.
 
     Parameters
@@ -656,7 +656,7 @@ class PSDLowRank(PSDLinOp):
     extends to ``k >= n``, and to ``logdet``, because a capability asserts
     a *cheap* implementation, and none of the three is cheap at any width:
     each needs the ``(n, n)`` Gram matrix ``F F.T`` formed and factorized,
-    which is what :func:`~pyeki.linalg.densify` already does.
+    which is what :func:`~enskit.linalg.densify` already does.
     Rank is a second reason: capabilities that varied with the stored width
     would advertise a ``solve`` that is ``nan`` for every rank-deficient
     wide factor, which no shape can rule out.
@@ -664,7 +664,7 @@ class PSDLowRank(PSDLinOp):
     Densifying is therefore the route to those operations, and it is only
     valid on an instance known to be full rank. Densifying a thin-factor
     instance returns ``nan`` without raising, except under
-    :func:`~pyeki.linalg.debug_checks`.
+    :func:`~enskit.linalg.debug_checks`.
 
     Construction validates the rank and sizes of ``F`` always, and its
     finiteness when debug checks are enabled — the same check

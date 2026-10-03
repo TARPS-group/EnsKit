@@ -20,7 +20,7 @@ operator arithmetic (``A @ B``, ``c * A``, ``A / c``, ``A.T``), which pick
 the most capable class for the ingredients. Constructing a class directly
 is allowed but never upgrades to a more capable one.
 
-See :mod:`pyeki.linalg.base` for the shape convention shared by all
+See :mod:`enskit.linalg.base` for the shape convention shared by all
 operators.
 
 Notes
@@ -92,7 +92,7 @@ def _check_ops_tuple(cls_name: str, field_name: str, ops, required=LinOp) -> Non
 class Transposed(LinOp):
     """The transpose of another operator, as a view.
 
-    What :attr:`~pyeki.linalg.LinOp.T` returns by default. A plain ``LinOp``
+    What :attr:`~enskit.linalg.LinOp.T` returns by default. A plain ``LinOp``
     regardless of the wrapped operator's level: transposition preserves
     solvability but not the layer's knowledge of it, and operators whose
     transpose supports more override ``T`` with a structured result instead.

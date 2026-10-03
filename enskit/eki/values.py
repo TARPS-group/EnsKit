@@ -18,14 +18,14 @@ object                       holds
 Conventions shared by everything in the module:
 
 - **The first three are unbatched frozen pytrees**, exactly like operators
-  and the classes of :mod:`pyeki.gauss`: they compare by identity, they are
+  and the classes of :mod:`enskit.gauss`: they compare by identity, they are
   never valid ``static_argnums``, and a pytree reconstruction with batched
   leaves produces a *vmapped family*, which reports its ``batch_shape`` and
   refuses every method and array-computing property. :class:`EKIResult` is
   the exception — it is a report, never an argument to traced code, so it is
   a plain frozen dataclass.
 - **Ensembles are stored row-wise**, a ``(J, dim)`` array, one member per
-  row, as in :mod:`pyeki.gauss`.
+  row, as in :mod:`enskit.gauss`.
 - **A run's status is one of three strings**, exported as the constants
   :data:`SCHEDULE_EXHAUSTED`, :data:`STOPPING_RULE` and :data:`INTERRUPTED`
   so that a comparison cannot be misspelled.
@@ -41,7 +41,7 @@ records with different ``step`` values would have different treedefs and
 :func:`jax.tree.map` across a history would raise instead of stacking. The
 history is the one collection in the package meant to be stacked, so its
 element type must be homogeneous as a pytree. :attr:`Evaluation.step` stays a
-static ``int`` for the opposite reason: :class:`~pyeki.eki.FixedSchedule`
+static ``int`` for the opposite reason: :class:`~enskit.eki.FixedSchedule`
 indexes a Python tuple with it, which a traced value cannot do.
 """
 from __future__ import annotations
@@ -81,7 +81,7 @@ SCHEDULE_EXHAUSTED = "schedule_exhausted"
 STOPPING_RULE = "stopping_rule"
 
 #: The run was ended by its caller, not by a policy. Never produced by
-#: :func:`~pyeki.eki.run`.
+#: :func:`~enskit.eki.run`.
 INTERRUPTED = "interrupted"
 
 Status = Literal["schedule_exhausted", "stopping_rule", "interrupted"]
@@ -176,7 +176,7 @@ class EKIState:
 
     **``step`` is cumulative across runs.** Resuming a partially-completed
     ladder is the case that is designed for: a ten-step
-    :class:`~pyeki.eki.FixedSchedule` interrupted after four steps resumes
+    :class:`~enskit.eki.FixedSchedule` interrupted after four steps resumes
     at step four. The same property makes *chaining* a second, different
     ladder onto a finished state a silent no-op — the fresh schedule finds
     ``step >= n_steps`` already true and the run returns immediately with an
@@ -219,7 +219,7 @@ class EKIState:
             key_sample, key_state = jax.random.split(key)
             EKIState(prior.sample(key_sample, n_members), 0.0, 0, key_state)
 
-        so the initial ensemble is exactly :meth:`~pyeki.gauss.Gaussian.sample`'s
+        so the initial ensemble is exactly :meth:`~enskit.gauss.Gaussian.sample`'s
         pinned draw, and the state's own stream is independent of it.
 
         Parameters
@@ -227,7 +227,7 @@ class EKIState:
         key
             A typed JAX PRNG key, consumed whole and split once.
         prior
-            A :class:`~pyeki.gauss.Gaussian` whose covariance supports
+            A :class:`~enskit.gauss.Gaussian` whose covariance supports
             ``factor``.
         n_members
             The ensemble size :math:`J`, a Python ``int`` at least 2.
@@ -319,10 +319,10 @@ class EKIState:
 class Evaluation:
     """Everything one forward evaluation produced.
 
-    What a :class:`~pyeki.eki.Schedule`'s ``next_increment`` and a
-    :class:`~pyeki.eki.StoppingRule` see, what :func:`~pyeki.eki.assimilate`
+    What a :class:`~enskit.eki.Schedule`'s ``next_increment`` and a
+    :class:`~enskit.eki.StoppingRule` see, what :func:`~enskit.eki.assimilate`
     consumes, and what a run reports as its ``last_evaluation``. Returned by
-    :func:`~pyeki.eki.evaluate`.
+    :func:`~enskit.eki.evaluate`.
 
     Parameters
     ----------
@@ -371,14 +371,14 @@ class Evaluation:
     so the misfits, the misfit of the mean prediction, and the whitened
     prediction anomalies are all recoverable from this one array — the last
     being, up to a sign and a :math:`\\sqrt{J-1}`, the whitened factor the
-    conditioning kernel of :mod:`pyeki.gauss` is built on.
+    conditioning kernel of :mod:`enskit.gauss` is built on.
     It costs nothing: the driver must whiten the residuals to compute the
     misfits at all. :math:`N` is likewise recoverable from the trailing axis,
     so a criterion may be calibrated to the observation dimension without
     storing it.
 
     The recovered anomaly matrix is a diagnostic and never a substitute for
-    the update's own: :mod:`pyeki.gauss` centres before it whitens — the
+    the update's own: :mod:`enskit.gauss` centres before it whitens — the
     factor it whitens was centred when it was built — precisely because
     centring already-whitened predictions cancels a common
     :math:`W\\bar v` and loses accuracy as the ensemble collapses.
@@ -451,7 +451,7 @@ class Evaluation:
         """The per-member misfits, a ``(J,)`` array.
 
         :math:`\\Phi_j = \\tfrac12\\lVert b_j\\rVert^2`, the same quantity
-        :func:`~pyeki.eki.misfits` computes from ``y`` and the predictions.
+        :func:`~enskit.eki.misfits` computes from ``y`` and the predictions.
         Computed on access, not cached.
         """
         _check_not_vmap_family(self, "misfits")
@@ -561,7 +561,7 @@ class HistoryRecord:
     -----
     The per-member misfit vector is deliberately absent, as is anything else
     of size :math:`J` or larger. A caller who wants per-member or
-    per-observation quantities uses :func:`~pyeki.eki.iterate` and keeps them
+    per-observation quantities uses :func:`~enskit.eki.iterate` and keeps them
     from ``evaluation.whitened_residuals``.
     """
 
@@ -791,7 +791,7 @@ class EKIResult:
         """Whether the run ended because its stopping rule fired.
 
         ``status == STOPPING_RULE``. With
-        :class:`~pyeki.eki.DiscrepancyStop` this is the optimization form's
+        :class:`~enskit.eki.DiscrepancyStop` this is the optimization form's
         answer to *did it fit?*; with any other rule it reports only that
         that rule fired.
         """

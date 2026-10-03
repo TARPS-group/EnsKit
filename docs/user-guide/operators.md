@@ -81,7 +81,7 @@ At = A.T             # the transpose, as an operator
 `@` composes **operators only**. Applying an operator to an array is always
 `matvec`/`matmat` — `op @ x` raises a `TypeError` that says so, because
 NumPy's `@` contracts axis `-2`, which is silently wrong for the
-leading-batch vector layout everything in pyEKI uses. Scalars for `*` and
+leading-batch vector layout everything in EnsKit uses. Scalars for `*` and
 `/` may be traced values, which is what tempering needs.
 
 (operator-batches)=
@@ -115,7 +115,7 @@ produces `nan` or `inf` downstream rather than an error. When a `nan`
 appears and you want to find where, turn on debug checks:
 
 ```python
-from pyeki.linalg import debug_checks
+from enskit.linalg import debug_checks
 
 with debug_checks():
     cov = DensePSD(A)   # raises here if A is not symmetric PD

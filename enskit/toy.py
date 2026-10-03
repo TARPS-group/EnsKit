@@ -17,7 +17,7 @@ factory                      builds
                              with a valid domain, so members outside it fail
 ============================ ==================================================
 
-**These are not production models, and they are not an interface.** pyEKI
+**These are not production models, and they are not an interface.** EnsKit
 ships no forward models for real use and defines no base class, protocol or
 registry for one: a forward model is any callable taking a ``(J, P)`` ensemble
 to ``(J, N)`` predictions. What these classes exemplify is that callable and
@@ -26,8 +26,8 @@ the problem around it, nothing more.
 Using one::
 
     import jax
-    from pyeki import toy
-    from pyeki.eki import AdaptiveESSSchedule, EKIState, run
+    from enskit import toy
+    from enskit.eki import AdaptiveESSSchedule, EKIState, run
 
     problem = toy.exponential_decay()
     state = EKIState.from_prior(jax.random.key(0), problem.prior, n_members=64)
@@ -40,7 +40,7 @@ Conventions shared by all three:
 
 - **A problem is a frozen dataclass of plain public values, and is not
   callable.** Pass ``forward``, ``y`` and ``noise_cov`` as three separate
-  arguments; nothing in :mod:`pyeki.eki` accepts a problem object in their
+  arguments; nothing in :mod:`enskit.eki` accepts a problem object in their
   place.
 - **Every field is a value a caller could have written themselves**, so a
   problem can be modified by constructing the class directly rather than
@@ -62,7 +62,7 @@ Conventions shared by all three:
 
 Notes
 -----
-Nothing in :mod:`pyeki.linalg`, :mod:`pyeki.gauss` or :mod:`pyeki.eki` imports
+Nothing in :mod:`enskit.linalg`, :mod:`enskit.gauss` or :mod:`enskit.eki` imports
 this module, and nothing should: it depends on two of them, so an import in
 the other direction would make toy problems load-bearing for the library.
 
@@ -71,12 +71,12 @@ Row independence — row :math:`j` of a model's return depending only on row
 that nothing in a run detects. Each model here is written so that the property
 is visible rather than asserted: the linear model applies an operator to the
 trailing axis, and the two decay models are :func:`jax.vmap` of a function of
-one member. :func:`pyeki.eki.testing.check_forward_model` tests the property
+one member. :func:`enskit.eki.testing.check_forward_model` tests the property
 from outside, on a model of your own.
 
 The closed-form posterior of :class:`LinearGaussian` is not computed here. It
-is :meth:`pyeki.gauss.GaussianJoint.from_linear_map` followed by
-:meth:`~pyeki.gauss.GaussianJoint.condition`, which is where the mathematics
+is :meth:`enskit.gauss.GaussianJoint.from_linear_map` followed by
+:meth:`~enskit.gauss.GaussianJoint.condition`, which is where the mathematics
 belongs and which is worth seeing: checking a run against a known answer does
 not mean writing your own algebra.
 """
@@ -167,15 +167,15 @@ def _check_problem(
     """Validate the four fields every problem carries against its sizes."""
     if not isinstance(prior, Gaussian):
         raise TypeError(
-            f"{cls_name}.prior: must be a pyeki.gauss.Gaussian, got "
+            f"{cls_name}.prior: must be a enskit.gauss.Gaussian, got "
             f"{type(prior).__name__}. Build one as "
             f"Gaussian(mean, PSDDiagonal(variances))."
         )
     if not isinstance(noise_cov, PSDLinOp):
         raise TypeError(
-            f"{cls_name}.noise_cov: must be a pyeki.linalg.PSDLinOp, got "
+            f"{cls_name}.noise_cov: must be a enskit.linalg.PSDLinOp, got "
             f"{type(noise_cov).__name__}. Wrap a dense matrix as "
-            f"pyeki.linalg.DensePSD(matrix)."
+            f"enskit.linalg.DensePSD(matrix)."
         )
     _check_not_family(cls_name, "prior", prior)
     _check_not_family(cls_name, "noise_cov", noise_cov)
@@ -294,13 +294,13 @@ class LinearGaussian:
     Parameters
     ----------
     G
-        The linear map, a :class:`~pyeki.linalg.LinOp` of shape ``(N, P)``.
+        The linear map, a :class:`~enskit.linalg.LinOp` of shape ``(N, P)``.
     prior
-        The prior over the parameters, a :class:`~pyeki.gauss.Gaussian` of
+        The prior over the parameters, a :class:`~enskit.gauss.Gaussian` of
         dimension ``P`` whose covariance supports ``factor``.
     noise_cov
         The observation error covariance, a
-        :class:`~pyeki.linalg.PSDLinOp` of side ``N``.
+        :class:`~enskit.linalg.PSDLinOp` of side ``N``.
     y
         The observation, a ``(N,)`` array.
     u_true
@@ -311,9 +311,9 @@ class LinearGaussian:
     ValueError
         If the five fields disagree on ``P`` or ``N``.
     TypeError
-        If ``G`` is not a :class:`~pyeki.linalg.LinOp`, ``prior`` not a
-        :class:`~pyeki.gauss.Gaussian`, or ``noise_cov`` not a
-        :class:`~pyeki.linalg.PSDLinOp`.
+        If ``G`` is not a :class:`~enskit.linalg.LinOp`, ``prior`` not a
+        :class:`~enskit.gauss.Gaussian`, or ``noise_cov`` not a
+        :class:`~enskit.linalg.PSDLinOp`.
     """
 
     G: LinOp = field(kw_only=True)
@@ -325,9 +325,9 @@ class LinearGaussian:
     def __post_init__(self) -> None:
         if not isinstance(self.G, LinOp):
             raise TypeError(
-                f"LinearGaussian.G: must be a pyeki.linalg.LinOp, got "
+                f"LinearGaussian.G: must be a enskit.linalg.LinOp, got "
                 f"{type(self.G).__name__}. Wrap a dense matrix as "
-                f"pyeki.linalg.Dense(G); the closed-form posterior needs an "
+                f"enskit.linalg.Dense(G); the closed-form posterior needs an "
                 f"operator."
             )
         _check_not_family("LinearGaussian", "G", self.G)
@@ -379,7 +379,7 @@ class LinearGaussian:
         the transposed model's predictions for a square one.
 
         ``jit``-able and ``vmap``-pable, as a convenience of these models
-        rather than a requirement on yours — see :mod:`pyeki.toy`.
+        rather than a requirement on yours — see :mod:`enskit.toy`.
         """
         return self.G.matvec(_check_ensemble("LinearGaussian", ensemble, self.u_dim))
 
@@ -398,7 +398,7 @@ class LinearGaussian:
         is the Bayesian posterior and a smaller value is the intermediate
         target a run passes through on the way to it.
 
-        Two lines, both in :mod:`pyeki.gauss`::
+        Two lines, both in :mod:`enskit.gauss`::
 
             joint = GaussianJoint.from_linear_map(self.prior, self.G)
             return joint.condition(self.y, self.noise_cov / beta)
@@ -418,10 +418,10 @@ class LinearGaussian:
         -------
         Gaussian
             The posterior over the parameters, of dimension ``P``. Its
-            covariance is a :class:`~pyeki.linalg.PSDLowRank` holding a
+            covariance is a :class:`~enskit.linalg.PSDLowRank` holding a
             ``(P, k)`` factor, for ``k`` the width of the prior covariance's
             factor — never a dense ``P``-by-``P`` matrix. Directly comparable
-            with :meth:`pyeki.gauss.Gaussian.from_samples` of a run's final
+            with :meth:`enskit.gauss.Gaussian.from_samples` of a run's final
             ensemble, which has the same type and the same covariance
             structure.
 
@@ -453,7 +453,7 @@ class LinearGaussian:
         The run itself has no such limit, so a high-dimensional problem can be
         inverted where its closed form cannot be written down. The two lines
         above bypass the guard, deliberately: it is a guard on a toy
-        convenience, not a limit in :mod:`pyeki.gauss`.
+        convenience, not a limit in :mod:`enskit.gauss`.
         """
         beta = float(beta)
         if not (beta > 0.0) or not math.isfinite(beta):
@@ -574,10 +574,10 @@ class ExponentialDecay:
         The points :math:`t_i`, a ``(N,)`` array.
     prior
         The prior over ``(amplitude, rate)``, a
-        :class:`~pyeki.gauss.Gaussian` of dimension 2.
+        :class:`~enskit.gauss.Gaussian` of dimension 2.
     noise_cov
         The observation error covariance, a
-        :class:`~pyeki.linalg.PSDLinOp` of side ``N``.
+        :class:`~enskit.linalg.PSDLinOp` of side ``N``.
     y
         The observation, a ``(N,)`` array.
     u_true
@@ -589,8 +589,8 @@ class ExponentialDecay:
         If ``times`` is not rank 1, or the fields disagree on ``N`` or on the
         two parameters.
     TypeError
-        If ``prior`` is not a :class:`~pyeki.gauss.Gaussian` or ``noise_cov``
-        not a :class:`~pyeki.linalg.PSDLinOp`.
+        If ``prior`` is not a :class:`~enskit.gauss.Gaussian` or ``noise_cov``
+        not a :class:`~enskit.linalg.PSDLinOp`.
     """
 
     times: Array = field(kw_only=True)
@@ -647,7 +647,7 @@ class ExponentialDecay:
         which cannot couple the rows even in principle.
 
         ``jit``-able and ``vmap``-pable, as a convenience of these models
-        rather than a requirement on yours — see :mod:`pyeki.toy`.
+        rather than a requirement on yours — see :mod:`enskit.toy`.
         """
         _check_ensemble("ExponentialDecay", ensemble, 2)
         return jax.vmap(_decay, in_axes=(0, None))(ensemble, self.times)
@@ -917,7 +917,7 @@ def exponential_decay(
     step and assimilating it gradually reach *reliably* different answers
     rather than coincidentally different ones. Measured over the eight
     observation seeds 0 to 7, against
-    :class:`~pyeki.eki.AdaptiveESSSchedule` at 64 members: the two posterior
+    :class:`~enskit.eki.AdaptiveESSSchedule` at 64 members: the two posterior
     means differ by between 0.10 and 0.25 in the rate, and the gradual answer
     is nearer ``u_true`` at every seed, by a factor between 2.7 and 41.
     ``tests/test_toy.py`` asserts both over all eight.

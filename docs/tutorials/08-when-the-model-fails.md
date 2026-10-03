@@ -29,7 +29,7 @@ required.
   ```
   step 0: 63 of 64 members' predictions were finite; the rest were repaired
           to the valid centre
-  UserWarning: pyeki.eki.run: some forward-model evaluations failed; the worst
+  UserWarning: enskit.eki.run: some forward-model evaluations failed; the worst
   step had 63 of 64 members valid. Each such step conditioned on a covariance
   damped by (n_valid - 1) / (J - 1). Inspect result.stacked.n_valid.
   ```
@@ -61,7 +61,7 @@ required.
 
 `run(..., on_failure=...)`, `iterate`, `EKIError`, `EKIState.restart`,
 `EKIResult.min_n_valid`, `HistoryRecord.n_valid`,
-`pyeki.eki.repair_failed_members`.
+`enskit.eki.repair_failed_members`.
 
 The wrapper obligation itself — catch your own exceptions, return a non-finite
 row — is specified in {doc}`../user-guide/writing-a-forward-model`, whose

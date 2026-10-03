@@ -37,9 +37,9 @@ import numpy as np
 import pytest
 from conftest import prints_as
 
-import pyeki  # noqa: F401  -- enables x64 before any array exists
-from pyeki import toy
-from pyeki.eki import (
+import enskit  # noqa: F401  -- enables x64 before any array exists
+from enskit import toy
+from enskit.eki import (
     AdaptiveESSSchedule,
     DiscrepancyStop,
     EKIState,
@@ -51,8 +51,8 @@ from pyeki.eki import (
     misfits,
     run,
 )
-from pyeki.gauss import Gaussian, GaussianJoint
-from pyeki.linalg import PSDDiagonal
+from enskit.gauss import Gaussian, GaussianJoint
+from enskit.linalg import PSDDiagonal
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "docs"))
 import figures  # noqa: E402  -- docs/figures.py, on the path just above

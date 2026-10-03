@@ -71,7 +71,7 @@ Then, having earned it:
 ## API exercised
 
 `FixedSchedule` (`uniform`, `constant`, and an explicit increment tuple),
-`AdaptiveESSSchedule`, `AdaptiveMisfitSchedule`, `pyeki.eki.iterate`,
+`AdaptiveESSSchedule`, `AdaptiveMisfitSchedule`, `enskit.eki.iterate`,
 `HistoryRecord.beta`, `HistoryRecord.increment`, `Evaluation.beta`.
 
 ## Notes for the writer

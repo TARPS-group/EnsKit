@@ -43,7 +43,7 @@ Conventions shared by everything in the module:
 - **Policies are pure and stateless.** A policy must be a pure function of
   its arguments and its own frozen fields, and must not carry step
   state — which is what makes a run resumable from an
-  :class:`~pyeki.eki.EKIState` alone, and why a schedule receives the step
+  :class:`~enskit.eki.EKIState` alone, and why a schedule receives the step
   index instead of counting calls.
 - **Policies consume their key whole.** No policy splits, stores or advances
   a key; splitting is the driver's.
@@ -55,7 +55,7 @@ contract" page of the documentation, which is normative, and the sources the
 shipped policies reproduce are listed there.
 
 This module implements no covariance arithmetic of its own. The two update
-rules are two lines over :mod:`pyeki.gauss`, and the entire numerical content
+rules are two lines over :mod:`enskit.gauss`, and the entire numerical content
 of an update — the whitened-SVD kernel, the bounded gain multiplier, the
 identity-completed square-root transform, the graceful degradation at zero
 prediction anomalies — belongs to that layer.
@@ -258,7 +258,7 @@ class TransformUpdate:
     """The deterministic square-root update; ignores the key. **The default.**
 
     Delegates to
-    :meth:`EmpiricalJoint.transform_update <pyeki.gauss.EmpiricalJoint.transform_update>`
+    :meth:`EmpiricalJoint.transform_update <enskit.gauss.EmpiricalJoint.transform_update>`
     with the tempered operator ``noise_cov / increment``. Holds no field.
 
     Notes
@@ -299,7 +299,7 @@ class PathwiseUpdate:
     """The stochastic perturbed-observation update; consumes the key.
 
     Delegates to
-    :meth:`EmpiricalJoint.pathwise_update <pyeki.gauss.EmpiricalJoint.pathwise_update>`
+    :meth:`EmpiricalJoint.pathwise_update <enskit.gauss.EmpiricalJoint.pathwise_update>`
     with the tempered operator ``noise_cov / increment``. Holds no field.
 
     Notes
@@ -380,7 +380,7 @@ class FixedSchedule:
     Because it indexes the state's *cumulative* step, a fixed schedule
     resumes a partially-completed ladder correctly and treats a finished
     state as finished — see :meth:`EKIState.restart
-    <pyeki.eki.EKIState.restart>` before chaining one run onto another.
+    <enskit.eki.EKIState.restart>` before chaining one run onto another.
 
     Its ``repr`` summarizes rather than enumerates, since a 200-step
     optimization ladder would otherwise print 200 floats into every traceback
@@ -526,14 +526,14 @@ class AdaptiveESSSchedule:
 
     The construction is the standard ESS-based adaptive tempering of the
     sequential Monte Carlo literature, used here purely as a step-size
-    heuristic: pyEKI computes no importance weights, does no resampling, and
+    heuristic: EnsKit computes no importance weights, does no resampling, and
     makes no importance-sampling correctness claim.
 
     ``ess_fraction`` is bounded away from 1 because
     :math:`\\mathrm{ESS}(0)` evaluates to ``exp(log J)`` rather than exactly
     :math:`J`, so a fraction within round-off of 1 would make
     :math:`\\delta = 0` an invalid lower bracket. Its default of ``0.5`` is
-    pyEKI's choice rather than a canonical value; the tempering literature
+    EnsKit's choice rather than a canonical value; the tempering literature
     uses targets between about a third and a half, and a smaller target takes
     longer steps and fewer of them.
     """
@@ -859,7 +859,7 @@ class AdditiveInflation:
     Parameters
     ----------
     cov
-        A :class:`~pyeki.linalg.PSDLinOp` of side :math:`P` supporting
+        A :class:`~enskit.linalg.PSDLinOp` of side :math:`P` supporting
         ``factor``. A scale is folded into the operator by the caller —
         ``AdditiveInflation(0.01 * prior.cov)`` — rather than carried as a
         second field.
@@ -867,7 +867,7 @@ class AdditiveInflation:
     Raises
     ------
     TypeError
-        If ``cov`` is not a :class:`~pyeki.linalg.PSDLinOp`.
+        If ``cov`` is not a :class:`~enskit.linalg.PSDLinOp`.
     ValueError
         If ``cov`` is a vmapped family.
     UnsupportedOpError
@@ -877,7 +877,7 @@ class AdditiveInflation:
     Notes
     -----
     Nothing is precomputed here, and nothing needs to be. Every call reaches
-    ``cov.factor()`` through :meth:`~pyeki.gauss.Gaussian.sample`, and the
+    ``cov.factor()`` through :meth:`~enskit.gauss.Gaussian.sample`, and the
     operator layer factorizes at construction, so ``factor()`` returns a
     stored factor rather than computing one — for every covariance this layer
     can be given.
@@ -888,7 +888,7 @@ class AdditiveInflation:
     def __post_init__(self) -> None:
         if not isinstance(self.cov, PSDLinOp):
             raise TypeError(
-                f"AdditiveInflation.cov: must be a pyeki.linalg.PSDLinOp, got "
+                f"AdditiveInflation.cov: must be a enskit.linalg.PSDLinOp, got "
                 f"{type(self.cov).__name__}"
             )
         if self.cov.batch_shape != ():

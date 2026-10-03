@@ -2,7 +2,7 @@
 
 Each test builds a deliberately broken operator that returns wrong answers,
 or fails only under a transformation, without raising in ordinary use, and
-requires :func:`pyeki.linalg.testing.check_operator` to reject it. Every
+requires :func:`enskit.linalg.testing.check_operator` to reject it. Every
 operator here passed an earlier version of the suite; the test names the bug
 class the suite now catches.
 """
@@ -14,8 +14,8 @@ import numpy as np
 import pytest
 from jax import Array
 
-import pyeki  # noqa: F401  -- enables x64 before any array exists
-from pyeki.linalg import (
+import enskit  # noqa: F401  -- enables x64 before any array exists
+from enskit.linalg import (
     DensePSD,
     DenseSquare,
     LinOp,
@@ -26,8 +26,8 @@ from pyeki.linalg import (
     linop,
     static_field,
 )
-from pyeki.linalg.base import _construct_unchecked
-from pyeki.linalg.testing import check_operator
+from enskit.linalg.base import _construct_unchecked
+from enskit.linalg.testing import check_operator
 
 RNG = np.random.default_rng(0)
 

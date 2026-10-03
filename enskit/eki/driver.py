@@ -9,12 +9,12 @@ function            does
 :func:`advance`     :func:`evaluate` then :func:`assimilate`, at an increment
 :func:`iterate`     the driver as a generator, yielding after every step
 :func:`run`         the driver as a function, returning an
-                    :class:`~pyeki.eki.EKIResult`
+                    :class:`~enskit.eki.EKIResult`
 =================== =========================================================
 
 The two phases are public because the forward evaluation is the resource a
 run is organized around, and separating them is what lets a caller spend it
-deliberately: one :class:`~pyeki.eki.Evaluation` serves any number of trial
+deliberately: one :class:`~enskit.eki.Evaluation` serves any number of trial
 increments, so a backtracking or damped loop costs one forward evaluation per
 step plus one per rejection rather than two per trial.
 
@@ -40,7 +40,7 @@ Conventions shared by everything in the module:
   a model that may crash, time out or lose a worker must catch that itself
   and return a non-finite row.
 - **Progress is reported through the standard library's** :mod:`logging`, on
-  the logger named ``pyeki.eki``: one record per step at ``INFO`` and one at
+  the logger named ``enskit.eki``: one record per step at ``INFO`` and one at
   ``WARNING`` when any member fails. No handler is installed and no
   configuration is read, so a caller who does nothing sees nothing.
 
@@ -90,7 +90,7 @@ __all__ = ["advance", "assimilate", "evaluate", "iterate", "run"]
 
 #: The layer's logger. No handler is installed; a caller who wants progress
 #: reports adds one.
-logger = logging.getLogger("pyeki.eki")
+logger = logging.getLogger("enskit.eki")
 
 #: Relative slack on a budget's exhaustion check. Relative rather than
 #: absolute so that a small ``beta_target`` is not swallowed whole: an
@@ -135,14 +135,14 @@ def evaluate(
         The observation, a ``(N,)`` finite array.
     noise_cov
         The **base** observation-noise covariance, a
-        :class:`~pyeki.linalg.PSDLinOp` of side ``N`` supporting ``whiten``,
+        :class:`~enskit.linalg.PSDLinOp` of side ``N`` supporting ``whiten``,
         with ``batch_shape == ()``.
     inflation
-        An :class:`~pyeki.eki.Inflation`, or ``None`` for none — in which
+        An :class:`~enskit.eki.Inflation`, or ``None`` for none — in which
         case the ensemble passes through bit-exactly. Keyword-only.
     on_failure
         ``"repair"`` (the default) to replace failed members by the valid
-        centre, or ``"raise"`` to raise :class:`~pyeki.eki.EKIError` on any
+        centre, or ``"raise"`` to raise :class:`~enskit.eki.EKIError` on any
         failure. Keyword-only.
 
     Returns
@@ -165,8 +165,8 @@ def evaluate(
         not ``(J, P)``, or if ``on_failure`` is not one of the two permitted
         strings.
     TypeError
-        If ``state`` is not an :class:`~pyeki.eki.EKIState`, or ``noise_cov``
-        not a :class:`~pyeki.linalg.PSDLinOp`.
+        If ``state`` is not an :class:`~enskit.eki.EKIState`, or ``noise_cov``
+        not a :class:`~enskit.linalg.PSDLinOp`.
     UnsupportedOpError
         If ``noise_cov`` does not support ``whiten``.
 
@@ -280,7 +280,7 @@ def assimilate(
     state
         The state to move.
     evaluation
-        An :class:`~pyeki.eki.Evaluation` obtained from ``state``.
+        An :class:`~enskit.eki.Evaluation` obtained from ``state``.
     increment
         The tempering increment, a scalar that must be finite and **strictly
         positive**. Keyword-only.
@@ -290,14 +290,14 @@ def assimilate(
         The **base** noise covariance; the update conditions with
         ``noise_cov / increment``. Keyword-only.
     update
-        An :class:`~pyeki.eki.EnsembleUpdate`, defaulting to
-        :class:`~pyeki.eki.TransformUpdate`. Keyword-only.
+        An :class:`~enskit.eki.EnsembleUpdate`, defaulting to
+        :class:`~enskit.eki.TransformUpdate`. Keyword-only.
 
     Returns
     -------
     tuple
-        The new :class:`~pyeki.eki.EKIState` and the step's
-        :class:`~pyeki.eki.HistoryRecord`.
+        The new :class:`~enskit.eki.EKIState` and the step's
+        :class:`~enskit.eki.HistoryRecord`.
 
     Raises
     ------
@@ -306,9 +306,9 @@ def assimilate(
         ``evaluation`` does not belong to ``state``, or if the update's
         output is not ``(J, P)`` of the incoming dtype.
     TypeError
-        If ``state`` is not an :class:`~pyeki.eki.EKIState`, ``evaluation``
-        not an :class:`~pyeki.eki.Evaluation`, or ``noise_cov`` not a
-        :class:`~pyeki.linalg.PSDLinOp`.
+        If ``state`` is not an :class:`~enskit.eki.EKIState`, ``evaluation``
+        not an :class:`~enskit.eki.Evaluation`, or ``noise_cov`` not a
+        :class:`~enskit.linalg.PSDLinOp`.
     EKIError
         If the updated ensemble contains a non-finite entry. Carries
         ``state`` and an empty ``history``.
@@ -417,17 +417,17 @@ def advance(
         The tempering increment, a finite, strictly positive scalar.
         Keyword-only.
     update
-        An :class:`~pyeki.eki.EnsembleUpdate`. Keyword-only.
+        An :class:`~enskit.eki.EnsembleUpdate`. Keyword-only.
     inflation
-        An :class:`~pyeki.eki.Inflation`, or ``None`` for none. Keyword-only.
+        An :class:`~enskit.eki.Inflation`, or ``None`` for none. Keyword-only.
     on_failure
         ``"repair"`` or ``"raise"``. Keyword-only.
 
     Returns
     -------
     tuple
-        The new :class:`~pyeki.eki.EKIState` and the step's
-        :class:`~pyeki.eki.HistoryRecord`.
+        The new :class:`~enskit.eki.EKIState` and the step's
+        :class:`~enskit.eki.HistoryRecord`.
 
     Raises
     ------
@@ -499,15 +499,15 @@ def iterate(
         The problem, as :func:`evaluate` takes them. Bound once for the whole
         run.
     schedule
-        A :class:`~pyeki.eki.Schedule`. Keyword-only.
+        A :class:`~enskit.eki.Schedule`. Keyword-only.
     update
-        An :class:`~pyeki.eki.EnsembleUpdate`, defaulting to
-        :class:`~pyeki.eki.TransformUpdate`. Keyword-only.
+        An :class:`~enskit.eki.EnsembleUpdate`, defaulting to
+        :class:`~enskit.eki.TransformUpdate`. Keyword-only.
     inflation
-        An :class:`~pyeki.eki.Inflation`, or ``None`` for none — the default.
+        An :class:`~enskit.eki.Inflation`, or ``None`` for none — the default.
         Keyword-only.
     stop
-        A :class:`~pyeki.eki.StoppingRule`, or ``None``. Keyword-only.
+        A :class:`~enskit.eki.StoppingRule`, or ``None``. Keyword-only.
     on_failure
         ``"repair"`` or ``"raise"``. Keyword-only.
     max_steps
@@ -531,8 +531,8 @@ def iterate(
         first advance of the generator rather than at the call, since a
         generator's body does not run until then.
     TypeError
-        If ``state`` is not an :class:`~pyeki.eki.EKIState`, or ``noise_cov``
-        not a :class:`~pyeki.linalg.PSDLinOp`.
+        If ``state`` is not an :class:`~enskit.eki.EKIState`, or ``noise_cov``
+        not a :class:`~enskit.linalg.PSDLinOp`.
 
     Warns
     -----
@@ -549,8 +549,8 @@ def iterate(
     ignores the third element.
 
     A caller who ends the loop themselves has everything an
-    :class:`~pyeki.eki.EKIResult` needs — the last yielded state, the records
-    they accumulated, :data:`~pyeki.eki.INTERRUPTED`, and the last yielded
+    :class:`~enskit.eki.EKIResult` needs — the last yielded state, the records
+    they accumulated, :data:`~enskit.eki.INTERRUPTED`, and the last yielded
     evaluation.
 
     **``max_steps`` bounds the steps of this call, not
@@ -599,14 +599,14 @@ def run(
         The problem, as :func:`evaluate` takes them. Bound once for the whole
         run.
     schedule
-        A :class:`~pyeki.eki.Schedule`. Keyword-only.
+        A :class:`~enskit.eki.Schedule`. Keyword-only.
     update
-        An :class:`~pyeki.eki.EnsembleUpdate`. Keyword-only.
+        An :class:`~enskit.eki.EnsembleUpdate`. Keyword-only.
     inflation
-        An :class:`~pyeki.eki.Inflation`, or ``None`` for none — the default.
+        An :class:`~enskit.eki.Inflation`, or ``None`` for none — the default.
         Keyword-only.
     stop
-        A :class:`~pyeki.eki.StoppingRule`, or ``None``. Keyword-only.
+        A :class:`~enskit.eki.StoppingRule`, or ``None``. Keyword-only.
     on_failure
         ``"repair"`` or ``"raise"``. Keyword-only.
     max_steps
@@ -616,9 +616,9 @@ def run(
     Returns
     -------
     EKIResult
-        With ``status`` either :data:`~pyeki.eki.SCHEDULE_EXHAUSTED` or
-        :data:`~pyeki.eki.STOPPING_RULE`;
-        :data:`~pyeki.eki.INTERRUPTED` is never produced here.
+        With ``status`` either :data:`~enskit.eki.SCHEDULE_EXHAUSTED` or
+        :data:`~enskit.eki.STOPPING_RULE`;
+        :data:`~enskit.eki.INTERRUPTED` is never produced here.
 
     Raises
     ------
@@ -629,8 +629,8 @@ def run(
         On any invalid argument, including a ``max_steps`` too small to
         accommodate the schedule's own floor-bound worst case.
     TypeError
-        If ``state`` is not an :class:`~pyeki.eki.EKIState`, or ``noise_cov``
-        not a :class:`~pyeki.linalg.PSDLinOp`.
+        If ``state`` is not an :class:`~enskit.eki.EKIState`, or ``noise_cov``
+        not a :class:`~enskit.linalg.PSDLinOp`.
 
     Warns
     -----
@@ -651,12 +651,12 @@ def run(
     is why policies may not hold state across steps.
 
     Chaining a *new* ladder onto a finished state is a different thing and is
-    a silent no-op — use :meth:`EKIState.restart <pyeki.eki.EKIState.restart>`.
+    a silent no-op — use :meth:`EKIState.restart <enskit.eki.EKIState.restart>`.
 
     There is no ``"max_steps"`` status, because exceeding ``max_steps``
     raises. The bound is a safety net against a schedule that can never be
     exhausted and a run with no stopping rule; a genuinely step-limited run
-    is a :class:`~pyeki.eki.FixedSchedule` with that many steps, or a
+    is a :class:`~enskit.eki.FixedSchedule` with that many steps, or a
     ``break`` in an :func:`iterate` loop.
     """
     driver = _drive(
@@ -690,7 +690,7 @@ def run(
     worst = result.min_n_valid
     if worst is not None and worst < state.n_members:
         warnings.warn(
-            f"pyeki.eki.run: some forward-model evaluations failed; the worst "
+            f"enskit.eki.run: some forward-model evaluations failed; the worst "
             f"step had {worst} of {state.n_members} members valid. "
             f"Each such step conditioned on a covariance damped by "
             f"(n_valid - 1) / (J - 1). Inspect result.stacked.n_valid.",
@@ -916,7 +916,7 @@ def _terminal_record(evaluation: Evaluation) -> HistoryRecord:
 
     ``increment`` is exactly ``0.0`` and ``beta_next == beta``; ``ess`` is
     the literal ``float(J)``, written here rather than obtained from
-    :func:`~pyeki.eki.effective_sample_size`, since ``exp(log J)`` is not
+    :func:`~enskit.eki.effective_sample_size`, since ``exp(log J)`` is not
     ``J`` in floating point. It appears at most once, always last, and in
     exactly two cases: a stopping rule fired, or a schedule's
     ``next_increment`` returned ``None``. A zero increment in a record
@@ -962,7 +962,7 @@ def _check_problem(where: str, y, noise_cov):
     """Validate the problem's shapes once, and ``y``'s finiteness."""
     if not isinstance(noise_cov, PSDLinOp):
         raise TypeError(
-            f"{where}: noise_cov must be a pyeki.linalg.PSDLinOp, got "
+            f"{where}: noise_cov must be a enskit.linalg.PSDLinOp, got "
             f"{type(noise_cov).__name__}"
         )
     if noise_cov.batch_shape != ():
@@ -1024,7 +1024,7 @@ def _warn_promoted(promoted_from, working_dtype, stacklevel: int) -> None:
     ``run`` or ``iterate`` that resumes it both sit in between.
     """
     warnings.warn(
-        f"pyeki.eki: the forward model returned {promoted_from} predictions, "
+        f"enskit.eki: the forward model returned {promoted_from} predictions, "
         f"promoted to the run's working dtype {working_dtype}. Ensemble "
         f"anomalies lose digits to cancellation, so a narrower model costs "
         f"precision the promotion cannot recover. Return {working_dtype} from "
