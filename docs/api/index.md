@@ -111,6 +111,56 @@ contract.
              check_arithmetic, check_family
 ```
 
+## enskit.distribution
+
+Distributions over named blocks, conditioning and conditional maps. See
+{doc}`../user-guide/distributions` for when to use each piece, and
+{doc}`../distribution-contract` for the full behavioral contract.
+
+```{eval-rst}
+.. automodule:: enskit.distribution
+   :no-members:
+```
+
+### Distributions
+
+```{eval-rst}
+.. autoclass:: enskit.distribution.Ensemble
+   :members: names, dims, n_particles, is_weighted, log_weights, weights,
+             all_finite, batch_shape, __getitem__, marginal, drop, assign,
+             rename, pipe, mean, anomalies, cov, project
+
+.. autoclass:: enskit.distribution.Gaussian
+   :members: independent, dims, latent_dim, batch_shape, mean, factor,
+             block_cov, cov, marginal, drop, rename, pipe, add_noise, absorb,
+             compress, condition, conditional_map, log_density, sample
+
+.. autoclass:: enskit.distribution.EnsembleGaussian
+   :members: realize_particles, square_root_map
+```
+
+### Conditional maps
+
+```{eval-rst}
+.. autoclass:: enskit.distribution.ConditionalMap
+   :members: __call__
+
+.. autoclass:: enskit.distribution.MatheronMap
+   :members: __call__, coefficients, particle_coefficients, batch_shape
+
+.. autoclass:: enskit.distribution.SquareRootMap
+   :members: __call__, batch_shape
+```
+
+### Weights, and the exact-moment fixture
+
+```{eval-rst}
+.. autofunction:: enskit.distribution.reweight
+.. autofunction:: enskit.distribution.effective_sample_size
+.. autofunction:: enskit.distribution.resample
+.. autofunction:: enskit.distribution.exact_moment_ensemble
+```
+
 ## enskit.gauss
 
 Joint Gaussian distributions and conditioning. See

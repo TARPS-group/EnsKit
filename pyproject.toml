@@ -98,6 +98,6 @@ layers = [
     "enskit.gauss",
     "(enskit.algorithms)",
     "(enskit.maps) | (enskit.kalman)",
-    "(enskit.distribution)",
+    "enskit.distribution",
     "enskit.linalg",
 ]
