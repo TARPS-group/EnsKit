@@ -91,6 +91,21 @@ OnFailure = Literal["repair", "raise"]
 
 _STATUSES = (SCHEDULE_EXHAUSTED, STOPPING_RULE, INTERRUPTED)
 
+#: The declaration order of :class:`HistoryRecord`'s fields.
+_RECORD_FIELDS = (
+    "step",
+    "n_valid",
+    "beta",
+    "increment",
+    "beta_next",
+    "misfit_mean",
+    "misfit_min",
+    "misfit_max",
+    "center_misfit",
+    "spread",
+    "ess",
+)
+
 
 # ---------------------------------------------------------------------------
 # the loop-carried state
@@ -813,22 +828,6 @@ class EKIError(RuntimeError):
 # ---------------------------------------------------------------------------
 # private
 # ---------------------------------------------------------------------------
-
-
-#: The declaration order of :class:`HistoryRecord`'s fields.
-_RECORD_FIELDS = (
-    "step",
-    "n_valid",
-    "beta",
-    "increment",
-    "beta_next",
-    "misfit_mean",
-    "misfit_min",
-    "misfit_max",
-    "center_misfit",
-    "spread",
-    "ess",
-)
 
 
 def _zero_record() -> HistoryRecord:

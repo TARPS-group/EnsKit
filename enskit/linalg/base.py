@@ -99,6 +99,29 @@ __all__ = [
     "value_check",
 ]
 
+#: Operations available on every operator, at every level.
+_ALWAYS_OPS = frozenset({"matvec", "rmatvec", "matmat", "rmatmat", "to_dense"})
+
+#: Operations that are not unconditionally available; `capabilities()` reports
+#: the supported subset of these.
+_OPTIONAL_OPS = ("solve", "solve_mat", "logdet", "diag", "factor", "whiten", "whiten_mat")
+
+_KNOWN_OPS = _ALWAYS_OPS | frozenset(_OPTIONAL_OPS)
+
+#: Optional operations implemented directly: supported iff the class defines
+#: the hook.
+_PRIMITIVE_HOOKS = {
+    "solve": "_solve",
+    "logdet": "_logdet",
+    "diag": "_diag",
+    "factor": "_factor",
+    "whiten": "_whiten",
+}
+
+#: Derived operations: supported iff the dependency is, or the class
+#: overrides the derived hook with a direct implementation.
+_DERIVED_DEPS = {"solve_mat": "solve", "whiten_mat": "whiten"}
+
 
 # ---------------------------------------------------------------------------
 # level 1 -- LinOp
@@ -1257,34 +1280,8 @@ def _scale(op: LinOp, c: Array) -> LinOp:
 # ---------------------------------------------------------------------------
 
 
-#: Operations available on every operator, at every level.
-_ALWAYS_OPS = frozenset({"matvec", "rmatvec", "matmat", "rmatmat", "to_dense"})
-
-
-#: Operations that are not unconditionally available; `capabilities()` reports
-#: the supported subset of these.
-_OPTIONAL_OPS = ("solve", "solve_mat", "logdet", "diag", "factor", "whiten", "whiten_mat")
-
-
-_KNOWN_OPS = _ALWAYS_OPS | frozenset(_OPTIONAL_OPS)
-
-
-#: Optional operations implemented directly: supported iff the class defines
-#: the hook.
-_PRIMITIVE_HOOKS = {
-    "solve": "_solve",
-    "logdet": "_logdet",
-    "diag": "_diag",
-    "factor": "_factor",
-    "whiten": "_whiten",
-}
-
-
-#: Derived operations: supported iff the dependency is, or the class
-#: overrides the derived hook with a direct implementation.
-_DERIVED_DEPS = {"solve_mat": "solve", "whiten_mat": "whiten"}
-
-
+#: The base classes' default derived hooks. Unlike the other capability
+#: tables, it refers to the classes, so it is defined after them.
 _DERIVED_DEFAULTS = {
     "solve_mat": SquareLinOp._solve_mat,
     "whiten_mat": PSDLinOp._whiten_mat,

@@ -128,6 +128,13 @@ __all__ = [
     "sqrt_transform",
 ]
 
+#: Why a conditioning result goes non-finite, which the check cannot itself see.
+_SINGULAR_NOISE = (
+    "The likeliest cause is a singular noise_cov: whiten's precondition is "
+    "that the noise covariance is nonsingular, and nothing here can detect a "
+    "violation before the fact."
+)
+
 
 # ---------------------------------------------------------------------------
 # a single Gaussian distribution
@@ -1842,14 +1849,6 @@ def _check_finite(where: str, name: str, x, *, cause: str | None = None) -> None
         lambda arr: bool(jnp.all(jnp.isfinite(arr))),
         f"{where}: {name} must be finite.{hint}",
     )
-
-
-#: Why a conditioning result goes non-finite, which the check cannot itself see.
-_SINGULAR_NOISE = (
-    "The likeliest cause is a singular noise_cov: whiten's precondition is "
-    "that the noise covariance is nonsingular, and nothing here can detect a "
-    "violation before the fact."
-)
 
 
 def _centered(x: Array) -> Array:

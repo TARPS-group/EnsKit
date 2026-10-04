@@ -31,8 +31,11 @@ test count is unchanged at 537. What moved:
   `enskit.linalg.base` has no index table, so it follows its docstring's
   sections: the three levels, then `linop` and `static_field`, then
   `UnsupportedOpError` and `densify`. `enskit.linalg.testing` puts
-  `check_operator` first, since its docstring opens with it. New modules
-  should be written in this order from the start.
+  `check_operator` first, since its docstring opens with it. Module
+  constants go at the top, after `__all__`; the one exception is
+  `_DERIVED_DEFAULTS` in `enskit.linalg.base`, which refers to the classes
+  and so follows them. New modules should be written in this order from the
+  start.
 
 **Still named `pyEKI`, deliberately:** the GitHub URLs in `pyproject.toml`,
 `docs/conf.py` and `README.md`, and the clone instructions in

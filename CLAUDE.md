@@ -228,7 +228,9 @@ example describes a method from a paper, it cites the paper.
 
 **Public API first.** In every module the public classes and functions come
 first, in the order of the module's index table; private helpers follow below
-them.
+them. Module constants, public or private, are the exception: they go at the
+top, after the imports and `__all__`, unless they refer to a class defined
+below.
 
 **Array shapes: leading batch axes, core operand shape trailing.** This is the
 NumPy generalized-ufunc rule and what `vmap` produces. It applies everywhere,

@@ -73,6 +73,39 @@ _RTOL, _ATOL = 1e-9, 1e-9
 _LOGDET_TOL = 1e-10
 _MISSING = object()
 
+_OPERATION_OPERANDS = {
+    "matvec": lambda n_out, n_in: (jnp.zeros(n_in),),
+    "rmatvec": lambda n_out, n_in: (jnp.zeros(n_out),),
+    "matmat": lambda n_out, n_in: (jnp.zeros((n_in, 3)),),
+    "rmatmat": lambda n_out, n_in: (jnp.zeros((n_out, 3)),),
+    "to_dense": lambda n_out, n_in: (),
+    "solve": lambda n_out, n_in: (jnp.zeros(n_out),),
+    "solve_mat": lambda n_out, n_in: (jnp.zeros((n_out, 3)),),
+    "logdet": lambda n_out, n_in: (),
+    "diag": lambda n_out, n_in: (),
+    "factor": lambda n_out, n_in: (),
+    "whiten": lambda n_out, n_in: (jnp.zeros(n_out),),
+    "whiten_mat": lambda n_out, n_in: (jnp.zeros((n_out, 3)),),
+}
+
+#: Every operation, as a function of the operator and its operands, and the
+#: core shape of each operand: "in"/"out" for a vector of length n_in/n_out,
+#: "in_mat"/"out_mat" for a matrix with that many rows.
+_OPERATIONS = {
+    "matvec": (lambda o, x: o.matvec(x), ("in",)),
+    "rmatvec": (lambda o, y: o.rmatvec(y), ("out",)),
+    "matmat": (lambda o, X: o.matmat(X), ("in_mat",)),
+    "rmatmat": (lambda o, Y: o.rmatmat(Y), ("out_mat",)),
+    "to_dense": (lambda o: o.to_dense(), ()),
+    "solve": (lambda o, b: o.solve(b), ("out",)),
+    "solve_mat": (lambda o, B: o.solve_mat(B), ("out_mat",)),
+    "logdet": (lambda o: o.logdet(), ()),
+    "diag": (lambda o: o.diag(), ()),
+    "factor": (lambda o: o.factor().to_dense(), ()),
+    "whiten": (lambda o, x: o.whiten(x), ("out",)),
+    "whiten_mat": (lambda o, X: o.whiten_mat(X), ("out_mat",)),
+}
+
 
 def check_operator(op: LinOp, *, seed: int = 0, other: LinOp | None = None) -> None:
     """Run every conformance check against one operator instance.
@@ -745,41 +778,6 @@ def _expect_raises(exc: type[Exception], fn, what: str) -> Exception:
     except exc as e:
         return e
     raise AssertionError(f"{what} should have raised {exc.__name__}")
-
-
-_OPERATION_OPERANDS = {
-    "matvec": lambda n_out, n_in: (jnp.zeros(n_in),),
-    "rmatvec": lambda n_out, n_in: (jnp.zeros(n_out),),
-    "matmat": lambda n_out, n_in: (jnp.zeros((n_in, 3)),),
-    "rmatmat": lambda n_out, n_in: (jnp.zeros((n_out, 3)),),
-    "to_dense": lambda n_out, n_in: (),
-    "solve": lambda n_out, n_in: (jnp.zeros(n_out),),
-    "solve_mat": lambda n_out, n_in: (jnp.zeros((n_out, 3)),),
-    "logdet": lambda n_out, n_in: (),
-    "diag": lambda n_out, n_in: (),
-    "factor": lambda n_out, n_in: (),
-    "whiten": lambda n_out, n_in: (jnp.zeros(n_out),),
-    "whiten_mat": lambda n_out, n_in: (jnp.zeros((n_out, 3)),),
-}
-
-
-#: Every operation, as a function of the operator and its operands, and the
-#: core shape of each operand: "in"/"out" for a vector of length n_in/n_out,
-#: "in_mat"/"out_mat" for a matrix with that many rows.
-_OPERATIONS = {
-    "matvec": (lambda o, x: o.matvec(x), ("in",)),
-    "rmatvec": (lambda o, y: o.rmatvec(y), ("out",)),
-    "matmat": (lambda o, X: o.matmat(X), ("in_mat",)),
-    "rmatmat": (lambda o, Y: o.rmatmat(Y), ("out_mat",)),
-    "to_dense": (lambda o: o.to_dense(), ()),
-    "solve": (lambda o, b: o.solve(b), ("out",)),
-    "solve_mat": (lambda o, B: o.solve_mat(B), ("out_mat",)),
-    "logdet": (lambda o: o.logdet(), ()),
-    "diag": (lambda o: o.diag(), ()),
-    "factor": (lambda o: o.factor().to_dense(), ()),
-    "whiten": (lambda o, x: o.whiten(x), ("out",)),
-    "whiten_mat": (lambda o, X: o.whiten_mat(X), ("out_mat",)),
-}
 
 
 def _supported_operations(op: LinOp) -> dict:
