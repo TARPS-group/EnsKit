@@ -15,12 +15,14 @@ permission. The layer is built on the operator layer, and this page refers to
 derives the factor representation this layer generalizes, and
 {doc}`redesign/index` records the design this page makes precise.
 
-:::{admonition} Status: specified, not yet implemented
+:::{admonition} Status: implemented
 :class: note
 
 This page was written and reviewed before the code, as the operator
-contract was. PR 4 of the redesign plan implements it; until then
-`enskit.distribution` does not exist. The page absorbs the joint Gaussian
+contract was, and PR 4 of the redesign plan implemented it in
+`enskit.distribution`. Where implementing it showed the page to be wrong or
+incomplete, the page was corrected in the same pull request; each change is
+listed in {ref}`dist-implementation-changes`. The page absorbs the joint Gaussian
 contract ({doc}`gaussian-contract`), which keeps governing `enskit.gauss`
 until that module is deleted in PR 7. Where the two pages disagree, this one
 describes the new layer and the old one describes the old module.
@@ -374,6 +376,10 @@ $O(d_c^2)$ per vector, a diagonal one in $O(d_c)$):
 | `SquareRootMap` (call) | $1$ | 0 |
 | `cov(a)` of a block with both parts | $k$ (`LowRankUpdate` whitens $F_a$, materialized as an array, at construction) | 1 |
 
+A given block with no factor row contributes zero rows to $S$ and whitens
+only its residual: one vector rather than $k + 1$ for `condition`, and none at
+a map's build. The counts above are for given blocks with factor rows.
+
 At $k = 0$ there is no $S$: `conditional_map` builds a map with no
 `IdentityPlusGram`, whose call returns the targets unchanged, and
 `condition` and `log_density` compute no SVD. The capabilities a method
@@ -429,18 +435,33 @@ with $\kappa(F_cF_c^\top + D_c) = 196$. What is lost is accuracy, at the
 rate the next paragraph states, and nothing in the layer can tell a
 numerically singular term from a merely precise one.
 
-**Accuracy at large $\sigma_{\max}$.** The conditional mean was accurate to
-a few $\varepsilon$, relative, in every measured case, with $\sigma_{\max}$
-from $10^5$ to $10^{20}$. The conditional *covariance* is accurate to a few
-$\varepsilon$ when $\rho = k$ (no more latent columns than given
-coordinates: $U$ is square and $T$ has no complement term). When $\rho < k$,
-the usual case for an ensemble ($J > N$), $T$'s complement term
-$x - UU^\top x$ leaves a residue of order $\varepsilon\lVert x\rVert$ in the
-directions the given blocks constrain, where the true result is of order
-$\lVert x\rVert/\sigma$. The conditional variance in those directions then
-carries a relative error of about $\varepsilon\,\sigma_{\max}$, of either
-sign. Measured against exact references computed in extended precision, for
-three given coordinates and $k = 5$:
+**Accuracy at large $\sigma_{\max}$.** The computation is backward stable:
+its results are the exact conditional for given rows perturbed by about
+$\varepsilon$ relative to $\sigma_{\max}$, as every normwise-stable
+factorization of $S$ is. How much that costs depends on the conditional's own
+sensitivity to such a perturbation, and in general it is large. For given
+rows with singular values $(\sigma_{\max}, 1, 1)$ in random directions, a
+perturbation of $F_c$ by $\varepsilon\sigma_{\max}$ entrywise changes the
+*exact* conditional mean by $7.5 \times 10^{-12}$, $7.5 \times 10^{-9}$ and
+$7.5 \times 10^{-5}$, relative, at $\sigma_{\max} = 10^5$, $10^8$ and
+$10^{12}$, and the layer's errors against exact rational references are at or
+below that ($3.7 \times 10^{-13}$, $2.2 \times 10^{-9}$, $4.7 \times 10^{-5}$
+for the mean, and the same order for the covariance, whether $\rho = k$ or
+$\rho < k$). Past $\sigma_{\max} \approx 1/\varepsilon$ such a conditional is
+not determined by the stored floats at all: the mean is wrong by order 1.
+
+Where the decomposition of $S$ is exact, as for given rows along latent
+coordinate axes, the results are accurate to a few $\varepsilon$: the mean at
+every measured $\sigma_{\max}$ from $10^5$ to $10^{20}$, and the covariance
+and `log_density` when $\rho = k$ (for `log_density`, $N \le k$). When
+$\rho < k$, the usual case for an ensemble ($J > N$), the covariance loses
+accuracy even then: $T$'s complement term $x - UU^\top x$ leaves a residue of
+order $\varepsilon\lVert x\rVert$ in the directions the given blocks
+constrain, where the true result is of order $\lVert x\rVert/\sigma$, so the
+conditional variance in those directions carries a relative error of about
+$\varepsilon\,\sigma_{\max}$, of either sign. Measured against exact
+references computed in extended precision, for three given coordinates and
+$k = 5$:
 
 | $\sigma_{\max}$ | relative error, latent direction along a coordinate axis | relative error, random latent direction |
 | --------------- | ------------------------------------------------- | --------------------------------------- |
@@ -451,14 +472,15 @@ three given coordinates and $k = 5$:
 | $10^{15}$ | — | $1.9 \times 10^{-1}$ |
 | $10^{17}$ | $-1$: the variance is exactly $0$ | $3.8 \times 10^{2}$ |
 
-Once $\sigma_{\max}$ passes about $1/\varepsilon$ the variance is wrong
-entirely: exactly zero when the residue happens to cancel (the axis-aligned
-case, which reports certainty), and overstated by orders of magnitude
-otherwise. A ratio of factor to noise standard deviations of $10^{11}$
-already costs about $10^{-4}$. The noisy `log_density` has the same
-mechanism through $V$ when $N > k$ ({ref}`dist-log-density`).
+The axis-aligned column is the thin basis alone: at $\rho = k$ the same rows
+give $2 \times 10^{-16}$. The random column is dominated by the sensitivity of
+the previous paragraph, which the thin basis does not add to. Once
+$\sigma_{\max}$ passes about $1/\varepsilon$ the axis-aligned variance is
+exactly zero, which reports certainty. A ratio of factor to noise standard
+deviations of $10^{11}$ already costs about $10^{-4}$. The noisy `log_density`
+has the thin-basis mechanism through $V$ when $N > k$ ({ref}`dist-log-density`).
 
-It is a property of the thin basis in
+The thin-basis loss is a property of
 {class}`~enskit.linalg.IdentityPlusGram`, not of this layer, and is recorded
 as issue #54. This layer does not check for it: no threshold on
 $\sigma_{\max}$ separates a numerically singular term from a deliberately
@@ -622,7 +644,11 @@ $\sqrt{w_j}$ is computed in log space, $\exp\big((\ell_j - \operatorname{lse}(\e
 so a particle of weight zero contributes an exact zero column with a finite
 derivative. The divisor is computed as
 $1 - \sum_i w_i^2 = -\operatorname{expm1}\big(\operatorname{lse}(2\ell) - 2\operatorname{lse}(\ell)\big)$,
-which stays accurate when one weight dominates. It is not particle-aligned:
+which stays accurate when one weight dominates. Each $\operatorname{lse}$
+factors out the largest term and sums the rest through `log1p`: a plain
+$\log(1 + t)$ loses $\varepsilon/t$ relative accuracy, which the
+near-cancellation of the two terms then exposes (about $10^{-10}$ at an ESS of
+$1 + 10^{-6}$). It is not particle-aligned:
 reading particles back would divide by $\sqrt{w_j}$. So it is a plain
 `Gaussian`, and the rules that need alignment refuse it.
 
@@ -760,14 +786,17 @@ $$
 
 and the rows of $R^\top$, as `Dense`s, replace the factor rows; $k$ becomes
 $D_F$. The distribution is unchanged. When $k \le D_F$ nothing is computed
-and the rows are kept as they are. Either way the result is a plain
+and the rows are kept as they are. When no block has a factor row but
+$k > 0$ (a marginal over blocks without rows), $D_F = 0$ and the result has
+$k = 0$. In every case the result is a plain
 `Gaussian`, so code does not depend on whether compression happened.
 
 Use it where repeated `absorb` would otherwise grow the latent width without
 bound, as absorbing a new independent term after every conditioning does.
-Before allocating, `compress` raises `ValueError` if $D_F > $ `max_dim` or
-$D_F k > $ `max_dim`$^2$ (stacking the rows allocates $D_F \times k$),
-with `max_dim` a Python `int` $\ge 1$. Compression materializes every factor row, so a structured
+Before allocating, when compression would happen ($k > D_F > 0$), `compress`
+raises `ValueError` if $D_F > $ `max_dim` or $D_F k > $ `max_dim`$^2$
+(stacking the rows allocates $D_F \times k$), with `max_dim` a Python `int`
+$\ge 1$. Compression materializes every factor row, so a structured
 row (a Kronecker factor) does not survive it.
 
 (dist-condition)=
@@ -862,7 +891,8 @@ block-diagonal operator of the named terms (`block_diag`) and $F_c$ their
 stacked rows as a `Dense`: the quadratic term is
 $\lVert W_C(v - m_c)\rVert^2$ with $W_C = (I_N + S^\top S)^{-1/2}W$, which
 is `C.whiten`, and the determinant is `C.logdet()`, both from the one
-decomposition `C` stores. At $k = 0$ the $S$ terms vanish and $C$ is $D_c$.
+decomposition `C` stores. At $k = 0$, or when no named block has a factor
+row, the $S$ terms vanish and $C$ is $D_c$.
 Requires `whiten` and `logdet` of every named block's term, checked in that
 order.
 
@@ -928,9 +958,9 @@ so latent coordinate $j$ belongs to particle $j$. Two operations need that
 correspondence and exist only here: reading the particles back out
 (`realize_particles`) and moving them as a set (`square_root_map`).
 
-**Construction.** `EnsembleGaussian(means, factors=None, block_covs=None, *, n_particles)`,
-with the `Gaussian` arguments and `n_particles` a Python `int` $\ge 2$ equal
-to the factor rows' width. The normal route is `Ensemble.project()`, which
+**Construction.** `EnsembleGaussian(means, *, factors=None, block_covs=None, n_particles)`,
+with the `Gaussian` arguments, keyword-only for the same reason, and
+`n_particles` a Python `int` $\ge 2$ equal to the factor rows' width. The normal route is `Ensemble.project()`, which
 centers by construction. Centering is a value precondition, checked in debug
 mode only: for each factor row,
 $\lVert F_b\mathbf 1\rVert_\infty \le 10\,J\,\varepsilon\,\max_{ij}|(F_b)_{ij}|$,
@@ -1269,7 +1299,7 @@ on sampling error.
 | `MatheronMap`, `coefficients`, `particle_coefficients` | `normal(key, (n, N))`, its columns the given blocks' whitened coordinates in block order |
 | `SquareRootMap` | as `realize_particles`, over the target blocks |
 | `exact_moment_ensemble` | `normal(key, (J, s))`, columns the latent vector then each term's factor columns in block order |
-| `resample`, systematic | $u =$ `uniform(key, (), dtype)`; indices `clip(searchsorted(cumsum(w), (u + arange(n)) / n, side="right"), 0, J - 1)` |
+| `resample`, systematic | $u =$ `uniform(key, (), dtype)`, `c = cumsum(w)`; indices `minimum(searchsorted(c, c[-1] * (u + arange(n)) / n, side="right"), last)`, with `last` the index of the last particle of positive weight |
 | `resample`, multinomial | `categorical(key, log_weights, shape=(n,))`, with zeros for `log_weights` when unweighted |
 
   All normal draws have the distribution's dtype. Pinning is over evaluation
@@ -1403,10 +1433,13 @@ else is static metadata and hashable. The fields are:
 A `None` entry is part of the tree structure, so whether a block has a factor
 row or an independent term is static: two Gaussians that differ in it are
 different pytree types, and a `vmap` or `jax.tree.map` across them raises.
-So is whether an ensemble is weighted. Consequently a sequence of operations
-that changes the structure (`reweight` then `resample`, or `add_noise` on a
-block that had no term) cannot be the carry of `lax.scan` or
-`lax.while_loop`; a loop carry must keep one structure (issue #56). PR 4
+So is whether an ensemble is weighted. Consequently the carry of `lax.scan`
+or `lax.while_loop` must leave each iteration with the structure it entered
+with (issue #56): an unweighted ensemble carried through `reweight` and then
+`resample` is fine, since it comes back unweighted, but one carried through
+`reweight` alone, or a Gaussian that gains an independent term from
+`add_noise`, is not; nor is resampling conditionally under `lax.cond`, whose
+two branches return different structures. PR 4
 extends the registration machinery to these fields (tuples containing
 `None`) without exposing a public decorator; the set of classes is closed.
 
@@ -1580,14 +1613,17 @@ output. The suite must verify at least:
     each from every conditioning path, with the cause in the message; neither
     fires under `jit` or `vmap`, nor inside a trace over closed-over concrete
     arrays; outside debug mode the singular term gives `nan` without raising.
-17. **Accuracy.** The measured regimes of {ref}`dist-accuracy`: the mean
-    accurate to a few $\varepsilon$ at $\sigma_{\max}$ up to $10^{20}$; the
-    covariance and `log_density` accurate to a few $\varepsilon$ when
-    $\rho = k$ (for `log_density`, $N \le k$); `log_density` far more accurate
-    than the cancelling form at $\sigma_{\max} = 10^8$; and, as regressions
-    pinned until issue #54 is settled, the $\varepsilon\sigma_{\max}$ loss
-    when $\rho < k$, on the axis-aligned case and on one seeded random
-    direction, each at its current value.
+17. **Accuracy.** The measured regimes of {ref}`dist-accuracy`: on given
+    rows along latent coordinate axes, the mean accurate to a few
+    $\varepsilon$ at $\sigma_{\max}$ up to $10^{20}$, and the covariance and
+    `log_density` when $\rho = k$ (for `log_density`, $N \le k$); on rotated
+    rows, at $\rho = k$ and $\rho < k$, mean and covariance errors no larger
+    than the exact conditional's own change under a perturbation of $F_c$ by
+    $\varepsilon\sigma_{\max}$; `log_density` far more accurate than the
+    cancelling form at $\sigma_{\max} = 10^8$; and, as regressions pinned
+    until issue #54 is settled, the $\varepsilon\sigma_{\max}$ loss when
+    $\rho < k$, on the axis-aligned case and on one seeded random direction,
+    each at its current value.
 18. **Derivatives.** First derivatives of noisy `condition`, both maps and
     `log_density` are finite and agree with finite differences at exactly
     repeated singular values, at zero-padded columns and at a collapsed
@@ -1690,6 +1726,46 @@ this page governs. Each departure, and why:
     `LowRankUpdate.whiten`**, not the cancelling
     $\lVert b\rVert^2 - \langle Sb, A^{-1}Sb\rangle$ the stub's formula
     suggests.
+
+(dist-implementation-changes)=
+## Changes made while implementing
+
+PR 4 implemented this page and corrected it where the implementation showed
+it to be wrong or incomplete. Each change, and why:
+
+1. **The accuracy claim is narrowed** ({ref}`dist-accuracy`). The page said
+   the conditional mean was accurate to a few $\varepsilon$ at every
+   $\sigma_{\max}$, and the covariance whenever $\rho = k$. That holds only
+   where the decomposition of $S$ is exact, as for the axis-aligned rows it
+   was measured on. For rows in general directions the conditional itself
+   moves by about $\varepsilon\sigma_{\max}$ under a perturbation of $F_c$ of
+   one rounding, so no normwise-stable algorithm can do better, and the layer
+   does not do worse. Obligation 17 now tests both statements.
+2. **A given block with no factor row whitens only its residual**
+   ({ref}`dist-cost`), rather than $k$ columns of zeros. The results are
+   identical, since whitening is linear.
+3. **`EnsembleGaussian`'s `factors` and `block_covs` are keyword-only**, as
+   `Gaussian`'s are and for the same reason; the page's signature had them
+   positional.
+4. **`compress`'s size guard applies only when compression would
+   allocate**, and `compress` drops the latent space when no block has a
+   factor row ($D_F = 0 < k$), which the page did not cover and which raised.
+   The page's guard read as unconditional, which would refuse a call that
+   computes nothing.
+5. **The log-sum-exps of the weighted projection use `log1p`**
+   ({ref}`dist-project`). The page's formula was right; computing its
+   $\operatorname{lse}$ terms with a plain logarithm lost about $10^{-10}$ at
+   an ESS of $1 + 10^{-6}$, which obligation 7 measures.
+6. **`log_density` skips $S$ when no named block has a factor row**, as it
+   does at $k = 0$; the result is the same.
+7. **Systematic resampling never selects a particle of weight zero.** The
+   pinned formula `clip(searchsorted(cumsum(w), (u + arange(n)) / n), 0, J - 1)`
+   selected the last particle when the cumulative sum rounded below 1 and the
+   last position fell past it, with probability about $J\varepsilon$ per call
+   even when that particle had weight zero, which is how a failed particle is
+   marked. The positions are now scaled by the cumulative sum's last entry,
+   and the index is bounded by the last particle of positive weight
+   ({ref}`dist-prng`).
 
 (dist-excluded)=
 ## Deliberately excluded

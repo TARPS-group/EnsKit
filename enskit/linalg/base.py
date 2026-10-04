@@ -76,6 +76,7 @@ from __future__ import annotations
 
 import abc
 import dataclasses
+import types
 import typing
 import warnings
 from contextlib import contextmanager
@@ -1131,25 +1132,38 @@ def _warn_dense_fallback(op: LinOp, name: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _is_data_annotation(ann) -> bool:
-    """Return True if this annotation is allowed to be pytree data."""
+def _is_data_annotation(ann, allow_none: bool = False) -> bool:
+    """Return True if this annotation is allowed to be pytree data.
+
+    With ``allow_none``, an optional annotation (``X | None``) is data when
+    ``X`` is, at the top level and inside tuples.
+    """
     if ann is Array:
         return True
     if isinstance(ann, type) and issubclass(ann, LinOp):
         return True
-    if typing.get_origin(ann) is tuple:
+    origin = typing.get_origin(ann)
+    if origin is tuple:
         args = [a for a in typing.get_args(ann) if a is not Ellipsis]
-        return bool(args) and all(_is_data_annotation(a) for a in args)
+        return bool(args) and all(_is_data_annotation(a, allow_none) for a in args)
+    if allow_none and origin in (typing.Union, types.UnionType):
+        args = [a for a in typing.get_args(ann) if a is not type(None)]
+        return bool(args) and all(_is_data_annotation(a, allow_none) for a in args)
     return False
 
 
-def _pytree_dataclass(cls: type) -> type:
+def _pytree_dataclass(cls: type, *, allow_none: bool = False) -> type:
     """Frozen dataclass plus JAX pytree registration, for any class.
 
     The implementation behind :func:`linop`, under a name that does not imply
-    the decorated class is a linear operator: ``enskit.gauss`` declares its
-    distribution classes with this. Not exported — :func:`linop` is the public
-    name, and the behavior is documented there.
+    the decorated class is a linear operator: ``enskit.gauss`` and
+    ``enskit.distribution`` declare their classes with this. Not exported —
+    :func:`linop` is the public name, and the behavior is documented there.
+
+    ``allow_none`` additionally admits optional data fields, ``X | None`` and
+    tuples of them, for classes whose absent entries are ``None``. A ``None``
+    entry is part of the tree structure, not a leaf. :func:`linop` keeps it
+    off: an operator's fields are always present.
     """
     cls = dataclass(frozen=True, eq=False, repr=False)(cls)
     try:
@@ -1164,12 +1178,13 @@ def _pytree_dataclass(cls: type) -> type:
     for f in dataclasses.fields(cls):
         if f.metadata.get("static", False):
             meta_fields.append(f.name)
-        elif _is_data_annotation(hints.get(f.name)):
+        elif _is_data_annotation(hints.get(f.name), allow_none):
             data_fields.append(f.name)
         else:
             raise TypeError(
                 f"{cls.__name__}.{f.name}: only `Array`, `LinOp` subtypes, and "
-                f"tuples of those may be pytree data. Mark this field with "
+                f"tuples of those{' (each optionally None)' if allow_none else ''} "
+                f"may be pytree data. Mark this field with "
                 f"static_field(), or store it as an array."
             )
     data_names, meta_names = tuple(data_fields), tuple(meta_fields)

@@ -154,6 +154,7 @@ tutorials/index
 
 user-guide/quickstart
 user-guide/operators
+user-guide/distributions
 user-guide/conditioning
 user-guide/running-an-inversion
 user-guide/writing-a-forward-model

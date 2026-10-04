@@ -6,12 +6,83 @@ against the normative contract, 2026-08-27 after `pyeki.eki` shipped,
 vocabulary was fixed, 2026-09-02 after the joint was split into a
 Gaussian and a sample container, 2026-10-03 when the EnsKit redesign was
 adopted, the same day after PR 1's renames, again after PR 2's linalg
-additions, and 2026-10-04 after PR 3's distribution contract and PR 10's
-Kronecker operators. Read `CLAUDE.md` first for
+additions, and 2026-10-04 after PR 3's distribution contract, PR 10's
+Kronecker operators and PR 4's `enskit.distribution`. Read `CLAUDE.md` first for
 conventions, including the layer rules, which the redesign replaced; then the
 two sections below; then the rest of this file, which describes the code as it
 stands before the redesign lands. That description is historical: where it
 names `pyeki.<module>`, the module is now `enskit.<module>`.
+
+## 2026-10-04: PR 4, `enskit.distribution`
+
+The layer exists, implementing `docs/distribution-contract.md`: `Ensemble`,
+`Gaussian`, `EnsembleGaussian`, the `ConditionalMap` protocol, `MatheronMap`,
+`SquareRootMap`, `reweight`, `effective_sample_size`, `resample` and
+`exact_moment_ensemble`. The modules are private (`_ensemble`, `_gaussian`,
+`_maps`, `_weights`, `_common`); everything public comes from
+`enskit.distribution`. The user-guide page is
+`docs/user-guide/distributions.md`, and the API reference has a section. The
+import-linter contract now names `enskit.distribution` without parentheses.
+`tests/test_distribution.py` works through the contract's obligations, then
+the ported regressions under their old names, then the new ones.
+
+**The pytree machinery.** `linalg.base._pytree_dataclass` gained
+`allow_none=True`: fields annotated `X | None`, or tuples of them, are data,
+and a `None` entry is tree structure. `linop` keeps it off.
+`enskit.distribution._common.distribution_class` is the partial. No class
+holds a distribution as a field, so that half of the issue's extension was not
+needed.
+
+**The contract was corrected where implementing it showed it wrong.** Every
+change is listed in its new section *Changes made while implementing*:
+
+- **The accuracy claim was narrowed.** The contract said the conditional mean
+  was accurate to a few $\varepsilon$ at every $\sigma_{\max}$. That holds
+  only where the SVD of $S$ is exact, as for axis-aligned given rows, which is
+  what had been measured. For rows in general directions the exact
+  conditional moves by about $\varepsilon\sigma_{\max}$ when $F_c$ is
+  perturbed by one rounding: $7.5\times10^{-9}$ at $10^8$, and order 1 past
+  $1/\varepsilon$. No normwise-stable algorithm can beat that, and the layer
+  matches it; obligation 17 tests both statements.
+- **Systematic resampling could select a zero-weight particle**, with
+  probability about $J\varepsilon$ per call, because the cumulative sum
+  rounds below 1. The pinned formula changed; the regression test uses a
+  float32 key that hits it.
+- `EnsembleGaussian`'s `factors` and `block_covs` are keyword-only.
+- `compress` drops the latent space when no block has a row, and its guard
+  runs only when it would allocate.
+- The weighted divisor's log-sum-exps use `log1p`, which a plain
+  `logsumexp` does not; without it the divisor loses about $10^{-10}$ at an
+  ESS of $1 + 10^{-6}$.
+- A given block without a factor row whitens only its residual.
+
+**Open from this PR:**
+
+- **#60.** Failed particles meet this layer badly in two ways. Debug mode's
+  construction check rejects non-finite particles, which is how the layers
+  above mark failures. And a `nan` particle at weight zero still poisons the
+  weighted mean, since $0\cdot\mathrm{nan}$ is `nan`. PR 5 and PR 7 should
+  settle it before relying on either.
+- **#33**, commented: operators carry no dtype, so the contract's "mixed
+  dtypes raise" is enforced for arrays only. A float64 operator row or term on
+  float32 means is accepted, and its results are promoted.
+
+**For later PRs.**
+
+- **PR 5 (maps).** Build Gaussians through the public constructor, with
+  keyword-only `factors=` and `block_covs=` (both classes), and
+  `EnsembleGaussian(..., n_particles=J)` for a result on the same latent
+  space. A pushforward that writes failed rows into an `Ensemble` hits #60's
+  debug check.
+- **PR 6 (kalman).** `MatheronMap` passes the targets' independent terms
+  through unsampled, so `kalman.Matheron` must add those draws itself, as
+  the contract's consumer section says. `particle_coefficients(values,
+  key=...)` is the $J + 1$ route, and it returns coefficients, not particles.
+  A weighted ensemble projects to a plain `Gaussian`, which has no
+  `square_root_map`. The update rules' message should say to resample first.
+- **PR 7.** Delete `tests/test_gauss.py` with `enskit.gauss`. Its regression
+  tests are ported in `tests/test_distribution.py` under the same names,
+  prefixed `test_regression_`.
 
 ## 2026-10-04: PR 10, the Kronecker operators
 
@@ -451,11 +522,11 @@ pyEKI. Nothing domain-specific should come back across.
 
 Follow the plan in `docs/redesign/index.md`, one pull request at a time, in
 a fresh session for each, as described in "Pull requests and handoffs" in
-`CLAUDE.md`. PRs 1 (#35), 2 (#36), 3 (#37) and 10 (#44) are done; PR 4
-(#38), `enskit.distribution`, is next, implementing
-`docs/distribution-contract.md`. #54 can run alongside it if the maintainer
-wants the thin-basis fix before PR 4 pins the current behavior. The notes
-below, written before the redesign,
+`CLAUDE.md`. PRs 1 (#35), 2 (#36), 3 (#37), 4 (#38) and 10 (#44) are done.
+PR 5 (#39, `enskit.maps`) and PR 6 (#40, `enskit.kalman`) both depend only
+on PR 4 and can run side by side. #60 is worth settling before either relies
+on failed particles. #54's fix would change the regressions pinned in
+obligation 17, by design. The notes below, written before the redesign,
 still apply to the pull requests they name; their `pyeki` modules are now
 `enskit` modules.
 
@@ -561,6 +632,8 @@ layer; this is the index.
 | A run at $P \gg J$ reports a spread the exact posterior contradicts | at $P = 2000$, $N = 40$, $J = 40$ the ensemble's mean posterior sd is 0.014 against an exact 0.990, a factor of seventy, with nothing raised and no history field flagging it |
 | A deterministic square-root update can get the covariance right and the shape wrong | on a nonlinear problem `TransformUpdate` leaves the least-varying direction with a kurtosis of 19 and two members holding 72% of its variance; it is a linear recombination of existing anomalies, so more members do not help. Only visible in a scatter plot or a shape statistic — no `HistoryRecord` field reports it |
 | One grid cannot serve every tempering level | a box wide enough for the prior reports the $\beta = 1$ mean wrong in the fourth decimal; a box sized for the target reports the prior's mean as `[1.48, 1.31]` rather than `[1, 1]`. Both are silent, and invisible in a contour plot |
+| A conditional's accuracy at large $\sigma_{\max}$ is set by its own sensitivity, not by the algorithm | for given rows in general directions, perturbing $F_c$ by one rounding moves the exact conditional by about $\varepsilon\sigma_{\max}$; only axis-aligned test rows show "a few $\varepsilon$", so measure against that sensitivity rather than against $\varepsilon$ |
+| `cumsum` of normalized weights can end just below 1 | systematic resampling with a clip to `J - 1` then selects the last particle even at weight zero; scale positions by `cumsum[-1]` and bound by the last positive weight |
 | A numerically singular noise covariance that still whitens gives a *correct* conditional to about $10^{-9}$, not a wrong one | the conditional exists whenever $F_cF_c^\top + D_c$ is nonsingular; what fails silently is the thin-basis covariance at large $\sigma_{\max}$, which collapses to exactly $0$ (#54) |
 | A multi-line `:alt:` value breaks a MyST `{figure}` | the continuation lines are absorbed into the caption, and the build fails with "Figure caption must be a paragraph" pointing at the directive rather than at the option |
 
