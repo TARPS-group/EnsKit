@@ -51,6 +51,7 @@ from enskit.linalg import (
     block_diag,
     diag_congruence,
     hstack,
+    kron,
     product,
 )
 from enskit.linalg.testing import check_operator
@@ -190,6 +191,37 @@ def _instances(rng: np.random.Generator) -> list[LinOp]:
         LowRankUpdate(
             2.0 * DensePSD(psd(3)), product(Dense(normal(3, 2)), Dense(normal(2, 2)))
         ),
+        # Kronecker products at each level. Sides differ, so a logdet that
+        # pairs each operand with its own side fails; the PSD factors are
+        # triangular, so factor() is a SquareKronecker that solves.
+        kron(DensePSD(psd(3)), DensePSD(psd(4))),
+        kron(PSDDiagonal(uniform(0.5, 3.0, 2)), DensePSD(psd(3))),
+        kron(Identity(2), 3.0 * Identity(3)),
+        kron(DensePSD(psd(2)), Identity(1)),
+        # a rectangular factor, so factor() is a plain Kronecker, and an
+        # operand without solve, whiten or logdet, so the product has none
+        kron(DensePSD(psd(2)), PSDLowRank(normal(3, 2))),
+        kron(PSDLowRank(normal(2, 3)), PSDDiagonal(uniform(0.5, 3.0, 2))),
+        # square, not PSD: negative pivots and a transpose that keeps solve
+        kron(DenseSquare(well_conditioned.at[0].multiply(-1.0)), DenseSquare(square(2))),
+        kron(
+            Triangular(jnp.asarray(np.diag([2.0, -3.0, 1.5])), lower=True),
+            Triangular(jnp.linalg.cholesky(psd(2)).T, lower=False),
+        ),
+        # rectangular, with all four sizes distinct, so reshaping the operand
+        # and the result alike is shape-invalid; and one square operand
+        kron(Dense(normal(2, 3)), Dense(normal(4, 5))),
+        kron(Dense(normal(3, 2)), DensePSD(psd(2))),
+        kron(Dense(normal(1, 3)), Dense(normal(2, 1))),
+        kron(Zero(2, 3), Dense(normal(2, 2))),
+        # nested, as composites' children, and as a LowRankUpdate base
+        kron(PSDDiagonal(uniform(0.5, 3.0, 2)), kron(DensePSD(psd(2)), Identity(2))),
+        kron(kron(Dense(normal(2, 1)), Dense(normal(1, 2))), Dense(normal(2, 3))),
+        block_diag(
+            kron(DensePSD(psd(2)), PSDDiagonal(uniform(0.5, 3.0, 2))), Identity(2)
+        ),
+        2.0 * kron(DensePSD(psd(2)), DensePSD(psd(3))),
+        LowRankUpdate(kron(DensePSD(psd(2)), PSDDiagonal(d[:3])), Dense(normal(6, 2))),
     ]
 
 

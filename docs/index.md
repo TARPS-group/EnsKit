@@ -34,8 +34,8 @@ internals.
 
 :::{grid-item-card} Structured operators
 `enskit.linalg` represents covariance matrices by how they act on vectors, so
-that structure — block, diagonal, triangular and low-rank today, Kronecker
-planned — is exploited rather than materialized.
+that structure — block, diagonal, triangular, low-rank and Kronecker — is
+exploited rather than materialized.
 :::
 
 :::{grid-item-card} Gaussian conditioning

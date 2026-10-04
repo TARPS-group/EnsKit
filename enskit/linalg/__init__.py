@@ -20,6 +20,8 @@ documentation.
 - :mod:`~enskit.linalg.gram` holds :class:`IdentityPlusGram`, the operator
   :math:`I + S S^\top` computed from one SVD of :math:`S`, with derivative
   rules that stay finite at degenerate spectra.
+- :mod:`~enskit.linalg.kronecker` holds Kronecker products of operators,
+  and the factory :func:`kron` that constructs them.
 - :mod:`~enskit.linalg.testing` holds conformance checks for new operator
   types.
 
@@ -68,6 +70,7 @@ from .elementary import (
     Zero,
 )
 from .gram import IdentityPlusGram, IdentityPlusGramInverseSqrt
+from .kronecker import Kronecker, PSDKronecker, SquareKronecker, kron
 
 __all__ = [
     # hierarchy and machinery
@@ -104,6 +107,9 @@ __all__ = [
     "PSDBlockDiag",
     "PSDDiagCongruence",
     "LowRankUpdate",
+    "Kronecker",
+    "SquareKronecker",
+    "PSDKronecker",
     # I + S S^T
     "IdentityPlusGram",
     "IdentityPlusGramInverseSqrt",
@@ -112,4 +118,5 @@ __all__ = [
     "product",
     "hstack",
     "diag_congruence",
+    "kron",
 ]

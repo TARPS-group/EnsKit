@@ -130,6 +130,42 @@ a validity mask, since variable-size domains cannot be vectorized.
 Results that inform which operators are worth implementing. Each was verified
 numerically against a dense reference.
 
+### Kronecker products
+
+$A \otimes B$ needs no factorization of its own: every operation reduces to
+the same operation on each operand, applied along its own axis of the
+reshaped operand. The factor of $A \otimes B$ is the Kronecker product of
+the operands' factors, and those need not be square, which is why a
+rectangular class is needed beside the square ones: the operand is reshaped
+to $(k_A, k_B)$ and the result read from $(n_A, n_B)$, through a mixed
+intermediate of shape $(k_A, n_B)$. Three results, each of which produces
+wrong numbers rather than an error:
+
+- **Orientation is silent.** The first operand's index is the slow one, as
+  in `numpy.kron`. Reversing it gives $B \otimes A$, which is positive
+  definite whenever $A \otimes B$ is and always has the same shape,
+  $(n_A n_B, k_A k_B)$: a valid covariance with the wrong meaning, at any
+  sizes.
+- **Consistency is not correctness.** The conformance suite compares every
+  operation with `to_dense`. Reversing the orientation in every method at
+  once — `matvec`, `rmatvec`, `solve`, `whiten`, `diag` and `to_dense` —
+  leaves `check_operator` passing — for operands of equal and of unequal
+  side, square and rectangular — while `matvec` of a random vector differs
+  from `numpy.kron`'s by an amount of the order of the entries (tens, for
+  random PSD operands of side 3 and 4). Only an external reference catches
+  it, so each method is pinned to `numpy.kron` separately; pinning them to
+  each other constrains nothing.
+- **The log-determinant pairs each operand with the other's side:**
+  $\log\det(A \otimes B) = n_B\log\det A + n_A\log\det B$. The swapped
+  pairing coincides with it whenever $n_A = n_B$, so only a test with
+  unequal sides can see the difference.
+
+The Kronecker product of two lower-triangular matrices is lower triangular
+and equals the Cholesky factor of the product exactly. With the contract's
+`factor()` and primitive `whiten()` this needs no special interface:
+`factor()` returns a `SquareKronecker` of the two `Triangular` factors,
+which solves, and `whiten` applies the operands' whiteners directly.
+
 ### Kronecker plus nugget
 
 $C = K \otimes B + I_n \otimes C^{l}$ admits a simultaneous diagonalization,
