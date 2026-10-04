@@ -5,11 +5,84 @@ against the normative contract, 2026-08-27 after `pyeki.eki` shipped,
 2026-08-28 after the forward-model contract was specified and the layer
 vocabulary was fixed, 2026-09-02 after the joint was split into a
 Gaussian and a sample container, 2026-10-03 when the EnsKit redesign was
-adopted, and the same day after PR 1's renames. Read `CLAUDE.md` first for
+adopted, the same day after PR 1's renames, and again after PR 2's linalg
+additions. Read `CLAUDE.md` first for
 conventions, including the layer rules, which the redesign replaced; then the
 two sections below; then the rest of this file, which describes the code as it
 stands before the redesign lands. That description is historical: where it
 names `pyeki.<module>`, the module is now `enskit.<module>`.
+
+## 2026-10-03: PR 2, the linalg additions
+
+`enskit.linalg` gained the conditioning core and three smaller pieces, all
+specified in `docs/linop-contract.md` and catalogued in
+`docs/user-guide/operators.md`:
+
+- **`IdentityPlusGram(S)`**, in the new module `enskit/linalg/gram.py`:
+  $I + SS^\top$ for a `(k, N)` array, one thin SVD stored at construction,
+  with `solve_factor` ($A^{-1}Sb$) and `inverse_sqrt()` (an
+  `IdentityPlusGramInverseSqrt`, a `PSDLinOp` with `matvec` and
+  `to_dense`) beside the usual PSD operations. Its custom JVP rules are the
+  contract's section *The conditioning core*.
+- **`Zero(n_out, n_in, *, dtype=None)`**, storing no array; `HStack` and
+  `Product` skip it when applying.
+- **`LowRankUpdate(base, F)`**, $D + FF^\top$, built on `IdentityPlusGram`
+  of $S = (W_D F)^\top$.
+- **`dense_fallback(max_n=2048)`**, opt-in, in `enskit/linalg/base.py`.
+  `UnsupportedOpError` takes an optional fourth argument, `detail`.
+
+`enskit.gauss` now routes every conditioning through `IdentityPlusGram`, so
+its updates differentiate finitely at exactly collapsed ensembles and
+zero-padded columns. Its behavior is otherwise unchanged; the one test that
+pinned the old `nan` gradient was ported to its positive form (see the
+test's docstring). `uv run lint-imports` checks the layer rules in CI.
+
+**Departures from the stubs, all recorded in the contract:**
+
+- `LowRankUpdate`'s second parameter is `F`, not `factor`: a field named
+  `factor` would shadow the `factor()` method.
+- `Zero`'s sizes are at least 1, not 0: the operator contract rejects empty
+  operators everywhere, and a Gaussian with no factor row has `None`
+  rather than a width-0 row.
+- `product` and `hstack` still return `Product` and `HStack` when given a
+  `Zero`; the skipping happens when they are applied. Returning a `Zero`
+  from `product` broke the conformance suite's arithmetic check, which
+  requires `op @ op.T` to be a `Product`.
+- `LowRankUpdate.whiten` is degenerate-safe too, not only `solve` and
+  `logdet`: it uses the inverse square root of $I + S^\top S$ from the same
+  stored decomposition.
+- `IdentityPlusGram` does not check that `S` is finite, even in debug mode,
+  so the layer that built `S` reports a non-finite result with its own
+  message and cause (the gauss contract requires this, and a test pins it).
+
+**Derivatives, as measured.** First derivatives are finite and correct at
+every $S$, in forward and reverse mode, under `jit` and `vmap` (forward
+mode raises under `jax_debug_nans` at degenerate spectra, from the SVD's
+discarded tangents; issue #52). Second derivatives are promised for
+`logdet` only. The others are exact at well-separated singular values, lose
+accuracy like $\varepsilon/\delta$ near a tie of gap $\delta$ (finite and
+wrong, once with the wrong sign), and `jax.hessian` of `solve_factor` is
+`nan` at an exact tie — linearization inlines the rules' own arithmetic,
+which reads `U` and `sigma`. The decomposition is deliberately *not*
+stop-gradiented, which would make them wrong at well-separated spectra too.
+The design's §9.1 promise of "degenerate-safe" derivatives therefore holds
+for first derivatives only, and the distribution contract (PR 3) should say
+so.
+
+**For later PRs.**
+
+- PR 3 and PR 4: build conditioning on `IdentityPlusGram(S)` with
+  `S = (W F_y)^T`; check results for finiteness at the distribution layer,
+  with the cause in the message, as gauss does. `Gaussian.cov(a)` returns
+  `LowRankUpdate(D_a, F_a)`, whose `base` must support `whiten`.
+- PR 4 (and each PR that adds a layer): remove the parentheses around the
+  new layer's name in `pyproject.toml`'s import-linter contract, so a
+  misnamed module fails the contract instead of being skipped as optional.
+- PR 7: delete the `enskit.eki` and `enskit.gauss` lines from that contract
+  when the modules go.
+- PR 10: every Kronecker class goes through `check_operator`; `Zero` and
+  `LowRankUpdate` are in `tests/test_conformance.py` as models of paired
+  instances.
 
 ## 2026-10-03: PR 1, the mechanical renames
 
@@ -268,8 +341,9 @@ pyEKI. Nothing domain-specific should come back across.
 
 Follow the plan in `docs/redesign/index.md`, one pull request at a time, in
 a fresh session for each, as described in "Pull requests and handoffs" in
-`CLAUDE.md`. PR 1 (#35) is done; PR 2 (#36) is next, and PR 10 (#44) can
-start once PR 2 has merged. The notes below, written before the redesign,
+`CLAUDE.md`. PRs 1 (#35) and 2 (#36) are done; PR 3 (#37), the
+distribution contract, is next, and PR 10 (#44), the Kronecker family, can
+run alongside it. The notes below, written before the redesign,
 still apply to the pull requests they name; their `pyeki` modules are now
 `enskit` modules.
 

@@ -65,7 +65,9 @@ Out of scope, deliberately and permanently:
 
 Imports go **down only**: `distribution` imports `linalg`; `maps` and `kalman`
 import `distribution` and `linalg`; `algorithms` imports all of them. An
-import-linter contract in `pyproject.toml` enforces this in CI (from PR 2), and
+import-linter contract in `pyproject.toml` enforces this in CI
+(`uv run lint-imports`; a layer that does not exist yet is listed in
+parentheses, and loses them when it lands), and
 `tests/test_toy.py` checks in a fresh interpreter that no layer loads
 `enskit.toy`. Cross-layer chaining in user code goes through `pipe`
 (`g.pipe(maps.pushforward, ...)`), never through an upward import. An
@@ -122,7 +124,7 @@ into one of these, never only into a chat or a prompt:
    scope is unclear, ask the maintainer before writing code.
 
 **During a PR.**
-- `uv run pytest`, `uv run ruff check .` and
+- `uv run pytest`, `uv run ruff check .`, `uv run lint-imports` and
   `uv run sphinx-build -b html -W docs docs/_build/html` all pass before every
   commit.
 - Before opening the PR, run an adversarial review with a subagent. Split

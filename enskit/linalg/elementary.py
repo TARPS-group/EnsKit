@@ -4,6 +4,7 @@
 class                        represents
 ===========================  ===============================================
 :class:`Identity`            the identity matrix
+:class:`Zero`                the zero matrix, possibly rectangular
 :class:`PSDDiagonal`         a diagonal matrix with positive entries
 :class:`Dense`               an explicit array, possibly rectangular
 :class:`DenseSquare`         a dense square matrix, stored with its LU
@@ -54,6 +55,7 @@ from .base import (
 
 __all__ = [
     "Identity",
+    "Zero",
     "PSDDiagonal",
     "Dense",
     "DenseSquare",
@@ -106,6 +108,81 @@ class Identity(PSDLinOp):
 
     def _to_dense(self) -> Array:
         return jnp.eye(self.size)
+
+
+@linop
+class Zero(LinOp):
+    """The ``(n_out, n_in)`` zero matrix; stores no array.
+
+    Applying it returns zeros of the right shape without reading the
+    operand's values, so padding an operator with zero blocks costs no
+    memory. A :class:`~enskit.linalg.Product` with a ``Zero`` factor applies
+    as a ``Zero`` without applying its other factors, and an
+    :class:`~enskit.linalg.HStack` skips its ``Zero`` blocks when applying.
+
+    Parameters
+    ----------
+    n_out, n_in
+        Static sizes, positive ints.
+    dtype
+        Keyword-only. The dtype of ``to_dense``, a real floating dtype; the
+        default is the default float, float64 once :mod:`enskit` is
+        imported. Applying the operator returns zeros of this dtype promoted
+        with the operand's, as any other operator's arithmetic would.
+
+    Raises
+    ------
+    TypeError
+        If a size is not an int, or ``dtype`` is not a real floating dtype.
+    ValueError
+        If a size is not positive.
+    """
+
+    n_out: int = static_field()
+    n_in: int = static_field()
+    dtype: jnp.dtype = static_field()
+
+    def __init__(self, n_out: int, n_in: int, *, dtype=None) -> None:
+        _check_size("Zero", n_out, field_name="n_out")
+        _check_size("Zero", n_in, field_name="n_in")
+        dtype = jnp.dtype(jnp.result_type(float) if dtype is None else dtype)
+        if not jnp.issubdtype(dtype, jnp.floating):
+            raise TypeError(f"Zero.dtype must be a real floating dtype, got {dtype}")
+        object.__setattr__(self, "n_out", n_out)
+        object.__setattr__(self, "n_in", n_in)
+        object.__setattr__(self, "dtype", dtype)
+
+    @property
+    def shape(self) -> tuple[int, int]:
+        return (self.n_out, self.n_in)
+
+    @property
+    def batch_shape(self) -> tuple[int, ...]:
+        return ()
+
+    @property
+    def T(self) -> Zero:  # noqa: N802 - mirrors the NumPy attribute
+        """The transpose, the ``(n_in, n_out)`` zero matrix."""
+        return Zero(self.n_in, self.n_out, dtype=self.dtype)
+
+    def _zeros(self, x: Array, core: tuple[int, ...], n_core: int) -> Array:
+        dtype = jnp.result_type(self.dtype, x.dtype)
+        return jnp.zeros((*x.shape[: x.ndim - n_core], *core), dtype=dtype)
+
+    def _matvec(self, x: Array) -> Array:
+        return self._zeros(x, (self.n_out,), 1)
+
+    def _rmatvec(self, x: Array) -> Array:
+        return self._zeros(x, (self.n_in,), 1)
+
+    def _matmat(self, X: Array) -> Array:
+        return self._zeros(X, (self.n_out, X.shape[-1]), 2)
+
+    def _rmatmat(self, X: Array) -> Array:
+        return self._zeros(X, (self.n_in, X.shape[-1]), 2)
+
+    def _to_dense(self) -> Array:
+        return jnp.zeros(self.shape, dtype=self.dtype)
 
 
 @linop
@@ -621,12 +698,14 @@ class PSDLowRank(PSDLinOp):
         return self.F @ self.F.swapaxes(-1, -2)
 
 
-def _check_size(cls_name: str, size) -> None:
-    """Validate a static side-length field."""
+def _check_size(cls_name: str, size, *, field_name: str = "size") -> None:
+    """Validate a static size field: a positive int."""
     if not isinstance(size, int) or isinstance(size, bool):
-        raise TypeError(f"{cls_name}.size must be an int, got {type(size).__name__}")
+        raise TypeError(
+            f"{cls_name}.{field_name} must be an int, got {type(size).__name__}"
+        )
     if size < 1:
-        raise ValueError(f"{cls_name}.size must be positive, got {size}")
+        raise ValueError(f"{cls_name}.{field_name} must be positive, got {size}")
 
 
 def _check_square_field(cls_name: str, field_name: str, value) -> None:

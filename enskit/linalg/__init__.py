@@ -5,7 +5,7 @@ known structure is exploited instead of storing or factorizing dense arrays.
 A block-diagonal covariance, for example, is solved block by block at a cost
 that is the sum over blocks rather than cubic in the total size.
 
-This is a lean layer aimed at what Ensemble Kalman Inversion needs — applying
+This is a lean layer aimed at what ensemble Kalman methods need — applying
 operators and their transposes, solving against them, and taking square roots
 to sample and whiten — rather than a general-purpose linear algebra library.
 Its behavior is specified by the "Linear operator contract" page of the
@@ -17,6 +17,9 @@ documentation.
   arrays.
 - :mod:`~enskit.linalg.composite` holds operators built from other operators,
   and the factory functions that construct them.
+- :mod:`~enskit.linalg.gram` holds :class:`IdentityPlusGram`, the operator
+  :math:`I + S S^\top` computed from one SVD of :math:`S`, with derivative
+  rules that stay finite at degenerate spectra.
 - :mod:`~enskit.linalg.testing` holds conformance checks for new operator
   types.
 
@@ -29,6 +32,7 @@ from .base import (
     SquareLinOp,
     UnsupportedOpError,
     debug_checks,
+    dense_fallback,
     dense_matvec,
     densify,
     linop,
@@ -40,6 +44,7 @@ from .base import (
 from .composite import (
     BlockDiag,
     HStack,
+    LowRankUpdate,
     Product,
     PSDBlockDiag,
     PSDDiagCongruence,
@@ -60,7 +65,9 @@ from .elementary import (
     PSDDiagonal,
     PSDLowRank,
     Triangular,
+    Zero,
 )
+from .gram import IdentityPlusGram, IdentityPlusGramInverseSqrt
 
 __all__ = [
     # hierarchy and machinery
@@ -69,6 +76,7 @@ __all__ = [
     "PSDLinOp",
     "UnsupportedOpError",
     "densify",
+    "dense_fallback",
     "linop",
     "static_field",
     "dense_matvec",
@@ -78,6 +86,7 @@ __all__ = [
     "value_check",
     # elementary operators
     "Identity",
+    "Zero",
     "PSDDiagonal",
     "Dense",
     "DenseSquare",
@@ -94,6 +103,10 @@ __all__ = [
     "BlockDiag",
     "PSDBlockDiag",
     "PSDDiagCongruence",
+    "LowRankUpdate",
+    # I + S S^T
+    "IdentityPlusGram",
+    "IdentityPlusGramInverseSqrt",
     # factories
     "block_diag",
     "product",

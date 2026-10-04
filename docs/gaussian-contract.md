@@ -286,10 +286,14 @@ T \;=\; (I_k + S S^\top)^{-1/2}
 \;\in\; \mathbb{R}^{k \times k},
 $$
 
-symmetric, built from the same SVD. The second form is the normative one:
-for a thin SVD the naive $U(I+\Sigma^2)^{-1/2}U^\top$ *omits the identity on
-the orthogonal complement* and is simply wrong whenever $\rho < k$ — the
-$I_k + U(\cdot - I)U^\top$ form is exact for every rank.
+symmetric, built from the same SVD. The identity on the orthogonal
+complement of $U$'s columns is required: for a thin SVD the naive
+$U(I+\Sigma^2)^{-1/2}U^\top$ *omits it* and is simply wrong whenever
+$\rho < k$. The implementation, `enskit.linalg.IdentityPlusGram`, computes
+$U(I+\Sigma^2)^{-1/2}U^\top + (I_k - UU^\top)$, adding the complement term
+only when $\rho < k$: when $U$ is square the term is zero, and forming it by
+subtraction would leave a residue of order $\varepsilon$ that swamps the
+$1/\sigma$-sized entries of $T$ once $\sigma$ is large.
 
 $F_u T$ is a factor of the posterior covariance, exactly:
 
@@ -311,11 +315,10 @@ Two structural facts:
   the modifier vanishes at $\sigma_i = 0$), so a centered factor conditions
   to a centered factor and the posterior mean is not silently shifted.
   In floating point the numerically-zero $\sigma$'s $U$ column need not be
-  orthogonal to $\mathbf{1}$; the property survives because the modifier
-  decays *quadratically*: the induced mean shift is
-  $O\bigl((\varepsilon\sigma_{\max})^2\bigr)$ rather than
-  $O(\varepsilon\sigma_{\max})$ — the modifier is exactly $0.0$ while
-  $\varepsilon\sigma_{\max} \lesssim 10^{-8}$, and negligible above it.
+  exactly $\mathbf{1}/\sqrt{k}$, nor the others exactly orthogonal to it,
+  but the computed $U$ is orthonormal to rounding and the numerically-zero
+  $\sigma$'s weight $(1+\sigma^2)^{-1/2}$ is exactly $1.0$, so
+  $T\mathbf{1} = \mathbf{1}$ holds to rounding.
 - **The identity is exact in exact arithmetic**, not asymptotic in $k$. The
   conformance suite checks it to floating-point tolerance
   ({ref}`gauss-conformance`).
@@ -387,25 +390,20 @@ Rules:
   single `gain_weights` call rather than looping; the $J$ per-sample
   residuals of a stochastic update are one `(J, N)` operand.
 - The functions are deterministic JAX code, safe under `jit` and `vmap`,
-  with no data-dependent shapes. They are differentiable wherever the
-  singular values of `s` are distinct and nonzero. At *exactly* repeated
-  or exactly zero singular values — an exactly collapsed `s`, or the
-  zero-padded columns a masked local analysis may produce when the masking
-  drops the rank below $\min(k, N)$ — the SVD's
-  gradient is `nan`, even though the functions themselves are smooth
-  there — `gain_weights` equals the rational $s(s^\top s + I)^{-1}b$, and
-  `sqrt_transform` is real-analytic, the spectrum of $I + ss^\top$ being
-  bounded below by 1. The
-  float-generic degeneracy of centering ($\sigma_{\min} \sim
-  10^{-16}$ when $N \ge k$) is not an exact tie and differentiates
-  finitely. No conditioning path in this layer *requires* differentiation
-  with respect to `s` ({ref}`gauss-jax`) — a caller who differentiates an
-  update with respect to `v_samples` does differentiate through the SVD,
-  and inherits these cases. An implementation may restore gradients
-  everywhere with a custom JVP routed through the closed forms, but is not
-  required to; note that for `sqrt_transform` that means a Fréchet
-  derivative of $A \mapsto A^{-1/2}$, materially more work than
-  `gain_weights`'s rational form.
+  with no data-dependent shapes. They are differentiable at every `s`,
+  including at *exactly* repeated or exactly zero singular values — an
+  exactly collapsed `s`, or the zero-padded columns a masked local
+  analysis may produce when the masking drops the rank below
+  $\min(k, N)$ — where a plain SVD's gradient is `nan` even though the
+  functions themselves are smooth there: `gain_weights` equals the
+  rational $s(s^\top s + I)^{-1}b$, and `sqrt_transform` is
+  real-analytic, the spectrum of $I + ss^\top$ being bounded below by 1.
+  Both are computed through `enskit.linalg.IdentityPlusGram`
+  (`solve_factor` and `inverse_sqrt`), whose custom derivative rules are
+  specified in the operator contract ({ref}`contract-gram`); the same
+  holds for every class method, so a caller who differentiates an update
+  with respect to `v_samples` gets finite first derivatives at every
+  ensemble.
 - `sqrt_transform` imposes no centering requirement on `s`. The
   $T\mathbf{1} = \mathbf{1}$ property of {ref}`gauss-kernel` follows from
   $s^\top\mathbf{1} = 0$, which holds exactly when the factor the whitening
@@ -1075,8 +1073,8 @@ machinery as operators, and every rule of the operator contract's JAX section
 - Conditioning methods and primitives must be `jit`- and `vmap`-safe with
   no data-dependent shapes, and `log_density` must be differentiable with
   respect to `x` and the array leaves (hyperparameter estimation
-  differentiates through it; the updates carry no such requirement — see
-  the differentiability caveat in {ref}`gauss-primitives`).
+  differentiates through it; the updates carry no such requirement, though
+  they are differentiable — see {ref}`gauss-primitives`).
 
 ### Families
 

@@ -1403,6 +1403,21 @@ def test_class_methods_compute_exactly_one_svd():
     assert _count_svd(both(s).jaxpr) == 2
 
 
+def test_class_methods_compute_one_svd_under_grad_too():
+    """The derivative rules of ``linalg.IdentityPlusGram`` reuse the
+    decomposition the value computed, so differentiating an update adds no
+    SVD."""
+    joint, noise_cov, y = _reference_problem()
+
+    def loss(v_samples):
+        moved = EmpiricalJoint(u_samples=joint.u_samples, v_samples=v_samples)
+        return jnp.sum(moved.transform_update(y, noise_cov) ** 2)
+
+    jaxpr = jax.make_jaxpr(jax.grad(loss))(joint.v_samples)
+    assert _count_svd(jaxpr.jaxpr) == 1
+    assert bool(jnp.all(jnp.isfinite(jax.grad(loss)(joint.v_samples))))
+
+
 # --- 14. the joint factor and its constructors -------------------------------
 
 
@@ -2153,20 +2168,32 @@ def test_regression_uncentered_transform_shifts_the_ensemble_mean():
     assert np.abs(shifted.mean(axis=0) - m_post).max() > 1e-3
 
 
-def test_regression_svd_gradient_is_nan_at_an_exactly_collapsed_operand():
-    """The primitives are smooth at an exactly collapsed s, but the SVD's
-    gradient there is nan. The contract scopes the differentiability claim to
-    distinct, nonzero singular values; this asserts the nan so that the day JAX
-    changes it — or the day a custom JVP is added — is visible.
+def test_regression_gradient_is_finite_at_an_exactly_collapsed_operand():
+    """The primitives are smooth at an exactly collapsed s, where the SVD's own
+    gradient is nan; they route through ``linalg.IdentityPlusGram``, whose
+    custom derivative rules are finite there.
+
+    Ported from ``test_regression_svd_gradient_is_nan_at_an_exactly_collapsed_
+    operand``, which asserted the nan so that the day a custom JVP was added
+    would be visible. The nan of a plain SVD is still asserted, so the test
+    keeps exercising a genuinely degenerate operand. At s = 0 the closed forms
+    give d gain_weights(s, b) = ds b and d sqrt_transform(s) = 0 exactly.
     """
     collapsed = jnp.zeros((3, 4))
+    b = jnp.asarray([1.0, -2.0, 0.5, 3.0])
+
+    def plain_svd_transform(s):
+        U, sigma, _ = jnp.linalg.svd(s, full_matrices=False)
+        return jnp.eye(3) + (U * (1.0 / jnp.sqrt(1.0 + sigma**2) - 1.0)) @ U.T
+
     assert bool(
-        jnp.isnan(jax.grad(lambda s: jnp.sum(sqrt_transform(s)))(collapsed)).any()
+        jnp.isnan(jax.grad(lambda s: jnp.sum(plain_svd_transform(s)))(collapsed)).any()
     )
-    assert bool(
-        jnp.isnan(
-            jax.grad(lambda s: jnp.sum(gain_weights(s, jnp.ones(4))))(collapsed)
-        ).any()
+    grad_transform = jax.grad(lambda s: jnp.sum(sqrt_transform(s)))(collapsed)
+    np.testing.assert_array_equal(np.asarray(grad_transform), np.zeros((3, 4)))
+    grad_gain = jax.grad(lambda s: jnp.sum(gain_weights(s, b)))(collapsed)
+    np.testing.assert_array_equal(
+        np.asarray(grad_gain), np.outer(np.ones(3), np.asarray(b))
     )
 
     # distinct, nonzero singular values differentiate finitely

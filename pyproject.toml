@@ -51,6 +51,7 @@ dev = [
     "jupyter>=1.0",
     "nbsphinx>=0.9",
     "ipykernel>=6.0",
+    "import-linter>=2.1",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -78,3 +79,25 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-v --tb=short"
+
+# The layer rules of CLAUDE.md, checked in CI with `uv run lint-imports`. A
+# layer may import only the layers listed below it; layers joined by `|` are
+# independent and never import each other; a name in parentheses is a layer
+# that does not exist yet. `toy` and `testing` sit on top, so no layer may
+# import either. Until PR 7, the old `eki` and `gauss` modules sit above every
+# new layer, so no new layer can depend on them; delete their two lines then.
+[tool.importlinter]
+root_package = "enskit"
+
+[[tool.importlinter.contracts]]
+name = "Layers import downward only"
+type = "layers"
+layers = [
+    "enskit.toy | (enskit.testing)",
+    "enskit.eki",
+    "enskit.gauss",
+    "(enskit.algorithms)",
+    "(enskit.maps) | (enskit.kalman)",
+    "(enskit.distribution)",
+    "enskit.linalg",
+]

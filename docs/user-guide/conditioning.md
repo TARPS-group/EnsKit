@@ -291,6 +291,7 @@ the default interface and these are the escape hatch.
 Two properties matter if you build on them. Each computes one SVD per call, so
 batch your residuals into a single call rather than looping — the $J$
 per-sample residuals of a stochastic update are one `(J, N)` operand. And they
-are differentiable wherever the singular values of `s` are distinct and
-nonzero; at exactly repeated or exactly zero singular values the SVD's
-gradient is `nan` even though the functions themselves are smooth there.
+are differentiable at every `s`, including at exactly repeated or exactly zero
+singular values, where a plain SVD's gradient is `nan`: both are computed
+through {class}`~enskit.linalg.IdentityPlusGram`, whose derivative rules stay
+finite there (see {doc}`operators`).
