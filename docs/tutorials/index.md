@@ -4,7 +4,7 @@ A series to read in order. Each one builds on the last and ends where the next
 begins.
 
 The first tutorial runs a complete inversion and assumes nothing — no
-familiarity with EKI, and no knowledge of anything else in pyEKI. Structured
+familiarity with EKI, and no knowledge of anything else in EnsKit. Structured
 operators, tempering schedules and ensemble diagnostics are each introduced at
 the point where the problem needs them, not before.
 
@@ -15,7 +15,7 @@ for tests, not for production.
 
 If you already know what you are looking for, the {doc}`../user-guide/quickstart`
 and the rest of the user guide are organized by question rather than by
-sequence, and the three contracts in the reference section specify behaviour
+sequence, and the three contracts in the reference section specify behavior
 exactly.
 
 ```{toctree}

@@ -1,6 +1,6 @@
 # Design notes
 
-Why pyEKI's interfaces look the way they do. This page records decisions that
+Why EnsKit's interfaces look the way they do. This page records decisions that
 are not obvious from the code and are easy to undo by accident. It is aimed at
 contributors; users need only the {doc}`user-guide/quickstart`.
 
@@ -19,7 +19,7 @@ codebases toward dense linear algebra.
 Two consequences shape the library.
 
 **The prior is off the hot path.** In tempered EKI the prior covariance is used
-exactly once, to draw the initial ensemble; everything afterwards runs on
+exactly once, to draw the initial ensemble; everything afterward runs on
 empirical moments. A prior with no cheap inverse at all is therefore perfectly
 usable. Cheap `solve` and `logdet` become load-bearing only when estimating
 hyperparameters, running variants whose drift term involves the prior
@@ -59,7 +59,7 @@ is the case $F = A^\top/\sqrt{J-1}$ for the anomaly matrix $A$.
 a factor rather than three covariance blocks; {doc}`gaussian-contract` states
 the rules normatively.
 
-This is the form pyEKI implements, in preference to the algebraically
+This is the form EnsKit implements, in preference to the algebraically
 equivalent Woodbury identity applied to the normal equations. Four reasons:
 
 - **Nothing is squared.** The competing route forms
@@ -93,12 +93,12 @@ its own $O(N^2k)$.
 
 ### The algorithm space
 
-A survey, not a dispatch plan: `pyeki.gauss` routes everything through the
+A survey, not a dispatch plan: `enskit.gauss` routes everything through the
 whitened SVD and selects nothing at runtime ({doc}`gaussian-contract`).
 
 | regime | method | cost |
 | --- | --- | --- |
-| $k < N$, noise whitenable | whitened SVD — what pyEKI implements | $O(Nk^2)$ |
+| $k < N$, noise whitenable | whitened SVD — what EnsKit implements | $O(Nk^2)$ |
 | $N$ very large, noise block diagonal | same, whitening per block | $O(Nk^2)$ |
 | localized | per-block whitened SVD on local data | $O(n N_{\text{loc}} k^2)$ |
 | $N \le k$ | dense factorization of the predictive covariance — deferred as a possible internal optimization behind the same signatures | $O(N^3)$ |
@@ -117,12 +117,12 @@ subspace algebra is preserved exactly, the per-block analyses are independent,
 and each yields a weight vector in $\mathbb{R}^J$ applied to that block's own
 anomalies.
 
-pyEKI will implement domain localization, because it preserves the conditioning
+EnsKit will implement domain localization, because it preserves the conditioning
 kernel above and parallelizes cleanly.
 
 Two hazards worth designing against. Parameters with no location — globally
 shared ones — must be exempt from tapering, or the pooling that makes them
-global is silently destroyed. And local neighbourhoods must be fixed-size with
+global is silently destroyed. And local neighborhoods must be fixed-size with
 a validity mask, since variable-size domains cannot be vectorized.
 
 ## Structured covariance results
@@ -225,7 +225,7 @@ because both branches are traced.
 
 ## Why not an existing library
 
-pyEKI implements its own operator layer rather than depending on a
+EnsKit implements its own operator layer rather than depending on a
 general-purpose one. The three structures EKI most needs are the three that
 general libraries tend to lack: a sum of Kronecker products, a spectral
 representation of that sum, and rectangular square roots for sampling. Existing
@@ -267,7 +267,7 @@ disagreement about the data rather than an arbitrary monotone quantity. And the
 $-2\delta$ prefactor vanishes at $\delta = 0$: the function is flat at the left
 endpoint, so bisection is the right root find and a derivative-based one is not.
 
-One precondition, which pyEKI satisfies structurally: the argument assumes the
+One precondition, which EnsKit satisfies structurally: the argument assumes the
 ensemble arrives equally weighted. It does, since the layer carries no
 importance weights at all — but a variant that introduced them would have to
 revisit this before reusing the bisection.

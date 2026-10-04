@@ -20,7 +20,7 @@ operator arithmetic (``A @ B``, ``c * A``, ``A / c``, ``A.T``), which pick
 the most capable class for the ingredients. Constructing a class directly
 is allowed but never upgrades to a more capable one.
 
-See :mod:`pyeki.linalg.base` for the shape convention shared by all
+See :mod:`enskit.linalg.base` for the shape convention shared by all
 operators.
 
 Notes
@@ -68,21 +68,6 @@ __all__ = [
 ]
 
 
-def _check_ops_tuple(cls_name: str, field_name: str, ops, required=LinOp) -> None:
-    """Structural check for a tuple-of-operators field."""
-    if not isinstance(ops, tuple):
-        raise TypeError(f"{cls_name}.{field_name} must be a tuple of operators")
-    if not ops:
-        raise ValueError(f"{cls_name} needs at least one operator")
-    for op in ops:
-        if not isinstance(op, required):
-            raise TypeError(
-                f"{cls_name} blocks must be {required.__name__}, "
-                f"got {type(op).__name__}"
-            )
-        _check_not_family(cls_name, op)
-
-
 # ---------------------------------------------------------------------------
 # views: transpose and scalar scaling
 # ---------------------------------------------------------------------------
@@ -92,7 +77,7 @@ def _check_ops_tuple(cls_name: str, field_name: str, ops, required=LinOp) -> Non
 class Transposed(LinOp):
     """The transpose of another operator, as a view.
 
-    What :attr:`~pyeki.linalg.LinOp.T` returns by default. A plain ``LinOp``
+    What :attr:`~enskit.linalg.LinOp.T` returns by default. A plain ``LinOp``
     regardless of the wrapped operator's level: transposition preserves
     solvability but not the layer's knowledge of it, and operators whose
     transpose supports more override ``T`` with a structured result instead.
@@ -225,7 +210,7 @@ class SquareScaled(Scaled, SquareLinOp):
         return self.op._solve_mat(B) / self.c
 
     def _logdet(self) -> Array:
-        return self.n * jnp.log(jnp.abs(self.c)) + self.op._logdet()
+        return self.dim * jnp.log(jnp.abs(self.c)) + self.op._logdet()
 
     def _diag(self) -> Array:
         return self.c * self.op._diag()
@@ -545,7 +530,7 @@ class PSDDiagCongruence(PSDLinOp):
     op
         The PSD operator to rescale.
     scale
-        Per-coordinate scale vector of length ``op.n``, strictly positive.
+        Per-coordinate scale vector of length ``op.dim``, strictly positive.
     """
 
     op: PSDLinOp
@@ -613,16 +598,6 @@ class PSDDiagCongruence(PSDLinOp):
 # ---------------------------------------------------------------------------
 
 
-def _check_factory_args(name: str, ops: tuple) -> None:
-    if not ops:
-        raise ValueError(f"{name}() needs at least one operator")
-    for op in ops:
-        if not isinstance(op, LinOp):
-            raise TypeError(
-                f"{name}() arguments must be operators, got {type(op).__name__}"
-            )
-
-
 def block_diag(*blocks: LinOp) -> LinOp:
     """Build a block-diagonal operator, choosing the most capable class.
 
@@ -673,7 +648,7 @@ def diag_congruence(op: PSDLinOp, scale) -> PSDDiagCongruence:
     op
         The PSD operator to rescale.
     scale
-        Per-coordinate scale vector of length ``op.n``, strictly positive.
+        Per-coordinate scale vector of length ``op.dim``, strictly positive.
     """
     if not isinstance(op, PSDLinOp):
         raise TypeError(
@@ -686,3 +661,33 @@ def diag_congruence(op: PSDLinOp, scale) -> PSDDiagCongruence:
             f"({op.shape[0]},), got {scale.shape}"
         )
     return PSDDiagCongruence(op, scale)
+
+
+# ---------------------------------------------------------------------------
+# private helpers
+# ---------------------------------------------------------------------------
+
+
+def _check_ops_tuple(cls_name: str, field_name: str, ops, required=LinOp) -> None:
+    """Structural check for a tuple-of-operators field."""
+    if not isinstance(ops, tuple):
+        raise TypeError(f"{cls_name}.{field_name} must be a tuple of operators")
+    if not ops:
+        raise ValueError(f"{cls_name} needs at least one operator")
+    for op in ops:
+        if not isinstance(op, required):
+            raise TypeError(
+                f"{cls_name} blocks must be {required.__name__}, "
+                f"got {type(op).__name__}"
+            )
+        _check_not_family(cls_name, op)
+
+
+def _check_factory_args(name: str, ops: tuple) -> None:
+    if not ops:
+        raise ValueError(f"{name}() needs at least one operator")
+    for op in ops:
+        if not isinstance(op, LinOp):
+            raise TypeError(
+                f"{name}() arguments must be operators, got {type(op).__name__}"
+            )

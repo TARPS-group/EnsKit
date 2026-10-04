@@ -1,1 +1,1 @@
-- [Project: pyEKI](project_pyeki.md) — what this package is, what is out of scope
+- [Project: EnsKit](project_enskit.md) — what this package is, what is out of scope

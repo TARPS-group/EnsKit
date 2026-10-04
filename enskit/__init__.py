@@ -1,28 +1,28 @@
-"""pyEKI — Ensemble Kalman Inversion for derivative-free Bayesian calibration.
+"""EnsKit — Ensemble Kalman Inversion for derivative-free Bayesian calibration.
 
 Ensemble Kalman Inversion (EKI) estimates the parameters of an expensive,
 possibly non-differentiable forward model from noisy observations, using only
-forward evaluations. pyEKI provides the pieces that requires:
+forward evaluations. EnsKit provides the pieces that requires:
 
-- :mod:`pyeki.linalg` — structured linear operators, so covariance structure is
+- :mod:`enskit.linalg` — structured linear operators, so covariance structure is
   exploited rather than materialized as dense arrays.
-- :mod:`pyeki.gauss` — joint Gaussian distributions and the conditioning
+- :mod:`enskit.gauss` — joint Gaussian distributions and the conditioning
   operations EKI is built from.
-- :mod:`pyeki.eki` — the algorithms themselves: tempering schedules, ensemble
+- :mod:`enskit.eki` — the algorithms themselves: tempering schedules, ensemble
   updates, inflation, and the driver loop.
-- :mod:`pyeki.localize` — distance-based localization for high-dimensional
+- :mod:`enskit.localize` — distance-based localization for high-dimensional
   problems. *(planned)*
-- :mod:`pyeki.toy` — small calibration problems for this package's tests and
+- :mod:`enskit.toy` — small calibration problems for this package's tests and
   documentation, not for production use.
 
 The forward model is any callable mapping parameters to predicted observations,
-so pyEKI is independent of the model being calibrated.
+so EnsKit is independent of the model being calibrated.
 
 Importing this package enables JAX float64. JAX defaults to float32, which is
 not accurate enough for the conditioning arithmetic: ensemble anomalies are
 formed by subtraction, and the resulting cancellation loses several digits.
-Import pyEKI before creating any array, since arrays made beforehand stay
-float32 and are not promoted afterwards.
+Import EnsKit before creating any array, since arrays made beforehand stay
+float32 and are not promoted afterward.
 
 Notes
 -----

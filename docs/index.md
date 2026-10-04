@@ -1,4 +1,4 @@
-# pyEKI
+# EnsKit
 
 Ensemble Kalman Inversion for derivative-free Bayesian calibration.
 
@@ -27,42 +27,42 @@ ensemble of parameter vectors toward the posterior using only forward
 evaluations, requiring no gradients, no adjoint, and no access to the model's
 internals.
 
-## What pyEKI provides
+## What EnsKit provides
 
 ::::{grid} 2
 :gutter: 3
 
 :::{grid-item-card} Structured operators
-`pyeki.linalg` represents covariance matrices by how they act on vectors, so
+`enskit.linalg` represents covariance matrices by how they act on vectors, so
 that structure — block, diagonal, triangular and low-rank today, Kronecker
 planned — is exploited rather than materialized.
 :::
 
 :::{grid-item-card} Gaussian conditioning
-`pyeki.gauss` provides the Gaussian machinery of the ensemble update —
+`enskit.gauss` provides the Gaussian machinery of the ensemble update —
 sampling, whitened-SVD conditioning, and the square-root transform, in both
 the stochastic and deterministic forms.
 :::
 
 :::{grid-item-card} Localization
-`pyeki.localize` supports problems where the parameter dimension far exceeds
+`enskit.localize` supports problems where the parameter dimension far exceeds
 the ensemble size. *(planned)*
 :::
 
 :::{grid-item-card} The EKI algorithms
-`pyeki.eki` provides tempering schedules, ensemble updates, inflation, and the
+`enskit.eki` provides tempering schedules, ensemble updates, inflation, and the
 driver loop, in both the approximate-sampling and the optimization form.
 :::
 ::::
 
-## What pyEKI is not
+## What EnsKit is not
 
-pyEKI does not implement production forward models, priors, or Gaussian
-process kernels. It ships three toy problems, in `pyeki.toy`, for its own
+EnsKit does not implement production forward models, priors, or Gaussian
+process kernels. It ships three toy problems, in `enskit.toy`, for its own
 tests and this documentation.
 The forward model is any callable from parameters to predicted observations,
 and a prior is any operator meeting the covariance interface. Building those
-belongs to the caller, which keeps pyEKI independent of the domain being
+belongs to the caller, which keeps EnsKit independent of the domain being
 calibrated. {doc}`user-guide/writing-a-forward-model` states everything a
 forward model must satisfy, and works through wrapping an external
 executable.
@@ -72,11 +72,11 @@ executable.
 Calibrating a two-parameter decay model against three noisy observations:
 
 ```python
-import pyeki                      # enables float64; import before creating arrays
+import enskit                      # enables float64; import before creating arrays
 import jax, jax.numpy as jnp
-from pyeki.linalg import PSDDiagonal
-from pyeki.gauss import Gaussian
-from pyeki.eki import EKIState, AdaptiveESSSchedule, run
+from enskit.linalg import PSDDiagonal
+from enskit.gauss import Gaussian
+from enskit.eki import EKIState, AdaptiveESSSchedule, run
 
 # The forward model: any callable from a (J, P) ensemble to (J, N) predictions.
 times = jnp.array([0.5, 1.0, 2.0])
@@ -124,7 +124,7 @@ diagnostics.
 :::
 
 :::{grid-item-card} Reference
-The normative contracts specifying each layer's behaviour exactly, the design
+The normative contracts specifying each layer's behavior exactly, the design
 notes, and the API.
 +++
 {doc}`api/index`

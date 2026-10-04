@@ -8,19 +8,19 @@ that is the sum over blocks rather than cubic in the total size.
 This is a lean layer aimed at what Ensemble Kalman Inversion needs — applying
 operators and their transposes, solving against them, and taking square roots
 to sample and whiten — rather than a general-purpose linear algebra library.
-Its behaviour is specified by the "Linear operator contract" page of the
+Its behavior is specified by the "Linear operator contract" page of the
 documentation.
 
-- :mod:`~pyeki.linalg.base` defines the class hierarchy, the array-shape
+- :mod:`~enskit.linalg.base` defines the class hierarchy, the array-shape
   convention, and how to add a new operator.
-- :mod:`~pyeki.linalg.elementary` holds operators defined by their own
+- :mod:`~enskit.linalg.elementary` holds operators defined by their own
   arrays.
-- :mod:`~pyeki.linalg.composite` holds operators built from other operators,
+- :mod:`~enskit.linalg.composite` holds operators built from other operators,
   and the factory functions that construct them.
-- :mod:`~pyeki.linalg.testing` holds conformance checks for new operator
+- :mod:`~enskit.linalg.testing` holds conformance checks for new operator
   types.
 
-Import :mod:`pyeki` before creating any array, so that float64 is enabled
+Import :mod:`enskit` before creating any array, so that float64 is enabled
 first.
 """
 from .base import (

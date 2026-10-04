@@ -3,9 +3,9 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "pyeki"
+name = "enskit"
 version = "0.1.0.dev0"
-description = "Ensemble Kalman Inversion for derivative-free Bayesian calibration"
+description = "Building blocks for ensemble Kalman methods"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
@@ -54,7 +54,7 @@ dev = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["pyeki"]
+packages = ["enskit"]
 
 [tool.ruff]
 target-version = "py311"

@@ -30,7 +30,7 @@ jobs:
         run: uv run ruff check .
 
       - name: Test
-        run: uv run pytest --cov=pyeki --cov-report=term-missing
+        run: uv run pytest --cov=enskit --cov-report=term-missing
 
   docs:
     runs-on: ubuntu-latest

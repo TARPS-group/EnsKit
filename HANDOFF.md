@@ -4,10 +4,52 @@ Written 2026-08-24, updated 2026-08-25 after the operator layer was reworked
 against the normative contract, 2026-08-27 after `pyeki.eki` shipped,
 2026-08-28 after the forward-model contract was specified and the layer
 vocabulary was fixed, 2026-09-02 after the joint was split into a
-Gaussian and a sample container, and 2026-10-03 when the EnsKit redesign was
-adopted. Read `CLAUDE.md` first for conventions, including the layer rules,
-which the redesign replaced; then the section below; then the rest of this
-file, which describes the code as it stands before the redesign lands.
+Gaussian and a sample container, 2026-10-03 when the EnsKit redesign was
+adopted, and the same day after PR 1's renames. Read `CLAUDE.md` first for
+conventions, including the layer rules, which the redesign replaced; then the
+two sections below; then the rest of this file, which describes the code as it
+stands before the redesign lands. That description is historical: where it
+names `pyeki.<module>`, the module is now `enskit.<module>`.
+
+## 2026-10-03: PR 1, the mechanical renames
+
+The package is **`enskit`**. PR 1 (#35) changed names and nothing else; the
+test count is unchanged at 537. What moved:
+
+- `pyeki` → `enskit` everywhere outside `docs/redesign/`, including the
+  distribution name, the Sphinx title, the CI coverage flag and the figure
+  override, now `ENSKIT_DOCS_FIGURES=force`. Prose says "EnsKit".
+- American spelling throughout. The public names it changed are the
+  `center_misfit` fields of `Evaluation` and `HistoryRecord` (were
+  `centre_misfit`); test names changed with them. Two quoted paper titles keep their British spelling, in the EKI
+  contract's references table.
+- `SquareLinOp.n` → `SquareLinOp.dim` (#20). The Gaussian contract now
+  states one naming rule for both layers instead of recording a departure.
+- Every module lists its public classes and functions first, in its index
+  table's order, with private helpers below; in modules divided by section
+  banners, the helpers' banners say `private`.
+  `enskit.linalg.base` has no index table, so it follows its docstring's
+  sections: the three levels, then `linop` and `static_field`, then
+  `UnsupportedOpError` and `densify`. `enskit.linalg.testing` puts
+  `check_operator` first, since its docstring opens with it. Module
+  constants go at the top, after `__all__`; the one exception is
+  `_DERIVED_DEFAULTS` in `enskit.linalg.base`, which refers to the classes
+  and so follows them. New modules should be written in this order from the
+  start.
+
+**Still named `pyEKI`, deliberately:** the GitHub URLs in `pyproject.toml`,
+`docs/conf.py` and `README.md`, and the clone instructions in
+`docs/installation.md` (`git clone …/pyEKI.git`, `cd pyEKI`, and the
+`../pyEKI` path of a local checkout). They change when the repository is
+renamed; GitHub redirects the old URLs in the meantime. The prototype in
+`docs/redesign/prototype/` still imports `pyeki.linalg`, so it runs only on a
+checkout from before this PR, such as `b1d829c`.
+
+**Left for PR 11:** the package docstring and the README and landing-page
+taglines still describe EKI alone ("Ensemble Kalman Inversion for
+derivative-free Bayesian calibration"). Renaming did not change what the
+package does, so they were not rewritten here; `pyproject.toml`'s description
+already reads "Building blocks for ensemble Kalman methods".
 
 ## 2026-10-03: the EnsKit redesign is adopted
 
@@ -52,7 +94,7 @@ contracts. Do not extend them, and do not make the new layers depend on them.
 ## Where things stand
 
 **Done.** `pyeki.linalg` is implemented to the specification in
-`docs/linop-contract.md` — the normative reference for the layer's behaviour,
+`docs/linop-contract.md` — the normative reference for the layer's behavior,
 written and adversarially reviewed before this implementation. Three-level
 hierarchy (`LinOp`/`SquareLinOp`/`PSDLinOp`) with template methods (public
 methods gate and validate; authors implement `_`-prefixed hooks), transposes
@@ -83,7 +125,7 @@ previously unreachable, since the only entrance to conditioning was to
 present samples. `docs/joint-factor.md` derives the representation and records
 why it is a factor rather than three covariance blocks. The square-root update
 stayed on `EmpiricalJoint` because its reading of the conditioned factor is
-valid only for a centred one, which holding samples makes structural; the
+valid only for a centered one, which holding samples makes structural; the
 contract and that page both give the measured failure it avoids.
 
 `pyeki.eki` was not touched: both update policies call the same two methods
@@ -186,7 +228,7 @@ Three things the first three pages settled, none of which had a precedent:
   a figure cannot disagree with the code that made it. Regeneration is skipped
   when every output postdates both that module and every source file of the
   package — 6 s to regenerate all of them, 1.6 s cached — and
-  `PYEKI_DOCS_FIGURES=force` overrides. That alone catches only a figure whose
+  `ENSKIT_DOCS_FIGURES=force` overrides. That alone catches only a figure whose
   code *raises*, so each figure function also returns the numbers it plotted
   and `tests/test_tutorials.py` pins them; a figure drawing the wrong array
   fails the test rather than merely looking wrong. Pixels are deliberately not
@@ -226,8 +268,10 @@ pyEKI. Nothing domain-specific should come back across.
 
 Follow the plan in `docs/redesign/index.md`, one pull request at a time, in
 a fresh session for each, as described in "Pull requests and handoffs" in
-`CLAUDE.md`. PR 1 (#35) is next. The notes below, written before the redesign,
-still apply to the pull requests they name.
+`CLAUDE.md`. PR 1 (#35) is done; PR 2 (#36) is next, and PR 10 (#44) can
+start once PR 2 has merged. The notes below, written before the redesign,
+still apply to the pull requests they name; their `pyeki` modules are now
+`enskit` modules.
 
 ### Notes for PR 10, the `Kronecker` family
 
@@ -263,7 +307,7 @@ their preconditions, including a log-determinant term that is easy to omit.
 Domain localization, not covariance localization — `docs/design.md` explains
 why the latter destroys the low-rank structure the conditioning kernel depends
 on. Watch the two hazards recorded there: exempting unlocated parameters from
-tapering, and fixed-size neighbourhoods with masks so the local analyses
+tapering, and fixed-size neighborhoods with masks so the local analyses
 vectorize.
 
 In the new design, localization is an update rule, `LocalizedUpdateRule`,
@@ -271,13 +315,13 @@ wrapping `Matheron` or `SymmetricSquareRoot`, and no driver needs to know
 about it. Two things localization must bring
 itself, neither of which `pyeki.eki` supplies: observation **locations**,
 which appear nowhere in the layer and so live as static fields on the rule,
-and the neighbourhood and taper definitions. One real limit, recorded in the
+and the neighborhood and taper definitions. One real limit, recorded in the
 EKI contract's *How the layers around this one connect*: extracting a
 principal submatrix of a *correlated* noise block is not an operator-layer
 operation, so localization composes cleanly for diagonal noise or for
-neighbourhoods aligned to the noise operator's blocks, and not for arbitrary
-neighbourhoods cutting across a correlated block. That is a constraint on
-neighbourhood construction rather than a gap in the layer below.
+neighborhoods aligned to the noise operator's blocks, and not for arbitrary
+neighborhoods cutting across a correlated block. That is a constraint on
+neighborhood construction rather than a gap in the layer below.
 
 ### Notes for PR 11, documentation
 
@@ -311,7 +355,7 @@ what shape it wants. Revisit when localization lands. The EKI contract's
 (Three decisions previously listed here were settled. Capability declaration
 and whitening versus triangularity went to the operator contract: `supports()`
 is defined by hook presence with derived-dependency resolution, and
-`cholesky()` was removed in favour of `factor()` plus a primitive `whiten()`.
+`cholesky()` was removed in favor of `factor()` plus a primitive `whiten()`.
 `AdditiveInflation`'s supposed per-step refactorization turned out not to
 exist: every shipped PSD operator factorizes at construction, so `factor()`
 returns a stored factor and the update path contains no Cholesky at all.)
@@ -338,8 +382,8 @@ layer; this is the index.
 | Per-step noise is $\Sigma/\Delta\beta_t$, never $\Sigma/\beta_t$ | a plausible posterior, wrong by $(T+1)/2$ times the data precision on a uniform $T$-step ladder, growing with ladder length |
 | A single-`where` guard sends a `nan` misfit to the `inf` branch | `nan > 0` is `False`, so the schedule silently returns the *largest* allowed step |
 | A Python float passed as a `jit` **argument** does not retrace | the retrace-per-step bug is a *static field* on an object crossing the boundary, so never pass an `EKIState` or `Evaluation` whole |
-| `Evaluation.centre_misfit` is not the mean of `Evaluation.misfits` | they differ by exactly $\tfrac{J-1}{2J}\operatorname{tr}(W \widehat C_{vv} W^\top)$ |
-| The repair formula is not bit-exactly the identity when nothing failed | it must be `jnp.where(valid, ensemble, centre)` *and* skipped in Python on the synchronized `n_valid` |
+| `Evaluation.center_misfit` is not the mean of `Evaluation.misfits` | they differ by exactly $\tfrac{J-1}{2J}\operatorname{tr}(W \widehat C_{vv} W^\top)$ |
+| The repair formula is not bit-exactly the identity when nothing failed | it must be `jnp.where(valid, ensemble, center)` *and* skipped in Python on the synchronized `n_valid` |
 | A static field on a `HistoryRecord` makes every record a different pytree | `jax.tree.map` across a history raises instead of stacking |
 | `step` is cumulative across runs | chaining a fresh ladder onto a finished state returns unchanged, with nothing raised — use `restart()` |
 | `cov.factor()` is free, because operators factorize at construction | "hoisting" it by storing a densified factor turns an $O(P)$ diagonal into a $P \times P$ array |
@@ -350,7 +394,7 @@ layer; this is the index.
 | A policy's output needs its **dtype** checked, not only its shape | an inflation returning `int64` handed the forward model an integer ensemble and the run completed silently; the shape check passed |
 | A `float32` forward model is promoted and warned about, not rejected | it still costs ~$7\times10^{-5}$ relative in the posterior mean where the prediction mean exceeds the spread by $10^4$; promotion recovers only about half, since the digits are gone before the array arrives |
 | `ensemble @ G` instead of `ensemble @ G.T` is silent when $G$ is square | the transposed model's predictions, right shape, no error; `G @ ensemble` raises, so it is the harmless mistake |
-| A **symmetric** coupling across ensemble members survives a permutation of them | mean-centring is permutation-equivariant, so a permutation test alone passes a model that normalizes across the ensemble; it takes re-evaluating a *subset* to catch, and that comparison cannot be bit-exact |
+| A **symmetric** coupling across ensemble members survives a permutation of them | mean-centering is permutation-equivariant, so a permutation test alone passes a model that normalizes across the ensemble; it takes re-evaluating a *subset* to catch, and that comparison cannot be bit-exact |
 | The same members in a differently *sized* batch round differently | a dense contraction picks a different kernel per batch shape, so a subset comparison holds only to round-off while a permutation one is bit-exact |
 | The closed form's cost is set by the prior factor's width $k$, not by $P$ | a full-rank prior at $P = 2000$ means a $(2000, 2000)$ posterior factor — 32 MB, 0.07 s — so `LinearGaussian.posterior` guards on $Pk$ and the *run* has no such limit |
 | A run at $P \gg J$ reports a spread the exact posterior contradicts | at $P = 2000$, $N = 40$, $J = 40$ the ensemble's mean posterior sd is 0.014 against an exact 0.990, a factor of seventy, with nothing raised and no history field flagging it |

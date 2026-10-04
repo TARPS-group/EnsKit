@@ -16,11 +16,11 @@ clarity and correctness over cleverness, and keep the public surface small.
 **The redesign is in progress.** `docs/redesign/index.md` records the design
 and the plan, a sequence of pull requests numbered 0 to 12; the full design
 document is `docs/redesign/design.html`, and `docs/redesign/stubs/` holds the
-docstrings each layer starts from. Until PR 1, the package is still named
-`pyeki`. Until PR 7, the old `gauss` and `eki` modules exist beside the new
-layers and keep their own contracts (`docs/gaussian-contract.md`,
-`docs/eki-contract.md`); do not extend them, and do not make the new layers
-depend on them.
+docstrings each layer starts from. PR 1 renamed the package from `pyeki`;
+the GitHub repository is `TARPS-group/pyEKI` until it is renamed. Until PR 7,
+the old `gauss` and `eki` modules exist beside the new layers and keep their
+own contracts (`docs/gaussian-contract.md`, `docs/eki-contract.md`); do not
+extend them, and do not make the new layers depend on them.
 
 The layers, each building on the ones above it in this list:
 
@@ -228,7 +228,9 @@ example describes a method from a paper, it cites the paper.
 
 **Public API first.** In every module the public classes and functions come
 first, in the order of the module's index table; private helpers follow below
-them.
+them. Module constants, public or private, are the exception: they go at the
+top, after the imports and `__all__`, unless they refer to a class defined
+below.
 
 **Array shapes: leading batch axes, core operand shape trailing.** This is the
 NumPy generalized-ufunc rule and what `vmap` produces. It applies everywhere,

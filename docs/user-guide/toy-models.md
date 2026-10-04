@@ -1,13 +1,13 @@
 # Toy problems
 
-`pyeki.toy` ships three small calibration problems, each bundling a forward
+`enskit.toy` ships three small calibration problems, each bundling a forward
 model with a prior, an observation error covariance, a synthetic observation
 and the parameters that generated it, `u_true`. They exist so that the package's own
 tests, this documentation and the tutorials all work the same problems, and so
-that trying pyEKI needs no data and no model of your own.
+that trying EnsKit needs no data and no model of your own.
 
 :::{important}
-**These are not production models, and they are not an interface.** pyEKI
+**These are not production models, and they are not an interface.** EnsKit
 ships no forward models for real use and defines no base class, protocol or
 registry for one — a forward model is any callable from a `(J, P)` ensemble to
 `(J, N)` predictions, and {doc}`writing-a-forward-model` is the whole
@@ -35,9 +35,9 @@ against a tolerance:
 
 ```python
 import jax
-from pyeki import toy
-from pyeki.eki import AdaptiveESSSchedule, EKIState, run
-from pyeki.gauss import Gaussian
+from enskit import toy
+from enskit.eki import AdaptiveESSSchedule, EKIState, run
+from enskit.gauss import Gaussian
 
 problem = toy.linear_gaussian(u_dim=4, v_dim=8)
 
@@ -105,7 +105,7 @@ mean to fail more members and see where repair stops being adequate; it must
 stay below the true rate of 1.5, or the observation would have been generated
 where the model does not evaluate.
 
-The failure here is signalled with `jnp.where`, which is the cheap version.
+The failure here is signaled with `jnp.where`, which is the cheap version.
 The realistic one is a wrapper that catches its own subprocess failures and
 returns non-finite rows: {doc}`writing-a-forward-model` works one through.
 
@@ -156,12 +156,12 @@ What they *are* an example of is the batched convention and row independence:
 - **Row `j` of the return depends only on row `j` of the argument.** That is
   the one requirement nothing inside a run detects, and both idioms above make
   it structural rather than a claim. From outside a run it *is* detectable:
-  `pyeki.eki.testing.check_forward_model` permutes the ensemble and
+  `enskit.eki.testing.check_forward_model` permutes the ensemble and
   re-evaluates a subset of it, which between them catch an order-dependent
   coupling and a symmetric one. Neither is sufficient alone.
 
 ```python
-from pyeki.eki.testing import check_forward_model
+from enskit.eki.testing import check_forward_model
 
 check_forward_model(my_forward, u_dim=12, v_dim=40)
 ```
@@ -180,7 +180,7 @@ error, for instance, changes nothing else about the run:
 import dataclasses
 import numpy as np
 import jax.numpy as jnp
-from pyeki.linalg import DensePSD
+from enskit.linalg import DensePSD
 
 rng = np.random.default_rng(1)
 M = rng.normal(size=(8, 8))

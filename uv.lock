@@ -781,6 +781,58 @@ wheels = [
 ]
 
 [[package]]
+name = "enskit"
+version = "0.1.0.dev0"
+source = { editable = "." }
+dependencies = [
+    { name = "jax", version = "0.10.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "jax", version = "0.11.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "numpy", version = "2.5.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "furo" },
+    { name = "ipykernel" },
+    { name = "jupyter" },
+    { name = "matplotlib" },
+    { name = "mypy" },
+    { name = "myst-parser" },
+    { name = "nbsphinx" },
+    { name = "pytest" },
+    { name = "pytest-cov" },
+    { name = "ruff" },
+    { name = "sphinx", version = "9.0.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "sphinx", version = "9.1.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "sphinx-copybutton" },
+    { name = "sphinx-design" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "jax", specifier = ">=0.4" },
+    { name = "numpy", specifier = ">=1.24" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "furo", specifier = ">=2024.1" },
+    { name = "ipykernel", specifier = ">=6.0" },
+    { name = "jupyter", specifier = ">=1.0" },
+    { name = "matplotlib", specifier = ">=3.7" },
+    { name = "mypy", specifier = ">=1.10" },
+    { name = "myst-parser", specifier = ">=2.0" },
+    { name = "nbsphinx", specifier = ">=0.9" },
+    { name = "pytest", specifier = ">=8.0" },
+    { name = "pytest-cov", specifier = ">=5.0" },
+    { name = "ruff", specifier = ">=0.4" },
+    { name = "sphinx", specifier = ">=7.0" },
+    { name = "sphinx-copybutton", specifier = ">=0.5" },
+    { name = "sphinx-design", specifier = ">=0.5" },
+]
+
+[[package]]
 name = "executing"
 version = "2.2.1"
 source = { registry = "https://pypi.org/simple" }
@@ -2510,58 +2562,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/1b/7d/92392ff7815c21062bea51aa7b87d45576f649f16458d78b7cf94b9ab2e6/pycparser-3.0.tar.gz", hash = "sha256:600f49d217304a5902ac3c37e1281c9fe94e4d0489de643a9504c5cdfdfc6b29", size = 103492, upload-time = "2026-01-21T14:26:51.89Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/0c/c3/44f3fbbfa403ea2a7c779186dc20772604442dde72947e7d01069cbe98e3/pycparser-3.0-py3-none-any.whl", hash = "sha256:b727414169a36b7d524c1c3e31839a521725078d7b2ff038656844266160a992", size = 48172, upload-time = "2026-01-21T14:26:50.693Z" },
-]
-
-[[package]]
-name = "pyeki"
-version = "0.1.0.dev0"
-source = { editable = "." }
-dependencies = [
-    { name = "jax", version = "0.10.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
-    { name = "jax", version = "0.11.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
-    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
-    { name = "numpy", version = "2.5.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "furo" },
-    { name = "ipykernel" },
-    { name = "jupyter" },
-    { name = "matplotlib" },
-    { name = "mypy" },
-    { name = "myst-parser" },
-    { name = "nbsphinx" },
-    { name = "pytest" },
-    { name = "pytest-cov" },
-    { name = "ruff" },
-    { name = "sphinx", version = "9.0.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
-    { name = "sphinx", version = "9.1.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
-    { name = "sphinx-copybutton" },
-    { name = "sphinx-design" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "jax", specifier = ">=0.4" },
-    { name = "numpy", specifier = ">=1.24" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "furo", specifier = ">=2024.1" },
-    { name = "ipykernel", specifier = ">=6.0" },
-    { name = "jupyter", specifier = ">=1.0" },
-    { name = "matplotlib", specifier = ">=3.7" },
-    { name = "mypy", specifier = ">=1.10" },
-    { name = "myst-parser", specifier = ">=2.0" },
-    { name = "nbsphinx", specifier = ">=0.9" },
-    { name = "pytest", specifier = ">=8.0" },
-    { name = "pytest-cov", specifier = ">=5.0" },
-    { name = "ruff", specifier = ">=0.4" },
-    { name = "sphinx", specifier = ">=7.0" },
-    { name = "sphinx-copybutton", specifier = ">=0.5" },
-    { name = "sphinx-design", specifier = ">=0.5" },
 ]
 
 [[package]]

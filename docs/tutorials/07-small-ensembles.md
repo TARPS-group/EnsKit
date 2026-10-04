@@ -37,7 +37,7 @@ for the operator `AdditiveInflation` takes.
   merely assertable, and it is worth showing that the same comparison is
   unavailable for a model that is not linear.
 - How the symptom appears in diagnostics: collapsing `spread`, and `ess`
-  behaviour that looks healthy while the answer is degenerate.
+  behavior that looks healthy while the answer is degenerate.
 - Mitigation 1, ensemble size. The honest first answer, bounded by the cost of
   the forward model.
 - Mitigation 2, `MultiplicativeInflation`. What it does to the anomalies, and
@@ -59,8 +59,8 @@ for the operator `AdditiveInflation` takes.
 ## API exercised
 
 `MultiplicativeInflation`, `AdditiveInflation`, `HistoryRecord.spread`,
-`HistoryRecord.ess`, `EKIState.n_members`, `pyeki.toy.linear_gaussian`,
-`pyeki.toy.LinearGaussian.posterior`.
+`HistoryRecord.ess`, `EKIState.n_members`, `enskit.toy.linear_gaussian`,
+`enskit.toy.LinearGaussian.posterior`.
 
 ## Notes for the writer
 

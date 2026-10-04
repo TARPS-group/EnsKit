@@ -1,14 +1,14 @@
 # Forward model requirements
 
-pyEKI supplies everything in a run except the forward model. This page is what
+EnsKit supplies everything in a run except the forward model. This page is what
 that callable must satisfy; {ref}`eki-failures` is the normative statement.
-There is nothing to subclass and nothing to register: pyEKI ships no forward
+There is nothing to subclass and nothing to register: EnsKit ships no forward
 models for real use and defines no base class, protocol or registry for one.
 
 ## The interface
 
 ```python
-import pyeki  # enables float64; import before creating arrays
+import enskit  # enables float64; import before creating arrays
 import jax.numpy as jnp
 
 times = jnp.array([0.5, 1.0, 2.0])
@@ -53,7 +53,7 @@ ordinary Python loop, which is equally legal.
 | **return** | any array-like of shape `(J, N)`: a `jax.Array`, a NumPy array, or a nested Python list |
 | **dtype** | a real floating dtype; a narrower one than the run's is promoted, with a warning |
 | **rows** | row `j` of the return depends only on row `j` of the argument |
-| **failure** | signalled by a **non-finite row**, never by an exception |
+| **failure** | signaled by a **non-finite row**, never by an exception |
 | **exceptions** | the callable owns its own; anything that escapes stops the run |
 
 Nothing else — see [what is not required](#what-is-not-required).
@@ -102,7 +102,7 @@ The dtype must be a real floating one; an integer or complex return is a
 run's — in practice `float32` — is promoted to the run's working dtype and
 warns once per run.
 
-pyEKI enables `float64` because ensemble anomalies are formed by subtraction
+EnsKit enables `float64` because ensemble anomalies are formed by subtraction
 and lose digits to cancellation, and a model that computes or reports in single
 precision has already lost them before the array arrives; promoting prevents a
 *second* loss in the conditioning arithmetic and nothing more. A `float32`
@@ -111,7 +111,7 @@ predictions have a mean-to-spread ratio of `1e4`, and promotion halves it.
 Return `float64` where you can. Where you cannot, the run is still legitimate
 and the warning is telling you the price.
 
-## Signalling failure
+## Signaling failure
 
 A member is *failed* when its prediction row contains any non-finite entry.
 That is the entire signal, and it puts one real obligation on the wrapper:
@@ -124,7 +124,7 @@ escaping the callable propagates out of the driver and stops the run — worse
 than a `nan` row, which the layer knows how to handle.
 :::
 
-Failed members are repaired to the valid members' centre by default;
+Failed members are repaired to the valid members' center by default;
 `on_failure="raise"` turns any failure into an `EKIError`. Either way, fewer
 than two valid members raises.
 
@@ -147,7 +147,7 @@ This is the only requirement beyond the shapes and the failure signal. From
 *outside* a run it is detectable, and worth checking once:
 
 ```python
-from pyeki.eki.testing import check_forward_model
+from enskit.eki.testing import check_forward_model
 
 check_forward_model(forward, u_dim=2, v_dim=3)
 ```
@@ -229,7 +229,7 @@ def forward(ensemble):
 
 Three details matter. **The result starts as `nan`**, so a member is
 valid only if something wrote over its row — every path that produces no
-prediction is already a correctly signalled failure, which is what keeps the
+prediction is already a correctly signaled failure, which is what keeps the
 `except` clause short enough to be right. **The `except` names its own
 failures** rather than catching everything, so a bug in the wrapper still
 reaches you. **Stale outputs are deleted first**, so a solver that exits zero
@@ -239,9 +239,9 @@ Driving it is unremarkable:
 
 ```python
 import jax, jax.numpy as jnp
-from pyeki.eki import AdaptiveESSSchedule, EKIState, run
-from pyeki.gauss import Gaussian
-from pyeki.linalg import PSDDiagonal
+from enskit.eki import AdaptiveESSSchedule, EKIState, run
+from enskit.gauss import Gaussian
+from enskit.linalg import PSDDiagonal
 
 times = jnp.array([0.5, 1.0, 2.0])
 truth = jnp.array([2.0, 0.7])

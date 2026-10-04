@@ -9,7 +9,7 @@ described below, so nothing here forms a matrix of either block's dimension.
 object                       represents
 ============================ ==================================================
 :class:`Gaussian`            one Gaussian distribution: a mean vector and a
-                             :class:`~pyeki.linalg.PSDLinOp` covariance
+                             :class:`~enskit.linalg.PSDLinOp` covariance
 :class:`GaussianJoint`       a joint Gaussian over the two blocks, held as a
                              mean pair and a joint factor; the home of every
                              conditioning identity
@@ -47,7 +47,7 @@ Conventions shared by everything in the module:
   stored batch axes. The two conditioning primitives are the exception —
   they are array-level and follow the operator layer's batch contract — as
   is the evaluation point of :meth:`Gaussian.log_density`.
-- **Noise covariances are** :class:`~pyeki.linalg.PSDLinOp` **s**, used only
+- **Noise covariances are** :class:`~enskit.linalg.PSDLinOp` **s**, used only
   through ``whiten``, so a noise operator with no factorization at all
   drives every update.
 
@@ -60,7 +60,7 @@ every method and array-computing property until it is applied under
 
 Notes
 -----
-The behaviour of this module is specified by the "Joint Gaussian contract"
+The behavior of this module is specified by the "Joint Gaussian contract"
 page of the documentation, which is normative; the user guide's
 "Conditioning" page explains when to reach for each piece.
 
@@ -128,161 +128,12 @@ __all__ = [
     "sqrt_transform",
 ]
 
-
-# ---------------------------------------------------------------------------
-# the conditioning primitives
-# ---------------------------------------------------------------------------
-
-
-def gain_weights(s: Array, b: Array) -> Array:
-    """Sample weights for a whitened residual: the shared conditioning core.
-
-    A pure matrix function of its arguments — no divisor, no whitening and no
-    randomness folded in. For the thin SVD :math:`s = U\\Sigma V^\\top`,
-
-    .. math::
-
-        \\texttt{gain\\_weights}(s, b)
-        = U \\operatorname{diag}\\!\\Bigl(\\frac{\\sigma_i}{1+\\sigma_i^2}\\Bigr)
-          V^\\top b
-        = s\\,(s^\\top s + I_N)^{-1} b ,
-
-    the second form showing that the result is a function of ``s`` alone,
-    invariant to the SVD's sign and degenerate-rotation freedom.
-
-    In conditioning, ``s`` is the whitened factor
-    :math:`S = (W F_v)^\\top` of the observed block and ``b`` a whitened
-    residual :math:`W r`, and the returned weights give the gain applied to
-    that residual as a combination of the other block's factor columns,
-    :math:`K r = F_u w`. The multipliers are bounded by
-    :math:`\\sigma/(1+\\sigma^2) \\le 1/2` for every :math:`\\sigma \\ge 0`,
-    so the gain cannot blow up however collapsed or ill-conditioned
-    :math:`s` becomes, and there is no regularization parameter to tune.
-
-    Parameters
-    ----------
-    s
-        Array of shape ``(k, N)``, exactly 2-D, both sizes at least 1. It
-        plays the operator's role and carries no batch axes; a family of
-        local analyses is a :func:`jax.vmap` over this function.
-    b
-        Array of shape ``(..., N)`` — whitened residuals along the trailing
-        axis, any number of leading batch axes, carried through.
-
-    Returns
-    -------
-    Array
-        Shape ``(..., k)``, the batch axes of ``b`` preserved.
-
-    Raises
-    ------
-    ValueError
-        If ``s`` is not 2-D with positive sizes, or ``b``'s trailing axis is
-        not ``N``. In debug mode, also if either is not finite.
-
-    Notes
-    -----
-    One SVD per call: batch the residuals of an update into a single call
-    rather than looping, since the :math:`J` per-sample residuals of a
-    stochastic update are one ``(J, N)`` operand.
-
-    Callers own the semantics of ``s`` and ``b``. The function cannot check
-    that they are whitened and read off a single joint factor as
-    conditioning requires, which is why the methods of
-    :class:`GaussianJoint` — where those conventions are enforced — are the
-    default interface and this is the escape hatch.
-
-    Differentiable wherever the singular values of ``s`` are distinct and
-    nonzero. At exactly repeated or exactly zero singular values — an
-    exactly collapsed ``s``, or the zero-padded columns a masked local
-    analysis may produce — the SVD's gradient is ``nan`` even though this
-    function is smooth there, equalling the rational form above. The
-    float-generic degeneracy of mean-centering (:math:`\\sigma_{\\min} \\sim
-    10^{-16}` when :math:`N \\ge k`) is not an exact tie and differentiates
-    finitely.
-    """
-    s = jnp.asarray(s)
-    if s.ndim != 2 or any(size < 1 for size in s.shape):
-        raise ValueError(
-            f"gain_weights: expected s of shape (k, N), exactly 2-D with both "
-            f"sizes at least 1, got shape {s.shape}"
-        )
-    b = _check_batched_operand("gain_weights", "b", b, s.shape[1])
-    _check_finite("gain_weights", "s", s)
-    _check_finite("gain_weights", "b", b)
-    U, sigma, Vt = _thin_svd(s)
-    return _weights_from_svd(U, sigma, Vt, b)
-
-
-def sqrt_transform(s: Array) -> Array:
-    """The deterministic square-root update transform: the shared conditioning core.
-
-    A pure matrix function of its argument. For the thin SVD
-    :math:`s = U\\Sigma V^\\top` with :math:`\\rho = \\min(k, N)`,
-
-    .. math::
-
-        \\texttt{sqrt\\_transform}(s) = (I_k + s s^\\top)^{-1/2}
-        = I_k + U\\bigl((I_\\rho + \\Sigma^2)^{-1/2} - I_\\rho\\bigr)U^\\top ,
-
-    which is symmetric, and exact at every rank: the second form is how it
-    is computed, and it is what this function returns for any correct thin
-    SVD, elementwise.
-
-    In conditioning, ``s`` is the whitened factor :math:`S = (W F_v)^\\top`
-    of the observed block, and multiplying the other block's factor on the
-    right by the result gives the posterior covariance exactly,
-
-    .. math::
-
-        \\bigl(F_u T\\bigr)\\bigl(F_u T\\bigr)^\\top = C_{uu} - K C_{vu} ,
-
-    an identity in exact arithmetic rather than an approximation. Neither
-    :math:`s s^\\top` nor :math:`s^\\top s` is formed.
-
-    Parameters
-    ----------
-    s
-        Array of shape ``(k, N)``, exactly 2-D, both sizes at least 1. No
-        batch axes, and no centering requirement: on general ``s`` the result
-        is still :math:`(I + ss^\\top)^{-1/2}`.
-
-    Returns
-    -------
-    Array
-        Shape ``(k, k)``, symmetric to round-off.
-
-    Raises
-    ------
-    ValueError
-        If ``s`` is not 2-D with positive sizes. In debug mode, also if it
-        is not finite.
-
-    Notes
-    -----
-    :math:`T\\mathbf{1} = \\mathbf{1}` — so a centred factor stays centred
-    and the posterior mean is not silently shifted — follows from
-    :math:`s^\\top \\mathbf{1} = 0`, which holds exactly when the factor the
-    whitening came from is centred. A factor read off a sample set is, which
-    is what makes :meth:`EmpiricalJoint.transform_update` a sample-to-sample
-    map. On general ``s``, :math:`T\\mathbf{1}` is whatever that matrix makes
-    it.
-
-    Differentiability carries the caveat documented on
-    :func:`gain_weights`; restoring gradients everywhere would need a
-    Fréchet derivative of :math:`A \\mapsto A^{-1/2}`, materially more work
-    than that function's rational form, and no conditioning path in this
-    layer requires it.
-    """
-    s = jnp.asarray(s)
-    if s.ndim != 2 or any(size < 1 for size in s.shape):
-        raise ValueError(
-            f"sqrt_transform: expected s of shape (k, N), exactly 2-D with both "
-            f"sizes at least 1, got shape {s.shape}"
-        )
-    _check_finite("sqrt_transform", "s", s)
-    U, sigma, _ = _thin_svd(s)
-    return _transform_from_svd(U, sigma, s.shape[0])
+#: Why a conditioning result goes non-finite, which the check cannot itself see.
+_SINGULAR_NOISE = (
+    "The likeliest cause is a singular noise_cov: whiten's precondition is "
+    "that the noise covariance is nonsingular, and nothing here can detect a "
+    "violation before the fact."
+)
 
 
 # ---------------------------------------------------------------------------
@@ -299,7 +150,7 @@ class Gaussian:
 
     Each method requires specific operations of the covariance, and an
     unsupported one raises the operator layer's
-    :class:`~pyeki.linalg.UnsupportedOpError` from the inner call. ``cov`` is
+    :class:`~enskit.linalg.UnsupportedOpError` from the inner call. ``cov`` is
     a public field, so gate on ``gaussian.cov.supports("factor")`` exactly as
     you would on an operator.
 
@@ -308,7 +159,7 @@ class Gaussian:
     mean
         The mean, a ``(n,)`` array.
     cov
-        The covariance, a :class:`~pyeki.linalg.PSDLinOp` of side ``n``.
+        The covariance, a :class:`~enskit.linalg.PSDLinOp` of side ``n``.
 
     Raises
     ------
@@ -317,7 +168,7 @@ class Gaussian:
         ``cov`` is a vmapped family. In debug mode, also if ``mean`` is not
         finite.
     TypeError
-        If ``cov`` is not a :class:`~pyeki.linalg.PSDLinOp`.
+        If ``cov`` is not a :class:`~enskit.linalg.PSDLinOp`.
     """
 
     mean: Array
@@ -327,7 +178,7 @@ class Gaussian:
         _check_field_rank("Gaussian", "mean", self.mean, 1)
         if not isinstance(self.cov, PSDLinOp):
             raise TypeError(
-                f"Gaussian.cov: must be a pyeki.linalg.PSDLinOp, got "
+                f"Gaussian.cov: must be an enskit.linalg.PSDLinOp, got "
                 f"{type(self.cov).__name__}"
             )
         if self.cov.batch_shape != ():
@@ -371,7 +222,7 @@ class Gaussian:
         Gaussian
             Mean the sample mean; covariance the empirical covariance with
             the package's :math:`J-1` divisor, held as a
-            :class:`~pyeki.linalg.PSDLowRank` whose factor is
+            :class:`~enskit.linalg.PSDLowRank` whose factor is
             :math:`A^\\top/\\sqrt{J-1}`.
 
         Raises
@@ -391,14 +242,14 @@ class Gaussian:
 
         Its rank is at most :math:`J-1`, so it is singular whenever
         :math:`J - 1 < n` — the usual regime for this layer — and
-        :class:`~pyeki.linalg.PSDLowRank` accordingly provides ``diag`` and
+        :class:`~enskit.linalg.PSDLowRank` accordingly provides ``diag`` and
         ``factor`` and withholds ``solve``, ``whiten`` and ``logdet``.
         :meth:`log_density` therefore raises
-        :class:`~pyeki.linalg.UnsupportedOpError` on the result, which is
+        :class:`~enskit.linalg.UnsupportedOpError` on the result, which is
         correct rather than restrictive: a density against a singular
         covariance is not defined.
 
-        Anomalies are formed with the same centring the conditioning methods
+        Anomalies are formed with the same centering the conditioning methods
         use, so identical samples give exactly zero spread rather than
         round-off, and the cancellation is governed by the spread rather than
         by the magnitude.
@@ -614,7 +465,7 @@ class GaussianJoint:
     chosen independently, one of :math:`C_{uu}` and one of :math:`C_{vv}`,
     would say nothing at all about :math:`C_{uv}`.
 
-    Both row blocks are :class:`~pyeki.linalg.LinOp` s, so a structured
+    Both row blocks are :class:`~enskit.linalg.LinOp` s, so a structured
     covariance stays structured: :meth:`condition` applies :math:`F_u` only
     through ``matvec`` and ``matmat``, and materializes :math:`F_v` as an
     ``(N, k)`` array, which the singular value decomposition needs.
@@ -642,10 +493,10 @@ class GaussianJoint:
         The mean :math:`\\bar v` of the observed block, a ``(N,)`` array.
         Keyword-only.
     u_factor
-        The row block :math:`F_u`, a :class:`~pyeki.linalg.LinOp` of shape
+        The row block :math:`F_u`, a :class:`~enskit.linalg.LinOp` of shape
         ``(P, k)``. Keyword-only.
     v_factor
-        The row block :math:`F_v`, a :class:`~pyeki.linalg.LinOp` of shape
+        The row block :math:`F_v`, a :class:`~enskit.linalg.LinOp` of shape
         ``(N, k)``, sharing the latent width ``k``. Keyword-only.
 
     Raises
@@ -655,7 +506,7 @@ class GaussianJoint:
         own mean, if the two factors disagree on ``k``, or if any field is a
         vmapped family. In debug mode, also if either mean is not finite.
     TypeError
-        If either factor is not a :class:`~pyeki.linalg.LinOp`, or either mean
+        If either factor is not a :class:`~enskit.linalg.LinOp`, or either mean
         has no shape to check.
 
     Notes
@@ -722,8 +573,8 @@ class GaussianJoint:
             The two means, ``(P,)`` and ``(N,)`` arrays.
         u_factor, v_factor
             The two row blocks, of shapes ``(P, k)`` and ``(N, k)``. A
-            :class:`~pyeki.linalg.LinOp`, or an array, which is wrapped as a
-            :class:`~pyeki.linalg.Dense`.
+            :class:`~enskit.linalg.LinOp`, or an array, which is wrapped as a
+            :class:`~enskit.linalg.Dense`.
 
         Returns
         -------
@@ -795,7 +646,7 @@ class GaussianJoint:
 
         Notes
         -----
-        The factor this builds is **centred**, :math:`F\\mathbf{1}_J = 0`,
+        The factor this builds is **centered**, :math:`F\\mathbf{1}_J = 0`,
         because anomalies sum to zero. That is what makes the latent index a
         sample index and lets :class:`EmpiricalJoint` read updated samples
         off a conditioned factor; see
@@ -848,7 +699,7 @@ class GaussianJoint:
             The marginal over :math:`u`, a :class:`Gaussian` whose
             covariance supports ``factor``.
         linear_map
-            The map :math:`G`, a :class:`~pyeki.linalg.LinOp` of shape
+            The map :math:`G`, a :class:`~enskit.linalg.LinOp` of shape
             ``(N, P)``.
 
         Returns
@@ -863,7 +714,7 @@ class GaussianJoint:
             If ``u_marginal.cov`` does not support ``factor``.
         TypeError
             If ``u_marginal`` is not a :class:`Gaussian`, or ``linear_map``
-            is not a :class:`~pyeki.linalg.LinOp`.
+            is not a :class:`~enskit.linalg.LinOp`.
         ValueError
             If ``linear_map``'s input size is not ``u_marginal.dim``, or if
             either argument is a vmapped family.
@@ -884,12 +735,12 @@ class GaussianJoint:
         if not isinstance(u_marginal, Gaussian):
             raise TypeError(
                 f"GaussianJoint.from_linear_map: u_marginal must be a "
-                f"pyeki.gauss.Gaussian, got {type(u_marginal).__name__}"
+                f"enskit.gauss.Gaussian, got {type(u_marginal).__name__}"
             )
         if not isinstance(linear_map, LinOp):
             raise TypeError(
                 f"GaussianJoint.from_linear_map: linear_map must be a "
-                f"pyeki.linalg.LinOp, got {type(linear_map).__name__}"
+                f"enskit.linalg.LinOp, got {type(linear_map).__name__}"
             )
         _check_not_vmap_family(u_marginal, "as the u_marginal of a GaussianJoint")
         if linear_map.batch_shape != ():
@@ -944,7 +795,7 @@ class GaussianJoint:
     def u_marginal(self) -> Gaussian:
         """The marginal :math:`\\mathcal{N}(\\bar u, F_u F_u^\\top)` over :math:`u`.
 
-        The covariance is a :class:`~pyeki.linalg.PSDLowRank` holding
+        The covariance is a :class:`~enskit.linalg.PSDLowRank` holding
         :math:`F_u`, so its rank is at most :math:`k` and it materializes
         the factor as a ``(P, k)`` array. It supports
         :meth:`Gaussian.sample` and ``diag``, and not
@@ -960,7 +811,7 @@ class GaussianJoint:
         The *noise-free* marginal: it is the distribution of :math:`v`, not
         of an observation of it, so the observation noise :math:`R` does not
         appear. As with :attr:`u_marginal`, the covariance is a
-        :class:`~pyeki.linalg.PSDLowRank`.
+        :class:`~enskit.linalg.PSDLowRank`.
         """
         _check_not_vmap_family(self, "v_marginal")
         return Gaussian(self.v_mean, PSDLowRank(self.v_factor.to_dense()))
@@ -989,7 +840,7 @@ class GaussianJoint:
 
         So conditioning multiplies the joint factor's :math:`u` block on the
         right by :math:`T`, and the posterior is returned in that form: a
-        :class:`~pyeki.linalg.PSDLowRank` holding the ``(P, k)`` array
+        :class:`~enskit.linalg.PSDLowRank` holding the ``(P, k)`` array
         :math:`F_u T`, never a dense :math:`P \\times P` matrix.
 
         Parameters
@@ -998,7 +849,7 @@ class GaussianJoint:
             The observation, a ``(N,)`` array.
         noise_cov
             The observation-noise covariance :math:`R`, a
-            :class:`~pyeki.linalg.PSDLinOp` of side ``N`` supporting
+            :class:`~enskit.linalg.PSDLinOp` of side ``N`` supporting
             ``whiten``.
 
         Returns
@@ -1011,7 +862,7 @@ class GaussianJoint:
         UnsupportedOpError
             If ``noise_cov`` does not support ``whiten``.
         TypeError
-            If ``noise_cov`` is not a :class:`~pyeki.linalg.PSDLinOp`.
+            If ``noise_cov`` is not a :class:`~enskit.linalg.PSDLinOp`.
         ValueError
             If ``y`` is not ``(N,)``, ``noise_cov``'s side is not ``N``,
             this or ``noise_cov`` is a vmapped family, or — in debug mode —
@@ -1024,7 +875,7 @@ class GaussianJoint:
         it is singular whenever :math:`k < P`. The posterior therefore
         supports :meth:`Gaussian.sample` — the factor is the stored
         representation — but not :meth:`Gaussian.log_density`, which raises
-        :class:`~pyeki.linalg.UnsupportedOpError` from the covariance. When
+        :class:`~enskit.linalg.UnsupportedOpError` from the covariance. When
         :math:`k \\ge P` the density exists mathematically; the static
         capability choice still raises, and a caller wanting it densifies
         the covariance deliberately.
@@ -1103,7 +954,7 @@ class GaussianJoint:
             The observation, a ``(N,)`` array. Keyword-only.
         noise_cov
             The observation-noise covariance :math:`R`, a
-            :class:`~pyeki.linalg.PSDLinOp` of side ``N`` supporting
+            :class:`~enskit.linalg.PSDLinOp` of side ``N`` supporting
             ``whiten``. Keyword-only.
 
         Returns
@@ -1117,7 +968,7 @@ class GaussianJoint:
         UnsupportedOpError
             If ``noise_cov`` does not support ``whiten``.
         TypeError
-            If ``noise_cov`` is not a :class:`~pyeki.linalg.PSDLinOp`.
+            If ``noise_cov`` is not a :class:`~enskit.linalg.PSDLinOp`.
         ValueError
             If any operand's trailing size is wrong, if ``noise_cov``'s side
             is not ``N``, if this or ``noise_cov`` is a vmapped family, or —
@@ -1235,7 +1086,6 @@ class GaussianJoint:
         )
         transform = _transform_from_svd(U, sigma, self.latent_dim)
         return mean, self.u_factor.matmat(transform)
-
 
 
 # ---------------------------------------------------------------------------
@@ -1386,7 +1236,7 @@ class EmpiricalJoint:
         why the two updates below live here and not on the joint.
 
         The joint is derived on each call, not stored. It is an
-        :math:`O(J(P+N))` centre-and-scale that fuses under ``jit``, and
+        :math:`O(J(P+N))` center-and-scale that fuses under ``jit``, and
         holding both representations would hold the same numbers twice.
         """
         _check_not_vmap_family(self, "to_gaussian_joint")
@@ -1399,7 +1249,7 @@ class EmpiricalJoint:
 
         The posterior of the fitted joint Gaussian, read back as samples.
         Conditioning multiplies the factor on the right by :math:`T =
-        \\texttt{sqrt\\_transform}(S)`, and because that factor is centred
+        \\texttt{sqrt\\_transform}(S)`, and because that factor is centered
         the conditioned one is too, so its columns are again a sample set:
 
         .. math::
@@ -1423,7 +1273,7 @@ class EmpiricalJoint:
             The observation, a ``(N,)`` array.
         noise_cov
             The observation-noise covariance :math:`R`, a
-            :class:`~pyeki.linalg.PSDLinOp` of side ``N`` supporting
+            :class:`~enskit.linalg.PSDLinOp` of side ``N`` supporting
             ``whiten``.
 
         Returns
@@ -1437,7 +1287,7 @@ class EmpiricalJoint:
         UnsupportedOpError
             If ``noise_cov`` does not support ``whiten``.
         TypeError
-            If ``noise_cov`` is not a :class:`~pyeki.linalg.PSDLinOp`.
+            If ``noise_cov`` is not a :class:`~enskit.linalg.PSDLinOp`.
         ValueError
             If ``y`` is not ``(N,)``, ``noise_cov``'s side is not ``N``,
             this or ``noise_cov`` is a vmapped family, or — in debug mode —
@@ -1448,7 +1298,7 @@ class EmpiricalJoint:
         This is exactly ``to_gaussian_joint().condition(y, noise_cov)``
         followed by the reading above, sharing that method's single
         decomposition. It is a method here, rather than a function of the
-        returned posterior, because the reading is valid only for a centred
+        returned posterior, because the reading is valid only for a centered
         factor. On a joint built any other way it returns, silently, a
         sample set whose mean is displaced by :math:`\\sqrt{k-1}\\,F_uT
         \\mathbf{1}_k/k` and whose sample covariance falls short of the
@@ -1497,7 +1347,7 @@ class EmpiricalJoint:
             The observation, a ``(N,)`` array.
         noise_cov
             The observation-noise covariance :math:`R`, a
-            :class:`~pyeki.linalg.PSDLinOp` of side ``N`` supporting
+            :class:`~enskit.linalg.PSDLinOp` of side ``N`` supporting
             ``whiten``.
 
         Returns
@@ -1511,7 +1361,7 @@ class EmpiricalJoint:
         UnsupportedOpError
             If ``noise_cov`` does not support ``whiten``.
         TypeError
-            If ``noise_cov`` is not a :class:`~pyeki.linalg.PSDLinOp`.
+            If ``noise_cov`` is not a :class:`~enskit.linalg.PSDLinOp`.
         ValueError
             If ``y`` is not ``(N,)``, ``noise_cov``'s side is not ``N``,
             this or ``noise_cov`` is a vmapped family, or — in debug mode —
@@ -1579,6 +1429,162 @@ class EmpiricalJoint:
 
 
 # ---------------------------------------------------------------------------
+# the conditioning primitives
+# ---------------------------------------------------------------------------
+
+
+def gain_weights(s: Array, b: Array) -> Array:
+    """Sample weights for a whitened residual: the shared conditioning core.
+
+    A pure matrix function of its arguments — no divisor, no whitening and no
+    randomness folded in. For the thin SVD :math:`s = U\\Sigma V^\\top`,
+
+    .. math::
+
+        \\texttt{gain\\_weights}(s, b)
+        = U \\operatorname{diag}\\!\\Bigl(\\frac{\\sigma_i}{1+\\sigma_i^2}\\Bigr)
+          V^\\top b
+        = s\\,(s^\\top s + I_N)^{-1} b ,
+
+    the second form showing that the result is a function of ``s`` alone,
+    invariant to the SVD's sign and degenerate-rotation freedom.
+
+    In conditioning, ``s`` is the whitened factor
+    :math:`S = (W F_v)^\\top` of the observed block and ``b`` a whitened
+    residual :math:`W r`, and the returned weights give the gain applied to
+    that residual as a combination of the other block's factor columns,
+    :math:`K r = F_u w`. The multipliers are bounded by
+    :math:`\\sigma/(1+\\sigma^2) \\le 1/2` for every :math:`\\sigma \\ge 0`,
+    so the gain cannot blow up however collapsed or ill-conditioned
+    :math:`s` becomes, and there is no regularization parameter to tune.
+
+    Parameters
+    ----------
+    s
+        Array of shape ``(k, N)``, exactly 2-D, both sizes at least 1. It
+        plays the operator's role and carries no batch axes; a family of
+        local analyses is a :func:`jax.vmap` over this function.
+    b
+        Array of shape ``(..., N)`` — whitened residuals along the trailing
+        axis, any number of leading batch axes, carried through.
+
+    Returns
+    -------
+    Array
+        Shape ``(..., k)``, the batch axes of ``b`` preserved.
+
+    Raises
+    ------
+    ValueError
+        If ``s`` is not 2-D with positive sizes, or ``b``'s trailing axis is
+        not ``N``. In debug mode, also if either is not finite.
+
+    Notes
+    -----
+    One SVD per call: batch the residuals of an update into a single call
+    rather than looping, since the :math:`J` per-sample residuals of a
+    stochastic update are one ``(J, N)`` operand.
+
+    Callers own the semantics of ``s`` and ``b``. The function cannot check
+    that they are whitened and read off a single joint factor as
+    conditioning requires, which is why the methods of
+    :class:`GaussianJoint` — where those conventions are enforced — are the
+    default interface and this is the escape hatch.
+
+    Differentiable wherever the singular values of ``s`` are distinct and
+    nonzero. At exactly repeated or exactly zero singular values — an
+    exactly collapsed ``s``, or the zero-padded columns a masked local
+    analysis may produce — the SVD's gradient is ``nan`` even though this
+    function is smooth there, equaling the rational form above. The
+    float-generic degeneracy of mean-centering (:math:`\\sigma_{\\min} \\sim
+    10^{-16}` when :math:`N \\ge k`) is not an exact tie and differentiates
+    finitely.
+    """
+    s = jnp.asarray(s)
+    if s.ndim != 2 or any(size < 1 for size in s.shape):
+        raise ValueError(
+            f"gain_weights: expected s of shape (k, N), exactly 2-D with both "
+            f"sizes at least 1, got shape {s.shape}"
+        )
+    b = _check_batched_operand("gain_weights", "b", b, s.shape[1])
+    _check_finite("gain_weights", "s", s)
+    _check_finite("gain_weights", "b", b)
+    U, sigma, Vt = _thin_svd(s)
+    return _weights_from_svd(U, sigma, Vt, b)
+
+
+def sqrt_transform(s: Array) -> Array:
+    """The deterministic square-root update transform: the shared conditioning core.
+
+    A pure matrix function of its argument. For the thin SVD
+    :math:`s = U\\Sigma V^\\top` with :math:`\\rho = \\min(k, N)`,
+
+    .. math::
+
+        \\texttt{sqrt\\_transform}(s) = (I_k + s s^\\top)^{-1/2}
+        = I_k + U\\bigl((I_\\rho + \\Sigma^2)^{-1/2} - I_\\rho\\bigr)U^\\top ,
+
+    which is symmetric, and exact at every rank: the second form is how it
+    is computed, and it is what this function returns for any correct thin
+    SVD, elementwise.
+
+    In conditioning, ``s`` is the whitened factor :math:`S = (W F_v)^\\top`
+    of the observed block, and multiplying the other block's factor on the
+    right by the result gives the posterior covariance exactly,
+
+    .. math::
+
+        \\bigl(F_u T\\bigr)\\bigl(F_u T\\bigr)^\\top = C_{uu} - K C_{vu} ,
+
+    an identity in exact arithmetic rather than an approximation. Neither
+    :math:`s s^\\top` nor :math:`s^\\top s` is formed.
+
+    Parameters
+    ----------
+    s
+        Array of shape ``(k, N)``, exactly 2-D, both sizes at least 1. No
+        batch axes, and no centering requirement: on general ``s`` the result
+        is still :math:`(I + ss^\\top)^{-1/2}`.
+
+    Returns
+    -------
+    Array
+        Shape ``(k, k)``, symmetric to round-off.
+
+    Raises
+    ------
+    ValueError
+        If ``s`` is not 2-D with positive sizes. In debug mode, also if it
+        is not finite.
+
+    Notes
+    -----
+    :math:`T\\mathbf{1} = \\mathbf{1}` — so a centered factor stays centered
+    and the posterior mean is not silently shifted — follows from
+    :math:`s^\\top \\mathbf{1} = 0`, which holds exactly when the factor the
+    whitening came from is centered. A factor read off a sample set is, which
+    is what makes :meth:`EmpiricalJoint.transform_update` a sample-to-sample
+    map. On general ``s``, :math:`T\\mathbf{1}` is whatever that matrix makes
+    it.
+
+    Differentiability carries the caveat documented on
+    :func:`gain_weights`; restoring gradients everywhere would need a
+    Fréchet derivative of :math:`A \\mapsto A^{-1/2}`, materially more work
+    than that function's rational form, and no conditioning path in this
+    layer requires it.
+    """
+    s = jnp.asarray(s)
+    if s.ndim != 2 or any(size < 1 for size in s.shape):
+        raise ValueError(
+            f"sqrt_transform: expected s of shape (k, N), exactly 2-D with both "
+            f"sizes at least 1, got shape {s.shape}"
+        )
+    _check_finite("sqrt_transform", "s", s)
+    U, sigma, _ = _thin_svd(s)
+    return _transform_from_svd(U, sigma, s.shape[0])
+
+
+# ---------------------------------------------------------------------------
 # private helpers: validation, and the conditioning kernel
 # ---------------------------------------------------------------------------
 
@@ -1612,7 +1618,7 @@ def _check_field_rank(cls_name: str, field_name: str, value, core_ndim: int) -> 
     if ndim != core_ndim:
         raise ValueError(
             f"{cls_name}.{field_name}: expected an array of rank {core_ndim}, got "
-            f"shape {value.shape}. Objects in pyeki.gauss are unbatched; build a "
+            f"shape {value.shape}. Objects in enskit.gauss are unbatched; build a "
             f"family with jax.vmap over the pytree, not with extra leading axes."
         )
     if any(size < 1 for size in value.shape):
@@ -1630,7 +1636,7 @@ def _check_factor_field(
     Raises
     ------
     TypeError
-        If the field is not a :class:`~pyeki.linalg.LinOp`. The row blocks
+        If the field is not a :class:`~enskit.linalg.LinOp`. The row blocks
         of a joint factor are operators, so that a structured covariance
         keeps its structure; an array is wrapped by
         :meth:`GaussianJoint.from_factors`, not here.
@@ -1640,8 +1646,8 @@ def _check_factor_field(
     """
     if not isinstance(value, LinOp):
         raise TypeError(
-            f"{cls_name}.{field_name}: must be a pyeki.linalg.LinOp, got "
-            f"{type(value).__name__}. Wrap an array with pyeki.linalg.Dense, or "
+            f"{cls_name}.{field_name}: must be an enskit.linalg.LinOp, got "
+            f"{type(value).__name__}. Wrap an array with enskit.linalg.Dense, or "
             f"use {cls_name}.from_factors, which wraps it for you."
         )
     if value.batch_shape != ():
@@ -1686,7 +1692,7 @@ def _as_factor(where: str, name: str, value) -> LinOp:
         # the diagnosis. The base class of the category always accepts a string.
         kind = ValueError if isinstance(e, ValueError) else TypeError
         raise kind(
-            f"{where}: {name} must be a pyeki.linalg.LinOp of shape (n, k), "
+            f"{where}: {name} must be an enskit.linalg.LinOp of shape (n, k), "
             f"or an array of that shape"
         ) from e
 
@@ -1732,7 +1738,7 @@ def _validate_conditioning_call(where: str, y, noise_cov, v_dim: int) -> Array:
     """
     if not isinstance(noise_cov, PSDLinOp):
         raise TypeError(
-            f"{where}: noise_cov must be a pyeki.linalg.PSDLinOp, got "
+            f"{where}: noise_cov must be an enskit.linalg.PSDLinOp, got "
             f"{type(noise_cov).__name__}"
         )
     if noise_cov.batch_shape != ():
@@ -1845,14 +1851,6 @@ def _check_finite(where: str, name: str, x, *, cause: str | None = None) -> None
     )
 
 
-#: Why a conditioning result goes non-finite, which the check cannot itself see.
-_SINGULAR_NOISE = (
-    "The likeliest cause is a singular noise_cov: whiten's precondition is "
-    "that the noise covariance is nonsingular, and nothing here can detect a "
-    "violation before the fact."
-)
-
-
 def _centered(x: Array) -> Array:
     """Deviations from the sample mean over the sample axis, formed stably.
 
@@ -1908,7 +1906,7 @@ def _transform_from_svd(U: Array, sigma: Array, latent_dim: int) -> Array:
     whenever :math:`\\rho < k`.
 
     :math:`T\\mathbf{1} = \\mathbf{1}` survives floating point for a
-    centred factor because the modifier decays *quadratically*: the
+    centered factor because the modifier decays *quadratically*: the
     numerically-zero singular value's column of :math:`U` need not be
     orthogonal to :math:`\\mathbf{1}`, but its modifier is
     :math:`O(\\sigma_i^2)`, so the induced mean shift is
@@ -1921,4 +1919,3 @@ def _transform_from_svd(U: Array, sigma: Array, latent_dim: int) -> Array:
     # (k, rho) @ (rho, k): both operands are exactly 2-D, so this is the
     # plain matrix product, not a batch of vectors.
     return jnp.eye(latent_dim, dtype=U.dtype) + (U * modifier) @ U.swapaxes(-1, -2)
-

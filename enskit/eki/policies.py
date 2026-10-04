@@ -30,7 +30,7 @@ shipped                               is
 :class:`AdaptiveMisfitSchedule`       adaptive tempering on the noise level
 :class:`DiscrepancyStop`              Morozov's discrepancy principle
 :class:`MultiplicativeInflation`      scales the ensemble's anomalies
-:class:`AdditiveInflation`            adds centred draws from a covariance
+:class:`AdditiveInflation`            adds centered draws from a covariance
 ===================================== ======================================
 
 Conventions shared by everything in the module:
@@ -39,23 +39,23 @@ Conventions shared by everything in the module:
   are arrays whose shapes coincide whenever :math:`P = N`, so a positional
   protocol would let ``ensemble`` and ``predictions`` be transposed with no
   error at all. Implementations **should** also accept and ignore ``**_``,
-  which is the layer's forwards-compatibility seam.
+  which is the layer's forward-compatibility seam.
 - **Policies are pure and stateless.** A policy must be a pure function of
   its arguments and its own frozen fields, and must not carry step
   state — which is what makes a run resumable from an
-  :class:`~pyeki.eki.EKIState` alone, and why a schedule receives the step
+  :class:`~enskit.eki.EKIState` alone, and why a schedule receives the step
   index instead of counting calls.
 - **Policies consume their key whole.** No policy splits, stores or advances
   a key; splitting is the driver's.
 
 Notes
 -----
-The behaviour of this module is specified by the "Ensemble Kalman Inversion
+The behavior of this module is specified by the "Ensemble Kalman Inversion
 contract" page of the documentation, which is normative, and the sources the
 shipped policies reproduce are listed there.
 
 This module implements no covariance arithmetic of its own. The two update
-rules are two lines over :mod:`pyeki.gauss`, and the entire numerical content
+rules are two lines over :mod:`enskit.gauss`, and the entire numerical content
 of an update — the whitened-SVD kernel, the bounded gain multiplier, the
 identity-completed square-root transform, the graceful degradation at zero
 prediction anomalies — belongs to that layer.
@@ -101,57 +101,6 @@ __all__ = [
 # ---------------------------------------------------------------------------
 # the protocols
 # ---------------------------------------------------------------------------
-
-
-class EnsembleUpdate(Protocol):
-    """One step of the ladder: the move that an increment produces.
-
-    An implementation maps an ensemble, its predictions, the observation, the
-    **base** noise covariance and a 0-d increment to a new ensemble. The two
-    shipped rules do so by conditioning with ``noise_cov / increment``.
-
-    Requirements on any implementation:
-
-    - It receives both the increment and the absolute level, and the two mean
-      different things: ``increment`` is how far this step moves,
-      ``beta`` is where the step starts, and ``step`` is which step
-      it is. The shipped rules use only the increment.
-    - It consumes the key whole and is a deterministic function of its
-      arguments including the key. A deterministic rule ignores the key.
-    - It is ``jit``- and ``vmap``-safe with static shapes, and holds any
-      arrays it needs as pytree data so that it can be passed through a trace
-      boundary.
-
-    Notes
-    -----
-    A rule that varies with ``beta`` or ``step`` — an annealed threshold, a
-    decaying damping — breaks the telescoping identity the layer's exactness
-    claim rests on, and the layer states that consequence rather than
-    preventing it. Withholding the arguments would only push callers into
-    keeping a counter inside the rule, which violates purity and silently
-    breaks resumption.
-
-    The base noise covariance and the increment are passed separately, rather
-    than as the pre-scaled per-step operator, so that a rule needing the
-    increment as a step size in its own right — a Langevin-type sampler — has
-    it.
-    """
-
-    def __call__(
-        self,
-        key,
-        *,
-        ensemble: Array,
-        predictions: Array,
-        y: Array,
-        noise_cov: PSDLinOp,
-        increment: Array,
-        step: int,
-        beta: Array,
-        **_,
-    ) -> Array:
-        """Return the new ``(J, P)`` ensemble."""
-        ...
 
 
 class Schedule(Protocol):
@@ -215,6 +164,57 @@ class StoppingRule(Protocol):
         ...
 
 
+class EnsembleUpdate(Protocol):
+    """One step of the ladder: the move that an increment produces.
+
+    An implementation maps an ensemble, its predictions, the observation, the
+    **base** noise covariance and a 0-d increment to a new ensemble. The two
+    shipped rules do so by conditioning with ``noise_cov / increment``.
+
+    Requirements on any implementation:
+
+    - It receives both the increment and the absolute level, and the two mean
+      different things: ``increment`` is how far this step moves,
+      ``beta`` is where the step starts, and ``step`` is which step
+      it is. The shipped rules use only the increment.
+    - It consumes the key whole and is a deterministic function of its
+      arguments including the key. A deterministic rule ignores the key.
+    - It is ``jit``- and ``vmap``-safe with static shapes, and holds any
+      arrays it needs as pytree data so that it can be passed through a trace
+      boundary.
+
+    Notes
+    -----
+    A rule that varies with ``beta`` or ``step`` — an annealed threshold, a
+    decaying damping — breaks the telescoping identity the layer's exactness
+    claim rests on, and the layer states that consequence rather than
+    preventing it. Withholding the arguments would only push callers into
+    keeping a counter inside the rule, which violates purity and silently
+    breaks resumption.
+
+    The base noise covariance and the increment are passed separately, rather
+    than as the pre-scaled per-step operator, so that a rule needing the
+    increment as a step size in its own right — a Langevin-type sampler — has
+    it.
+    """
+
+    def __call__(
+        self,
+        key,
+        *,
+        ensemble: Array,
+        predictions: Array,
+        y: Array,
+        noise_cov: PSDLinOp,
+        increment: Array,
+        step: int,
+        beta: Array,
+        **_,
+    ) -> Array:
+        """Return the new ``(J, P)`` ensemble."""
+        ...
+
+
 class Inflation(Protocol):
     """A shape-preserving transformation applied before each forward evaluation.
 
@@ -258,7 +258,7 @@ class TransformUpdate:
     """The deterministic square-root update; ignores the key. **The default.**
 
     Delegates to
-    :meth:`EmpiricalJoint.transform_update <pyeki.gauss.EmpiricalJoint.transform_update>`
+    :meth:`EmpiricalJoint.transform_update <enskit.gauss.EmpiricalJoint.transform_update>`
     with the tempered operator ``noise_cov / increment``. Holds no field.
 
     Notes
@@ -299,7 +299,7 @@ class PathwiseUpdate:
     """The stochastic perturbed-observation update; consumes the key.
 
     Delegates to
-    :meth:`EmpiricalJoint.pathwise_update <pyeki.gauss.EmpiricalJoint.pathwise_update>`
+    :meth:`EmpiricalJoint.pathwise_update <enskit.gauss.EmpiricalJoint.pathwise_update>`
     with the tempered operator ``noise_cov / increment``. Holds no field.
 
     Notes
@@ -331,20 +331,6 @@ class PathwiseUpdate:
     def __repr__(self) -> str:
         """As ``PathwiseUpdate()``."""
         return "PathwiseUpdate()"
-
-
-@jax.jit
-def _transform_update(ensemble, predictions, y, noise_cov, increment) -> Array:
-    return EmpiricalJoint(
-        u_samples=ensemble, v_samples=predictions
-    ).transform_update(y, noise_cov / increment)
-
-
-@jax.jit
-def _pathwise_update(key, ensemble, predictions, y, noise_cov, increment) -> Array:
-    return EmpiricalJoint(
-        u_samples=ensemble, v_samples=predictions
-    ).pathwise_update(key, y, noise_cov / increment)
 
 
 # ---------------------------------------------------------------------------
@@ -380,7 +366,7 @@ class FixedSchedule:
     Because it indexes the state's *cumulative* step, a fixed schedule
     resumes a partially-completed ladder correctly and treats a finished
     state as finished — see :meth:`EKIState.restart
-    <pyeki.eki.EKIState.restart>` before chaining one run onto another.
+    <enskit.eki.EKIState.restart>` before chaining one run onto another.
 
     Its ``repr`` summarizes rather than enumerates, since a 200-step
     optimization ladder would otherwise print 200 floats into every traceback
@@ -526,14 +512,14 @@ class AdaptiveESSSchedule:
 
     The construction is the standard ESS-based adaptive tempering of the
     sequential Monte Carlo literature, used here purely as a step-size
-    heuristic: pyEKI computes no importance weights, does no resampling, and
+    heuristic: EnsKit computes no importance weights, does no resampling, and
     makes no importance-sampling correctness claim.
 
     ``ess_fraction`` is bounded away from 1 because
     :math:`\\mathrm{ESS}(0)` evaluates to ``exp(log J)`` rather than exactly
     :math:`J`, so a fraction within round-off of 1 would make
     :math:`\\delta = 0` an invalid lower bracket. Its default of ``0.5`` is
-    pyEKI's choice rather than a canonical value; the tempering literature
+    EnsKit's choice rather than a canonical value; the tempering literature
     uses targets between about a third and a half, and a smaller target takes
     longer steps and fewer of them.
     """
@@ -700,7 +686,7 @@ class AdaptiveMisfitSchedule:
 
 @_pytree_dataclass
 class DiscrepancyStop:
-    """Morozov's discrepancy principle: stop once the centre fits to the noise.
+    """Morozov's discrepancy principle: stop once the center fits to the noise.
 
     Fires as soon as
 
@@ -709,7 +695,7 @@ class DiscrepancyStop:
         2\\,\\Phi(\\bar v) \\;\\le\\; \\tau^2 N ,
 
     where :math:`\\bar v` is the **mean prediction** and :math:`\\Phi(\\bar
-    v)` is the evaluation's ``centre_misfit``.
+    v)` is the evaluation's ``center_misfit``.
 
     Parameters
     ----------
@@ -726,7 +712,7 @@ class DiscrepancyStop:
     The scaling is the natural one. At the true parameter the whitened
     residual is the whitened noise, so :math:`2\\Phi` is a :math:`\\chi^2_N`
     variate with mean :math:`N` and standard deviation :math:`\\sqrt{2N}`:
-    :math:`\\tau = 1` stops when the centre's residual reaches the size the
+    :math:`\\tau = 1` stops when the center's residual reaches the size the
     noise alone explains in expectation, and
     :math:`\\tau^2 = 1 + k\\sqrt{2/N}` puts the threshold :math:`k` standard
     deviations above that, values up to about :math:`\\tau = 2` being the
@@ -761,7 +747,7 @@ class DiscrepancyStop:
     def __call__(self, evaluation: Evaluation) -> bool:
         """Whether :math:`2\\Phi(\\bar v) \\le \\tau^2 N`."""
         threshold = self.tau**2 * evaluation.v_dim
-        return bool(2.0 * evaluation.centre_misfit <= threshold)
+        return bool(2.0 * evaluation.center_misfit <= threshold)
 
     def __repr__(self) -> str:
         """As ``DiscrepancyStop(tau=1.0)``."""
@@ -842,7 +828,7 @@ class MultiplicativeInflation:
 
 @_pytree_dataclass
 class AdditiveInflation:
-    """Add centred draws from a covariance to the ensemble.
+    """Add centered draws from a covariance to the ensemble.
 
     With :math:`P` the parameter dimension and :math:`J` the ensemble size,
 
@@ -851,7 +837,7 @@ class AdditiveInflation:
         pert = Gaussian(jnp.zeros(P), cov).sample(key, J)
         ensemble + (pert - pert.mean(axis=0))
 
-    The perturbations are centred, so the ensemble mean is preserved exactly
+    The perturbations are centered, so the ensemble mean is preserved exactly
     and the empirical covariance is inflated by ``cov`` in expectation under
     the :math:`J-1` divisor. It is the only shipped mechanism that moves the
     ensemble out of the affine subspace its initial members span.
@@ -859,7 +845,7 @@ class AdditiveInflation:
     Parameters
     ----------
     cov
-        A :class:`~pyeki.linalg.PSDLinOp` of side :math:`P` supporting
+        A :class:`~enskit.linalg.PSDLinOp` of side :math:`P` supporting
         ``factor``. A scale is folded into the operator by the caller —
         ``AdditiveInflation(0.01 * prior.cov)`` — rather than carried as a
         second field.
@@ -867,7 +853,7 @@ class AdditiveInflation:
     Raises
     ------
     TypeError
-        If ``cov`` is not a :class:`~pyeki.linalg.PSDLinOp`.
+        If ``cov`` is not a :class:`~enskit.linalg.PSDLinOp`.
     ValueError
         If ``cov`` is a vmapped family.
     UnsupportedOpError
@@ -877,7 +863,7 @@ class AdditiveInflation:
     Notes
     -----
     Nothing is precomputed here, and nothing needs to be. Every call reaches
-    ``cov.factor()`` through :meth:`~pyeki.gauss.Gaussian.sample`, and the
+    ``cov.factor()`` through :meth:`~enskit.gauss.Gaussian.sample`, and the
     operator layer factorizes at construction, so ``factor()`` returns a
     stored factor rather than computing one — for every covariance this layer
     can be given.
@@ -888,7 +874,7 @@ class AdditiveInflation:
     def __post_init__(self) -> None:
         if not isinstance(self.cov, PSDLinOp):
             raise TypeError(
-                f"AdditiveInflation.cov: must be a pyeki.linalg.PSDLinOp, got "
+                f"AdditiveInflation.cov: must be an enskit.linalg.PSDLinOp, got "
                 f"{type(self.cov).__name__}"
             )
         if self.cov.batch_shape != ():
@@ -922,6 +908,25 @@ class AdditiveInflation:
             return "<AdditiveInflation (unprintable leaves)>"
 
 
+# ---------------------------------------------------------------------------
+# private: the updates' array work, the clamp, the criteria, the field checks
+# ---------------------------------------------------------------------------
+
+
+@jax.jit
+def _transform_update(ensemble, predictions, y, noise_cov, increment) -> Array:
+    return EmpiricalJoint(
+        u_samples=ensemble, v_samples=predictions
+    ).transform_update(y, noise_cov / increment)
+
+
+@jax.jit
+def _pathwise_update(key, ensemble, predictions, y, noise_cov, increment) -> Array:
+    return EmpiricalJoint(
+        u_samples=ensemble, v_samples=predictions
+    ).pathwise_update(key, y, noise_cov / increment)
+
+
 @jax.jit
 def _multiplicative_inflate(ensemble: Array, anomaly_factor: Array) -> Array:
     return jnp.mean(ensemble, axis=-2) + anomaly_factor * _anomalies(ensemble)
@@ -931,11 +936,6 @@ def _multiplicative_inflate(ensemble: Array, anomaly_factor: Array) -> Array:
 def _additive_inflate(cov, key, ensemble, n_members: int, u_dim: int) -> Array:
     pert = Gaussian(jnp.zeros(u_dim), cov).sample(key, n_members)
     return ensemble + (pert - pert.mean(axis=0))
-
-
-# ---------------------------------------------------------------------------
-# private: the clamp, the two criteria, and the shared field checks
-# ---------------------------------------------------------------------------
 
 
 def _bracket_top(schedule, beta: Array) -> Array:
@@ -971,7 +971,7 @@ def _clamp(schedule, unclamped: Array, beta: Array) -> Array:
 def _bisect_ess(misfits: Array, delta_hi: Array, target, n_bisect: int) -> Array:
     """Bisect ``[0, delta_hi]`` for the largest increment meeting the target.
 
-    The cap-binds case is folded in **branchlessly**, by initialising ``lo``
+    The cap-binds case is folded in **branchlessly**, by initializing ``lo``
     to ``delta_hi`` when the top of the bracket already meets the target and
     letting the loop run unchanged. That is not an optimization: without it a
     degenerate ensemble reaches the largest allowed step only to

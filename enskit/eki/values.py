@@ -18,21 +18,21 @@ object                       holds
 Conventions shared by everything in the module:
 
 - **The first three are unbatched frozen pytrees**, exactly like operators
-  and the classes of :mod:`pyeki.gauss`: they compare by identity, they are
+  and the classes of :mod:`enskit.gauss`: they compare by identity, they are
   never valid ``static_argnums``, and a pytree reconstruction with batched
   leaves produces a *vmapped family*, which reports its ``batch_shape`` and
   refuses every method and array-computing property. :class:`EKIResult` is
   the exception — it is a report, never an argument to traced code, so it is
   a plain frozen dataclass.
 - **Ensembles are stored row-wise**, a ``(J, dim)`` array, one member per
-  row, as in :mod:`pyeki.gauss`.
+  row, as in :mod:`enskit.gauss`.
 - **A run's status is one of three strings**, exported as the constants
   :data:`SCHEDULE_EXHAUSTED`, :data:`STOPPING_RULE` and :data:`INTERRUPTED`
   so that a comparison cannot be misspelled.
 
 Notes
 -----
-The behaviour of this module is specified by the "Ensemble Kalman Inversion
+The behavior of this module is specified by the "Ensemble Kalman Inversion
 contract" page of the documentation, which is normative.
 
 Every field of :class:`HistoryRecord` is a 0-d array, ``step`` and
@@ -41,7 +41,7 @@ records with different ``step`` values would have different treedefs and
 :func:`jax.tree.map` across a history would raise instead of stacking. The
 history is the one collection in the package meant to be stacked, so its
 element type must be homogeneous as a pytree. :attr:`Evaluation.step` stays a
-static ``int`` for the opposite reason: :class:`~pyeki.eki.FixedSchedule`
+static ``int`` for the opposite reason: :class:`~enskit.eki.FixedSchedule`
 indexes a Python tuple with it, which a traced value cannot do.
 """
 from __future__ import annotations
@@ -81,7 +81,7 @@ SCHEDULE_EXHAUSTED = "schedule_exhausted"
 STOPPING_RULE = "stopping_rule"
 
 #: The run was ended by its caller, not by a policy. Never produced by
-#: :func:`~pyeki.eki.run`.
+#: :func:`~enskit.eki.run`.
 INTERRUPTED = "interrupted"
 
 Status = Literal["schedule_exhausted", "stopping_rule", "interrupted"]
@@ -91,41 +91,20 @@ OnFailure = Literal["repair", "raise"]
 
 _STATUSES = (SCHEDULE_EXHAUSTED, STOPPING_RULE, INTERRUPTED)
 
-
-class EKIError(RuntimeError):
-    """A run cannot continue.
-
-    Raised on four conditions: ``max_steps`` exceeded, fewer than two valid
-    members, any invalid member under ``on_failure="raise"``, and a
-    non-finite updated ensemble. A run is long and expensive enough that a
-    caller wants to catch its failures specifically, to checkpoint and
-    investigate, without catching every :class:`RuntimeError` in the process.
-
-    Attributes
-    ----------
-    state : EKIState
-        The last good state, populated on every raise path.
-    history : tuple of HistoryRecord
-        The records accumulated up to the failure.
-
-    Notes
-    -----
-    The two attributes are what make a caught error recoverable::
-
-        try:
-            result = run(state, forward, y, noise_cov, schedule=sched)
-        except EKIError as exc:
-            checkpoint(exc.state)          # resume from here
-            diagnose(exc.history)
-
-    Resuming from ``exc.state`` continues the run exactly, so nothing beyond
-    the two attributes is needed to make the recovery exact.
-    """
-
-    def __init__(self, message: str, *, state=None, history=()) -> None:
-        super().__init__(message)
-        self.state = state
-        self.history = tuple(history)
+#: The declaration order of :class:`HistoryRecord`'s fields.
+_RECORD_FIELDS = (
+    "step",
+    "n_valid",
+    "beta",
+    "increment",
+    "beta_next",
+    "misfit_mean",
+    "misfit_min",
+    "misfit_max",
+    "center_misfit",
+    "spread",
+    "ess",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -176,7 +155,7 @@ class EKIState:
 
     **``step`` is cumulative across runs.** Resuming a partially-completed
     ladder is the case that is designed for: a ten-step
-    :class:`~pyeki.eki.FixedSchedule` interrupted after four steps resumes
+    :class:`~enskit.eki.FixedSchedule` interrupted after four steps resumes
     at step four. The same property makes *chaining* a second, different
     ladder onto a finished state a silent no-op — the fresh schedule finds
     ``step >= n_steps`` already true and the run returns immediately with an
@@ -219,7 +198,7 @@ class EKIState:
             key_sample, key_state = jax.random.split(key)
             EKIState(prior.sample(key_sample, n_members), 0.0, 0, key_state)
 
-        so the initial ensemble is exactly :meth:`~pyeki.gauss.Gaussian.sample`'s
+        so the initial ensemble is exactly :meth:`~enskit.gauss.Gaussian.sample`'s
         pinned draw, and the state's own stream is independent of it.
 
         Parameters
@@ -227,7 +206,7 @@ class EKIState:
         key
             A typed JAX PRNG key, consumed whole and split once.
         prior
-            A :class:`~pyeki.gauss.Gaussian` whose covariance supports
+            A :class:`~enskit.gauss.Gaussian` whose covariance supports
             ``factor``.
         n_members
             The ensemble size :math:`J`, a Python ``int`` at least 2.
@@ -319,10 +298,10 @@ class EKIState:
 class Evaluation:
     """Everything one forward evaluation produced.
 
-    What a :class:`~pyeki.eki.Schedule`'s ``next_increment`` and a
-    :class:`~pyeki.eki.StoppingRule` see, what :func:`~pyeki.eki.assimilate`
+    What a :class:`~enskit.eki.Schedule`'s ``next_increment`` and a
+    :class:`~enskit.eki.StoppingRule` see, what :func:`~enskit.eki.assimilate`
     consumes, and what a run reports as its ``last_evaluation``. Returned by
-    :func:`~pyeki.eki.evaluate`.
+    :func:`~enskit.eki.evaluate`.
 
     Parameters
     ----------
@@ -371,16 +350,16 @@ class Evaluation:
     so the misfits, the misfit of the mean prediction, and the whitened
     prediction anomalies are all recoverable from this one array — the last
     being, up to a sign and a :math:`\\sqrt{J-1}`, the whitened factor the
-    conditioning kernel of :mod:`pyeki.gauss` is built on.
+    conditioning kernel of :mod:`enskit.gauss` is built on.
     It costs nothing: the driver must whiten the residuals to compute the
     misfits at all. :math:`N` is likewise recoverable from the trailing axis,
     so a criterion may be calibrated to the observation dimension without
     storing it.
 
     The recovered anomaly matrix is a diagnostic and never a substitute for
-    the update's own: :mod:`pyeki.gauss` centres before it whitens — the
-    factor it whitens was centred when it was built — precisely because
-    centring already-whitened predictions cancels a common
+    the update's own: :mod:`enskit.gauss` centers before it whitens — the
+    factor it whitens was centered when it was built — precisely because
+    centering already-whitened predictions cancels a common
     :math:`W\\bar v` and loses accuracy as the ensemble collapses.
 
     ``rms_parameter_spread`` is scale-dependent, and the name says so: it
@@ -451,14 +430,14 @@ class Evaluation:
         """The per-member misfits, a ``(J,)`` array.
 
         :math:`\\Phi_j = \\tfrac12\\lVert b_j\\rVert^2`, the same quantity
-        :func:`~pyeki.eki.misfits` computes from ``y`` and the predictions.
+        :func:`~enskit.eki.misfits` computes from ``y`` and the predictions.
         Computed on access, not cached.
         """
         _check_not_vmap_family(self, "misfits")
         return _misfits_from_residuals(self.whitened_residuals)
 
     @property
-    def centre_misfit(self) -> Array:
+    def center_misfit(self) -> Array:
         """The misfit of the mean prediction, a 0-d array.
 
         :math:`\\Phi(\\bar v) = \\tfrac12\\lVert \\bar b\\rVert^2`. This is
@@ -472,10 +451,10 @@ class Evaluation:
               \\bigl(W \\widehat{C}_{vv} W^\\top\\bigr) ,
 
         coinciding only as the ensemble collapses. A discrepancy principle
-        asks about the centre; a tempering criterion asks about the
+        asks about the center; a tempering criterion asks about the
         individual members.
         """
-        _check_not_vmap_family(self, "centre_misfit")
+        _check_not_vmap_family(self, "center_misfit")
         return _misfits_from_residuals(jnp.mean(self.whitened_residuals, axis=-2))
 
     @property
@@ -544,7 +523,7 @@ class HistoryRecord:
         ladder needs no arithmetic.
     misfit_mean, misfit_min, misfit_max
         Summaries of the step's per-member misfits.
-    centre_misfit
+    center_misfit
         The misfit of the mean prediction.
     spread
         The evaluation's ``rms_parameter_spread``.
@@ -561,7 +540,7 @@ class HistoryRecord:
     -----
     The per-member misfit vector is deliberately absent, as is anything else
     of size :math:`J` or larger. A caller who wants per-member or
-    per-observation quantities uses :func:`~pyeki.eki.iterate` and keeps them
+    per-observation quantities uses :func:`~enskit.eki.iterate` and keeps them
     from ``evaluation.whitened_residuals``.
     """
 
@@ -573,7 +552,7 @@ class HistoryRecord:
     misfit_mean: Array
     misfit_min: Array
     misfit_max: Array
-    centre_misfit: Array
+    center_misfit: Array
     spread: Array
     ess: Array
 
@@ -599,22 +578,6 @@ class HistoryRecord:
         except Exception:
             return "<HistoryRecord (unprintable leaves)>"
         return f"vmapped({base}, batch={batch})" if batch != () else base
-
-
-#: The declaration order of :class:`HistoryRecord`'s fields.
-_RECORD_FIELDS = (
-    "step",
-    "n_valid",
-    "beta",
-    "increment",
-    "beta_next",
-    "misfit_mean",
-    "misfit_min",
-    "misfit_max",
-    "centre_misfit",
-    "spread",
-    "ess",
-)
 
 
 # ---------------------------------------------------------------------------
@@ -791,7 +754,7 @@ class EKIResult:
         """Whether the run ended because its stopping rule fired.
 
         ``status == STOPPING_RULE``. With
-        :class:`~pyeki.eki.DiscrepancyStop` this is the optimization form's
+        :class:`~enskit.eki.DiscrepancyStop` this is the optimization form's
         answer to *did it fit?*; with any other rule it reports only that
         that rule fired.
         """
@@ -822,6 +785,47 @@ class EKIResult:
 
 
 # ---------------------------------------------------------------------------
+# the error a run raises
+# ---------------------------------------------------------------------------
+
+
+class EKIError(RuntimeError):
+    """A run cannot continue.
+
+    Raised on four conditions: ``max_steps`` exceeded, fewer than two valid
+    members, any invalid member under ``on_failure="raise"``, and a
+    non-finite updated ensemble. A run is long and expensive enough that a
+    caller wants to catch its failures specifically, to checkpoint and
+    investigate, without catching every :class:`RuntimeError` in the process.
+
+    Attributes
+    ----------
+    state : EKIState
+        The last good state, populated on every raise path.
+    history : tuple of HistoryRecord
+        The records accumulated up to the failure.
+
+    Notes
+    -----
+    The two attributes are what make a caught error recoverable::
+
+        try:
+            result = run(state, forward, y, noise_cov, schedule=sched)
+        except EKIError as exc:
+            checkpoint(exc.state)          # resume from here
+            diagnose(exc.history)
+
+    Resuming from ``exc.state`` continues the run exactly, so nothing beyond
+    the two attributes is needed to make the recovery exact.
+    """
+
+    def __init__(self, message: str, *, state=None, history=()) -> None:
+        super().__init__(message)
+        self.state = state
+        self.history = tuple(history)
+
+
+# ---------------------------------------------------------------------------
 # private
 # ---------------------------------------------------------------------------
 
@@ -839,7 +843,7 @@ def _zero_record() -> HistoryRecord:
         misfit_mean=zero,
         misfit_min=zero,
         misfit_max=zero,
-        centre_misfit=zero,
+        center_misfit=zero,
         spread=zero,
         ess=zero,
     )

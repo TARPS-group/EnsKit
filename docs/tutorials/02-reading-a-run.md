@@ -10,10 +10,10 @@ the initial ensemble of {doc}`01-first-inversion`, and with the library's
 default update rule rather than the pathwise one that page selects:
 
 ```python
-import pyeki
+import enskit
 import jax
-from pyeki import toy
-from pyeki.eki import AdaptiveESSSchedule, EKIState, run
+from enskit import toy
+from enskit.eki import AdaptiveESSSchedule, EKIState, run
 
 problem = toy.exponential_decay()
 state = EKIState.from_prior(jax.random.key(0), problem.prior, n_members=64)
@@ -71,7 +71,7 @@ The eleven fields answer four different questions.
 | field | what it tells you |
 | --- | --- |
 | `step`, `beta`, `increment`, `beta_next` | **where on the ladder** this step was, and how far it went |
-| `misfit_mean`, `misfit_min`, `misfit_max`, `centre_misfit` | **how well the members fit the observations** |
+| `misfit_mean`, `misfit_min`, `misfit_max`, `center_misfit` | **how well the members fit the observations** |
 | `spread`, `ess` | **whether the ensemble can still describe its target** |
 | `n_valid` | **whether the forward model worked** |
 
@@ -217,14 +217,14 @@ that ended because the ladder finished, the last step produced the returned
 ensemble and the loop then ended, so the returned ensemble has never been
 through the model.
 
-## The centre's misfit is not the average misfit
+## The center's misfit is not the average misfit
 
-`centre_misfit` is the misfit of the ensemble's mean prediction. It is a
+`center_misfit` is the misfit of the ensemble's mean prediction. It is a
 different number from the average of the members' misfits, and the difference
 is large:
 
 ```python
-evaluation.centre_misfit      # 4.6065
+evaluation.center_misfit      # 4.6065
 evaluation.misfits.mean()     # 6.7961
 ```
 
@@ -241,7 +241,7 @@ It is 2.1896 here, and accounts for the difference to the last digit. It
 shrinks as the ensemble collapses, so the two numbers converge in the
 optimization form and stay apart in the sampling form.
 
-Use `centre_misfit` when you want to know how well the answer's centre fits,
+Use `center_misfit` when you want to know how well the answer's center fits,
 and `misfit_mean` when you want to know how well a typical member fits. They
 are not interchangeable, and a reader who compares them expecting agreement
 will go looking for a bug.
@@ -251,7 +251,7 @@ will go looking for a bug.
 The ensemble is the answer, but a two-moment summary of it is one line:
 
 ```python
-from pyeki.gauss import Gaussian
+from enskit.gauss import Gaussian
 
 fitted = Gaussian.from_samples(result.ensemble)
 fitted.mean                    # [1.9802  1.4741]
@@ -270,7 +270,7 @@ The misfit and the effective sample size are both public functions, so a loop
 you drive yourself can compute them:
 
 ```python
-from pyeki.eki import effective_sample_size, misfits
+from enskit.eki import effective_sample_size, misfits
 
 phi = misfits(problem.y, problem.forward(result.ensemble), problem.noise_cov)
 phi.mean()                         # 5.7186

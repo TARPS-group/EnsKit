@@ -11,7 +11,7 @@ Two rules govern the reference throughout:
 
 - **The dense reference is hand-written here.** Plain dense linear algebra
   over means, anomalies and materialized operators, never routed through
-  ``pyeki.eki`` or ``pyeki.gauss``, so every comparison is between two
+  ``enskit.eki`` or ``enskit.gauss``, so every comparison is between two
   genuinely independent paths.
 - **Exactness tests compare against closed forms**, at a tolerance of a few
   machine epsilons times the natural scale of the quantity, never a tolerance
@@ -30,8 +30,8 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-import pyeki  # noqa: F401  -- enables x64 before any array exists
-from pyeki.eki import (
+import enskit  # noqa: F401  -- enables x64 before any array exists
+from enskit.eki import (
     INTERRUPTED,
     SCHEDULE_EXHAUSTED,
     STOPPING_RULE,
@@ -57,9 +57,9 @@ from pyeki.eki import (
     repair_failed_members,
     run,
 )
-from pyeki.eki.driver import _check_predictions
-from pyeki.gauss import EmpiricalJoint, Gaussian
-from pyeki.linalg import (
+from enskit.eki.driver import _check_predictions
+from enskit.gauss import EmpiricalJoint, Gaussian
+from enskit.linalg import (
     DensePSD,
     Identity,
     PSDDiagonal,
@@ -740,13 +740,13 @@ def test_7_the_discrepancy_stop_fires_on_its_threshold_and_ends_the_run():
     v_dim = 4
     for tau in (0.5, 1.0, 2.0):
         rule = DiscrepancyStop(tau=tau)
-        for centre_misfit in (0.1, 0.9, 2.0, 4.5, 9.0):
+        for center_misfit in (0.1, 0.9, 2.0, 4.5, 9.0):
             evaluation = _evaluation_with_misfits(
-                np.full(4, centre_misfit), v_dim=v_dim
+                np.full(4, center_misfit), v_dim=v_dim
             )
-            # Every member has the same residual, so the centre misfit is it.
-            assert float(evaluation.centre_misfit) == pytest.approx(centre_misfit)
-            assert rule(evaluation) is (2.0 * centre_misfit <= tau**2 * v_dim)
+            # Every member has the same residual, so the center misfit is it.
+            assert float(evaluation.center_misfit) == pytest.approx(center_misfit)
+            assert rule(evaluation) is (2.0 * center_misfit <= tau**2 * v_dim)
 
 
 def test_7_a_fired_stop_ends_the_run_with_a_zero_increment_terminal_record():
@@ -844,7 +844,7 @@ def test_9_the_repair_moves_only_the_failed_members_and_damps_the_moments():
     u_hat = np.asarray(ensemble)[mask].mean(axis=0)
     v_hat = np.asarray(predictions)[mask].mean(axis=0)
 
-    # Valid members are bit-identical; failed ones sit exactly at the centre.
+    # Valid members are bit-identical; failed ones sit exactly at the center.
     assert np.array_equal(np.asarray(repaired)[mask], np.asarray(ensemble)[mask])
     assert np.array_equal(
         np.asarray(repaired_predictions)[mask], np.asarray(predictions)[mask]
@@ -939,7 +939,7 @@ def test_9_the_failure_modes_raise_where_the_contract_says_they_do():
             state, fail([1, 4]), y, noise, schedule=FixedSchedule.uniform(3)
         )
     stacked = result.stacked
-    for name in ("misfit_mean", "misfit_min", "misfit_max", "centre_misfit", "ess"):
+    for name in ("misfit_mean", "misfit_min", "misfit_max", "center_misfit", "ess"):
         assert np.all(np.isfinite(np.asarray(getattr(stacked, name)))), name
     assert int(stacked.n_valid[0]) == problem.J - 2
     assert result.min_n_valid == problem.J - 2
@@ -995,7 +995,7 @@ def test_10_multiplicative_inflation_stays_in_the_span_and_additive_leaves_it():
 
 
 def test_10_additive_inflation_matches_its_pinned_elementwise_definition():
-    """Delegation to ``Gaussian.sample``, centred, and mean-preserving."""
+    """Delegation to ``Gaussian.sample``, centered, and mean-preserving."""
     rng = np.random.default_rng(29)
     J, P = 8, 3
     ensemble = jnp.asarray(rng.normal(size=(J, P)))
@@ -1096,11 +1096,11 @@ def test_11_misfits_is_the_gaussian_log_likelihood_less_its_normalizer(name, bat
     assert np.abs(np.asarray(total) - want).max() < 1e-12 * abs(want)
 
 
-def test_11_the_centre_misfit_differs_from_the_mean_by_exactly_the_spread_term():
+def test_11_the_center_misfit_differs_from_the_mean_by_exactly_the_spread_term():
     """``mean(Phi_j) - Phi(vbar) == (J-1)/(2J) tr(W Chat_vv W^T)``, exactly.
 
     A divisor the derivation gets wrong easily, and which no tolerance-based
-    test would catch. The identity is also what makes ``centre_misfit`` and
+    test would catch. The identity is also what makes ``center_misfit`` and
     ``misfit_mean`` two different fields rather than one.
     """
     problem = _AffineProblem(J=10)
@@ -1113,7 +1113,7 @@ def test_11_the_centre_misfit_differs_from_the_mean_by_exactly_the_spread_term()
     anomalies = whitened - whitened.mean(axis=0)
     trace = float(np.sum(anomalies**2) / (J - 1))
     gap = float(np.mean(np.asarray(evaluation.misfits))) - float(
-        evaluation.centre_misfit
+        evaluation.center_misfit
     )
     want = (J - 1) / (2 * J) * trace
     assert gap == pytest.approx(want, rel=1e-11)
@@ -1122,7 +1122,7 @@ def test_11_the_centre_misfit_differs_from_the_mean_by_exactly_the_spread_term()
     assert np.abs(
         np.asarray(evaluation.misfits) - 0.5 * np.sum(whitened**2, axis=1)
     ).max() < 1e-12
-    assert float(evaluation.centre_misfit) == pytest.approx(
+    assert float(evaluation.center_misfit) == pytest.approx(
         0.5 * float(np.sum(whitened.mean(axis=0) ** 2)), rel=1e-12
     )
 
@@ -1189,7 +1189,7 @@ def test_12_runs_are_reproducible_resumable_and_agree_with_iterate():
 
 
 def test_13_the_optimization_form_approaches_the_restricted_least_squares_fit():
-    """A monotone misfit, and a centre approaching the subspace-restricted fit.
+    """A monotone misfit, and a center approaching the subspace-restricted fit.
 
     The correct target is the least-squares solution restricted to the initial
     ensemble's affine subspace, not the unrestricted minimizer: every iterate
@@ -1233,8 +1233,8 @@ def test_13_the_optimization_form_approaches_the_restricted_least_squares_fit():
     )
     assert result.stop_fired, "the run must terminate on the discrepancy principle"
 
-    centre_misfits = np.asarray(result.stacked.centre_misfit)
-    assert np.all(np.diff(centre_misfits) <= 1e-9 * max(1.0, centre_misfits[0]))
+    center_misfits = np.asarray(result.stacked.center_misfit)
+    assert np.all(np.diff(center_misfits) <= 1e-9 * max(1.0, center_misfits[0]))
 
     got = np.asarray(result.ensemble).mean(axis=0)
     assert np.abs(got - restricted).max() < 1e-2 * max(1.0, np.abs(restricted).max())
@@ -1283,7 +1283,7 @@ def test_14_a_run_compiles_a_bounded_number_of_times_whatever_its_length():
 
 def _jitted_functions():
     """Every ``jax.jit``-wrapped function the layer defines, across its modules."""
-    from pyeki.eki import driver, helpers, policies, values
+    from enskit.eki import driver, helpers, policies, values
 
     found = []
     for module in (helpers, values, policies, driver):
@@ -1301,7 +1301,7 @@ def _compilation_count() -> int:
 
 
 def test_14_the_pytree_classes_round_trip_and_families_are_inert():
-    """Flatten and unflatten preserve type and behaviour, with sentinel leaves."""
+    """Flatten and unflatten preserve type and behavior, with sentinel leaves."""
     problem = _AffineProblem()
     state = problem.state()
     evaluation = evaluate(
@@ -1704,7 +1704,7 @@ def test_19_the_result_reports_the_run_on_four_fixtures():
     assert unfitted.budget_complete and not unfitted.stop_fired
 
     # 3. A stop firing on a budgeted ladder, on a problem it has *not* fit.
-    #    The threshold is met by the ensemble centre while the ladder is only
+    #    The threshold is met by the ensemble center while the ladder is only
     #    part-way, which is the trap the two booleans exist to expose.
     early = run(
         problem.state(), problem.forward, y, noise,
@@ -1893,7 +1893,7 @@ def test_21_every_record_field_agrees_with_the_evaluation_it_came_from():
         assert float(record.misfit_mean) == pytest.approx(phi.mean(), rel=1e-11)
         assert float(record.misfit_min) == pytest.approx(phi.min(), rel=1e-11)
         assert float(record.misfit_max) == pytest.approx(phi.max(), rel=1e-11)
-        assert float(record.centre_misfit) == pytest.approx(
+        assert float(record.center_misfit) == pytest.approx(
             0.5 * np.sum(residuals.mean(axis=0) ** 2), rel=1e-10
         )
         assert float(record.spread) == pytest.approx(spread, rel=1e-11)
@@ -1972,7 +1972,7 @@ def test_23_a_no_op_run_says_so_at_warning_level(caplog):
         problem.state(), problem.forward, jnp.asarray(problem.y), problem.noise_cov,
         schedule=FixedSchedule.uniform(2),
     )
-    with caplog.at_level(logging.WARNING, logger="pyeki.eki"):
+    with caplog.at_level(logging.WARNING, logger="enskit.eki"):
         run(finished.state, problem.forward, jnp.asarray(problem.y),
             problem.noise_cov, schedule=FixedSchedule.uniform(2))
     assert "no forward evaluations" in caplog.text
@@ -2086,9 +2086,9 @@ def test_26_the_two_form_example_runs():
 
     sampled = run(state, forward, y, noise_cov, schedule=AdaptiveESSSchedule())
     ensemble = sampled.ensemble
-    centre = sampled.mean
+    center = sampled.mean
     assert ensemble.shape == (64, problem.P)
-    assert centre.shape == (problem.P,)
+    assert center.shape == (problem.P,)
 
     fit = run(
         state, forward, y, noise_cov,
@@ -2139,7 +2139,7 @@ def test_26_the_backtracking_loop_runs_and_costs_what_the_contract_says():
             s, current, increment=delta, y=y, noise_cov=noise_cov
         )
         probe = evaluate(trial, forward, y, noise_cov)
-        if probe.centre_misfit < current.centre_misfit:
+        if probe.center_misfit < current.center_misfit:
             s, current, delta = trial, probe, delta * 1.5
             accepted += 1
         else:
@@ -2350,8 +2350,8 @@ def test_27_the_forward_model_receives_what_the_contract_promises():
         inflation=MultiplicativeInflation(factor),
     )
     members = np.asarray(state.ensemble)
-    centre = members.mean(axis=0, keepdims=True)
-    expected = centre + factor * (members - centre)
+    center = members.mean(axis=0, keepdims=True)
+    expected = center + factor * (members - center)
     assert np.abs(seen[0] - expected).max() < 64 * EPS * np.abs(expected).max()
     assert np.abs(seen[0] - members).max() > 0.0
 
@@ -2625,8 +2625,8 @@ def test_regression_the_repair_does_not_rescale_the_surviving_members():
 def test_regression_misfits_are_computed_after_the_repair():
     """A failed member would otherwise poison every statistic and criterion.
 
-    After repair its prediction is the valid centre, so it contributes the
-    centre's misfit — which sits *below* the valid members' mean misfit, a
+    After repair its prediction is the valid center, so it contributes the
+    center's misfit — which sits *below* the valid members' mean misfit, a
     downward bias the contract names rather than hides.
     """
     problem = _AffineProblem(J=8)
@@ -2654,7 +2654,7 @@ def test_regression_misfits_are_computed_after_the_repair():
 
 def test_regression_a_schedule_that_counts_its_own_calls_is_caught():
     """Purity is what makes a run resumable, and the harness is what catches it."""
-    from pyeki.eki.testing import check_schedule, synthetic_evaluation
+    from enskit.eki.testing import check_schedule, synthetic_evaluation
 
     class _CountsItsCalls:
         n_steps, beta_target = None, 1.0
@@ -2714,7 +2714,7 @@ def test_regression_a_fill_value_model_stalls_an_adaptive_ladder_silently():
     disagreement and answers by shrinking the increment — here all the way to
     the floor, so a one-step ladder becomes a fifty-step one. Nothing raises
     and nothing warns; ``n_valid`` reports every member valid. Documented as
-    a behaviour rather than fixed, because the layer cannot see it.
+    a behavior rather than fixed, because the layer cannot see it.
 
     Scaled down to a budget of 0.05 against the same floor, so the stall is
     exercised at 5% of the cost the shipped defaults would incur.
@@ -2767,7 +2767,7 @@ def test_regression_a_failing_step_logs_at_warning_level(caplog):
         v = jnp.asarray(u) @ jnp.asarray(problem.G).T
         return v.at[3, 0].set(jnp.nan)
 
-    with caplog.at_level(logging.WARNING, logger="pyeki.eki"), warnings.catch_warnings():
+    with caplog.at_level(logging.WARNING, logger="enskit.eki"), warnings.catch_warnings():
         warnings.simplefilter("ignore")
         run(
             problem.state(), failing, jnp.asarray(problem.y), problem.noise_cov,
@@ -2945,7 +2945,7 @@ def test_regression_the_anomalies_are_formed_stably():
     spurious anomalies of about eps*|xbar| — which the gain then amplifies
     into a finite, nan-free, wrong update once the members are large.
     """
-    from pyeki.eki.helpers import _anomalies
+    from enskit.eki.helpers import _anomalies
 
     for magnitude in (1.0, 6e23):
         collapsed = jnp.full((7, 3), magnitude)
@@ -3006,7 +3006,7 @@ def test_regression_a_nan_misfit_does_not_become_the_floor_step():
         assert got != pytest.approx(schedule.min_increment)
 
     # Through the driver a poisoned ensemble is caught earlier still, by the
-    # validity check, so the schedule guard is the second line of defence.
+    # validity check, so the schedule guard is the second line of defense.
     problem = _AffineProblem()
     with pytest.raises(EKIError, match="At least 2 are required"):
         run(problem.state(), lambda u: jnp.full((problem.J, problem.N), jnp.inf),
@@ -3059,7 +3059,7 @@ def test_14_n_valid_is_data_so_a_jitted_policy_does_not_retrace_per_step():
     one is the obvious thing to do with it; a static field on the object it
     receives would retrace it once per distinct valid-member count.
     """
-    from pyeki.eki.testing import synthetic_evaluation
+    from enskit.eki.testing import synthetic_evaluation
 
     counts = {"traces": 0}
 
@@ -3113,7 +3113,7 @@ def test_4_the_entry_budget_check_measures_the_remaining_budget():
 
     # And the quotient is robust to its own round-off: 1e-9 / 1e-12 is 1000
     # steps, not the 1001 a naive ceil of the float division reports.
-    from pyeki.eki.driver import _steps_needed
+    from enskit.eki.driver import _steps_needed
 
     assert _steps_needed(1e-9, 1e-12) == 1000
     assert _steps_needed(1.0, 1e-3) == 1000

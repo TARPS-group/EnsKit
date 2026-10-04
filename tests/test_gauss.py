@@ -10,7 +10,7 @@ Two rules govern the reference throughout:
 
 - **The dense reference is hand-written here.** Plain dense linear algebra over
   means, anomalies and materialized operators, never routed through
-  ``gain_weights``, ``sqrt_transform`` or any other code of ``pyeki.gauss``, so
+  ``gain_weights``, ``sqrt_transform`` or any other code of ``enskit.gauss``, so
   every comparison is between two genuinely independent paths.
 - **Exactness tests compare against closed forms**, at a tolerance of a few
   machine epsilons times the natural scale of the quantity, never a tolerance
@@ -31,15 +31,15 @@ import numpy as np
 import pytest
 from jax import Array
 
-import pyeki  # noqa: F401  -- enables x64 before any array exists
-from pyeki.gauss import (
+import enskit  # noqa: F401  -- enables x64 before any array exists
+from enskit.gauss import (
     EmpiricalJoint,
     Gaussian,
     GaussianJoint,
     gain_weights,
     sqrt_transform,
 )
-from pyeki.linalg import (
+from enskit.linalg import (
     Dense,
     DensePSD,
     LinOp,
@@ -53,7 +53,7 @@ from pyeki.linalg import (
     linop,
     tri_solve,
 )
-from pyeki.linalg.testing import check_operator
+from enskit.linalg.testing import check_operator
 
 RNG = np.random.default_rng(0)
 EPS = float(np.finfo(np.float64).eps)
@@ -238,7 +238,7 @@ def test_local_operators_satisfy_the_operator_contract():
 # the hand-written dense reference
 #
 # Plain dense linear algebra over means, anomalies and materialized
-# operators. Nothing below calls into pyeki.gauss.
+# operators. Nothing below calls into enskit.gauss.
 # ---------------------------------------------------------------------------
 
 
@@ -737,7 +737,7 @@ def test_7_from_samples_agrees_with_the_joint_it_is_the_one_block_case_of():
 
 
 def test_7_from_samples_gives_identical_members_exactly_zero_spread():
-    """The stable centring, not jnp.mean: a collapsed sample has no anomalies."""
+    """The stable centering, not jnp.mean: a collapsed sample has no anomalies."""
     collapsed = jnp.tile(jnp.asarray([1e23, 2e23, 3e23]), (5, 1))
 
     cov = Gaussian.from_samples(collapsed).cov
@@ -1101,7 +1101,7 @@ def _reference_problem():
 
 
 @pytest.mark.parametrize("factory", ["gaussian", "joint"])
-def test_11_flatten_unflatten_preserves_type_and_behaviour(factory):
+def test_11_flatten_unflatten_preserves_type_and_behavior(factory):
     if factory == "gaussian":
         obj = Gaussian(
             jnp.asarray(RNG.normal(size=3)),
@@ -1247,7 +1247,7 @@ def test_12_the_pinned_prng_draws_are_snapshotted():
     than silently absorbed into every downstream result.
 
     Captured under JAX 0.10.2 with x64 enabled and default PRNG settings. A
-    failure here is not necessarily a pyEKI bug — check JAX's version and the
+    failure here is not necessarily an EnsKit bug — check JAX's version and the
     jax_threefry_partitionable / x64 flags first — but it does mean every
     stochastic output of this layer changed.
     """
@@ -1529,7 +1529,7 @@ def test_14_from_samples_reproduces_the_empirical_moments():
 
 
 def test_14_the_projection_to_a_joint_is_lossless():
-    """A mean and a centred factor of width J *are* the samples: u_j = u_bar +
+    """A mean and a centered factor of width J *are* the samples: u_j = u_bar +
     sqrt(J - 1) (F_u)_j. Nothing needs the samples supplied a second time, and
     both updates read their realizations off the factor."""
     J, P, N = 9, 4, 3
@@ -1548,7 +1548,7 @@ def test_14_the_projection_to_a_joint_is_lossless():
         np.testing.assert_allclose(
             recovered, samples, rtol=0, atol=1e3 * EPS * np.abs(samples).max()
         )
-        # centred, which is what makes the latent index a sample index
+        # centered, which is what makes the latent index a sample index
         assert np.abs(F @ np.ones(J)).max() < 1e3 * EPS * np.abs(F).max()
 
 
@@ -1578,7 +1578,7 @@ def test_14_construction_and_constructor_validation():
     Fv = Dense(jnp.zeros((N, k)))
     fields = {"u_mean": jnp.zeros(P), "v_mean": jnp.zeros(N)}
 
-    with pytest.raises(TypeError, match="pyeki.linalg.LinOp"):
+    with pytest.raises(TypeError, match="enskit.linalg.LinOp"):
         GaussianJoint(**fields, u_factor=jnp.zeros((P, k)), v_factor=Fv)
     with pytest.raises(ValueError, match="disagrees with u_mean"):
         GaussianJoint(**fields, u_factor=Dense(jnp.zeros((P + 1, k))), v_factor=Fv)
@@ -1590,9 +1590,9 @@ def test_14_construction_and_constructor_validation():
         )
 
     prior, linear_map, _, _, _ = _linear_gaussian(P, N)
-    with pytest.raises(TypeError, match="pyeki.gauss.Gaussian"):
+    with pytest.raises(TypeError, match="enskit.gauss.Gaussian"):
         GaussianJoint.from_linear_map(jnp.zeros(P), linear_map)
-    with pytest.raises(TypeError, match="pyeki.linalg.LinOp"):
+    with pytest.raises(TypeError, match="enskit.linalg.LinOp"):
         GaussianJoint.from_linear_map(prior, jnp.zeros((N, P)))
     with pytest.raises(ValueError, match="takes vectors of length"):
         GaussianJoint.from_linear_map(prior, Dense(jnp.zeros((N, P + 1))))
@@ -1875,7 +1875,7 @@ def test_15_pathwise_batches_over_realizations_and_validates_them():
 
 
 
-def test_regression_the_square_root_reading_needs_a_centred_factor():
+def test_regression_the_square_root_reading_needs_a_centered_factor():
     """``transform_update`` reads updated samples off the conditioned factor's
     columns, which is why it lives on the class that holds samples and takes
     no sample argument.
@@ -2695,7 +2695,7 @@ def test_empirical_joint_fields_are_keyword_only():
     swap is shape-valid whenever P == N and no check can catch it.
 
     Verified below: with P == N both orders would be accepted and would give
-    different, finite, plausible answers. Naming them is the only defence, so
+    different, finite, plausible answers. Naming them is the only defense, so
     positional construction is rejected outright.
     """
     U = jnp.asarray(RNG.normal(size=(5, 3)))
@@ -2728,14 +2728,14 @@ def test_empirical_joint_fields_are_keyword_only():
 
 
 def test_regression_anomalies_are_formed_over_the_member_axis_when_batched():
-    """The centring subtracts per-member means, not per-batch ones.
+    """The centering subtracts per-member means, not per-batch ones.
 
     ``jnp.mean(..., axis=-2)`` without ``keepdims`` drops the member axis, so
     the subtraction right-aligns against the *batch* axis. For an operand
     whose leading axis happens to equal ``J`` that broadcasts happily and
     returns finite, plausible, wrong anomalies rather than raising.
     """
-    from pyeki.gauss import _centered
+    from enskit.gauss import _centered
 
     for shape in [(3, 3, 4), (2, 5, 5), (4, 6, 2)]:
         x = jnp.asarray(RNG.normal(size=shape))

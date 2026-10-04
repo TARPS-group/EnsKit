@@ -23,7 +23,7 @@ dimension is too large for a dense covariance to fit in memory.
 - What an operator is: a matrix represented by how it acts on vectors, so
   structure is used rather than materialized. A `PSDDiagonal` of length one
   million applies in linear time; the dense equivalent does not fit in memory.
-- The catalogue as a reader needs it, not exhaustively: `PSDDiagonal`,
+- The catalog as a reader needs it, not exhaustively: `PSDDiagonal`,
   `DensePSD`, `Identity`, `PSDLowRank`, and `block_diag` for the common
   independent-plus-correlated case.
 - The batch-axis rule — leading batch axes, core operand shape trailing — and
@@ -48,7 +48,7 @@ dimension is too large for a dense covariance to fit in memory.
 
 ## API exercised
 
-`pyeki.linalg`: `PSDDiagonal`, `DensePSD`, `Identity`, `PSDLowRank`,
+`enskit.linalg`: `PSDDiagonal`, `DensePSD`, `Identity`, `PSDLowRank`,
 `block_diag`, `whiten`, `factor`, `supports`, `capabilities`,
 `UnsupportedOpError`, scalar division.
 
@@ -60,18 +60,18 @@ dimension is too large for a dense covariance to fit in memory.
 the package's entry point before this series existed. It is kept rather than
 absorbed, for two reasons: it is linked from the landing page, this series'
 index, {doc}`../user-guide/operators` and {doc}`../user-guide/conditioning`,
-and it serves a reader who came for `pyeki.linalg` alone — which is a real
+and it serves a reader who came for `enskit.linalg` alone — which is a real
 audience, since the operator layer is usable without the rest of the package.
 
 So this page is not the operator layer's reference. It leads with the reader's
 own problem — correlated observations, a non-diagonal prior, a covariance too
 large to store — introduces only the operators that problem needs, and links
-to the quickstart and {doc}`../user-guide/operators` for the catalogue. Do not
-restate the catalogue here; that is how the two pages drift apart.
+to the quickstart and {doc}`../user-guide/operators` for the catalog. Do not
+restate the catalog here; that is how the two pages drift apart.
 :::
 
 Never write `M @ x` when demonstrating application: for arrays of two or more
 dimensions it contracts the second-to-last axis and silently returns a wrong
 answer when the operator is square. Use `matvec`, or
-`pyeki.linalg.dense_matvec`. `op @ x` on an array raises an error saying so,
+`enskit.linalg.dense_matvec`. `op @ x` on an array raises an error saying so,
 which is worth showing.

@@ -12,17 +12,17 @@ function                       computes
 :func:`effective_sample_size`  the effective sample size of the tempering
                                weights :math:`e^{-\\delta\\Phi}`
 :func:`repair_failed_members`  the mean-preserving repair that moves failed
-                               members to the valid centre
+                               members to the valid center
 ============================== =============================================
 
 The misfit carries the factor :math:`\\tfrac12` and is measured against the
 **base** noise covariance, never a tempered one. Every criterion, diagnostic
-and stopping rule in :mod:`pyeki.eki` is written in terms of that quantity, so
+and stopping rule in :mod:`enskit.eki` is written in terms of that quantity, so
 the convention is fixed in exactly one place.
 
 Notes
 -----
-The behaviour of this module is specified by the "Ensemble Kalman Inversion
+The behavior of this module is specified by the "Ensemble Kalman Inversion
 contract" page of the documentation, which is normative.
 """
 from __future__ import annotations
@@ -60,7 +60,7 @@ def misfits(y, predictions, noise_cov) -> Array:
         misfits.
     noise_cov
         The observation-noise covariance :math:`R`, a
-        :class:`~pyeki.linalg.PSDLinOp` of side ``N`` supporting ``whiten``.
+        :class:`~enskit.linalg.PSDLinOp` of side ``N`` supporting ``whiten``.
         Pass the **base** covariance: a tempered :math:`R/\\delta` would
         rescale every misfit by :math:`\\delta`.
 
@@ -74,7 +74,7 @@ def misfits(y, predictions, noise_cov) -> Array:
     UnsupportedOpError
         If ``noise_cov`` does not support ``whiten``.
     TypeError
-        If ``noise_cov`` is not a :class:`~pyeki.linalg.PSDLinOp`.
+        If ``noise_cov`` is not a :class:`~enskit.linalg.PSDLinOp`.
     ValueError
         If ``y`` is not ``(N,)``, if ``predictions``' trailing axis is not
         ``N``, or if ``noise_cov`` is a vmapped family.
@@ -95,12 +95,12 @@ def misfits(y, predictions, noise_cov) -> Array:
         \\;=\\; -\\Phi(v) - \\tfrac12\\bigl(\\log\\det R + N \\log 2\\pi\\bigr) .
 
     The normalized value is ``Gaussian(y, noise_cov).log_density(predictions)``
-    (:meth:`pyeki.gauss.Gaussian.log_density`), batched the same way; it
+    (:meth:`enskit.gauss.Gaussian.log_density`), batched the same way; it
     additionally requires ``noise_cov`` to support ``logdet``.
     """
     if not isinstance(noise_cov, PSDLinOp):
         raise TypeError(
-            f"misfits: noise_cov must be a pyeki.linalg.PSDLinOp, got "
+            f"misfits: noise_cov must be an enskit.linalg.PSDLinOp, got "
             f"{type(noise_cov).__name__}"
         )
     v_dim = noise_cov.shape[0]
@@ -181,7 +181,7 @@ def effective_sample_size(misfits, increment) -> Array:
 
 
 def repair_failed_members(*, ensemble, predictions, valid):
-    """Move failed members to the valid centre.
+    """Move failed members to the valid center.
 
     ``(J, P), (J, N), (J,) bool -> (J, P), (J, N)``.
 
@@ -193,7 +193,7 @@ def repair_failed_members(*, ensemble, predictions, valid):
         u_j \\longmapsto \\hat u + m_j (u_j - \\hat u) ,
 
     and identically for :math:`v_j`: **failed members are moved to the valid
-    centre and valid members are left exactly where they are**, bit for bit.
+    center and valid members are left exactly where they are**, bit for bit.
     The ensemble size is unchanged, so every downstream shape stays static.
 
     Parameters
@@ -337,7 +337,7 @@ def _check_field_rank(cls_name: str, field_name: str, value, core_ndim: int) -> 
     if ndim != core_ndim:
         raise ValueError(
             f"{cls_name}.{field_name}: expected an array of rank {core_ndim}, got "
-            f"shape {value.shape}. Objects in pyeki.eki are unbatched; build a "
+            f"shape {value.shape}. Objects in enskit.eki are unbatched; build a "
             f"family with jax.vmap over the pytree, not with extra leading axes."
         )
     if any(size < 1 for size in value.shape):
@@ -364,8 +364,8 @@ def _anomalies(x: Array) -> Array:
     the first member before averaging, so that identical members give exactly
     zero rather than round-off and the cancellation is governed by the spread
     rather than by the magnitude. The layer's one piece of ensemble
-    arithmetic; everything else is dispatched to :mod:`pyeki.gauss` or
-    :mod:`pyeki.linalg`.
+    arithmetic; everything else is dispatched to :mod:`enskit.gauss` or
+    :mod:`enskit.linalg`.
     """
     shifted = x - x[..., :1, :]
     return shifted - jnp.mean(shifted, axis=-2, keepdims=True)

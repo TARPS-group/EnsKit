@@ -1,4 +1,4 @@
-# Operator catalogue
+# Operator catalog
 
 ## The hierarchy
 
@@ -14,7 +14,7 @@ at all, rather than a `solve` that raises.
 | `PSDLinOp` | a symmetric positive semi-definite map | `factor`, `whiten`, `whiten_mat` |
 
 `rmatvec` applies the transpose, and `op.T` returns the transpose as an
-operator. The full behavioural specification is the
+operator. The full behavioral specification is the
 {doc}`../linop-contract` reference page.
 
 ## Operators defined by their own arrays
@@ -81,7 +81,7 @@ At = A.T             # the transpose, as an operator
 `@` composes **operators only**. Applying an operator to an array is always
 `matvec`/`matmat` — `op @ x` raises a `TypeError` that says so, because
 NumPy's `@` contracts axis `-2`, which is silently wrong for the
-leading-batch vector layout everything in pyEKI uses. Scalars for `*` and
+leading-batch vector layout everything in EnsKit uses. Scalars for `*` and
 `/` may be traced values, which is what tempering needs.
 
 (operator-batches)=
@@ -115,7 +115,7 @@ produces `nan` or `inf` downstream rather than an error. When a `nan`
 appears and you want to find where, turn on debug checks:
 
 ```python
-from pyeki.linalg import debug_checks
+from enskit.linalg import debug_checks
 
 with debug_checks():
     cov = DensePSD(A)   # raises here if A is not symmetric PD
@@ -123,7 +123,7 @@ with debug_checks():
 
 `set_debug_checks(True)` enables them process-wide. The checks run only on
 concrete arrays and are skipped on traced values, so enabling them never
-changes `jit`-ed behaviour.
+changes `jit`-ed behavior.
 
 ## Conditional support
 

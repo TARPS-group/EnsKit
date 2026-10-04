@@ -1,23 +1,23 @@
 # Running an inversion
 
-`pyeki.eki` is the layer that turns Gaussian conditioning into a *run*: an
+`enskit.eki` is the layer that turns Gaussian conditioning into a *run*: an
 initial ensemble, a ladder of intermediate targets, one ensemble update per
 step, and a record of what happened.
 
 This page is about *when and why* to reach for each piece. The
 {doc}`../eki-contract` reference page specifies exactly *what* each one does,
-and is the place to look for precise shapes, error behaviour, and the
+and is the place to look for precise shapes, error behavior, and the
 mathematics of the two adaptive criteria.
 
 ## The shortest complete run
 
 ```python
-import pyeki  # enables float64; import this before creating arrays
+import enskit  # enables float64; import this before creating arrays
 import jax
 import jax.numpy as jnp
-from pyeki.eki import AdaptiveESSSchedule, EKIState, run
-from pyeki.gauss import Gaussian
-from pyeki.linalg import PSDDiagonal, DensePSD
+from enskit.eki import AdaptiveESSSchedule, EKIState, run
+from enskit.gauss import Gaussian
+from enskit.linalg import PSDDiagonal, DensePSD
 
 prior = Gaussian(jnp.zeros(12), DensePSD(C0))
 noise_cov = PSDDiagonal(instrument_variances)          # side N
@@ -31,7 +31,7 @@ result.beta           # 1.0 — the ladder finished
 ```
 
 `forward` is any callable taking a `(J, P)` array of members and returning a
-`(J, N)` array of predictions: pyEKI ships no models for real use and defines
+`(J, N)` array of predictions: EnsKit ships no models for real use and defines
 no base class, and the callable may be `jit`-ed, may fan out over processes, or
 may block on a job scheduler. It is called **once per step with the whole
 ensemble**, never one member at a time. {doc}`toy-models` has three ready-made
@@ -64,7 +64,7 @@ The sampling form and the optimization form are not two drivers and not a
 flag. They differ in whether the ladder has a temperature budget.
 
 ```python
-from pyeki.eki import DiscrepancyStop, FixedSchedule
+from enskit.eki import DiscrepancyStop, FixedSchedule
 
 # Sampling: a budget of beta = 1, an adaptive ladder, no stopping rule.
 sampled = run(state, forward, y, noise_cov, schedule=AdaptiveESSSchedule())
@@ -97,7 +97,7 @@ step is
 EmpiricalJoint(u_samples=u, v_samples=v).transform_update(y, noise_cov / dbeta)
 ```
 
-and nothing in `pyeki.gauss` had to change to serve tempering.
+and nothing in `enskit.gauss` had to change to serve tempering.
 
 Two consequences are worth carrying around. Per-step precisions **add**, so a
 ladder whose increments sum to 1 composes to one-shot conditioning at
@@ -120,7 +120,7 @@ of $\tfrac12$, through `misfits`:
 
 ```python
 import jax.numpy as jnp
-from pyeki.eki import misfits
+from enskit.eki import misfits
 
 def log_target(u):
     v = forward(u[None])[0]          # one point, as a batch of one
@@ -179,13 +179,13 @@ rather than letting you discover it a thousand model calls later.
 ## Choosing an update
 
 ```python
-from pyeki.eki import PathwiseUpdate, TransformUpdate
+from enskit.eki import PathwiseUpdate, TransformUpdate
 
 run(..., update=TransformUpdate())   # the default: deterministic, no key
 run(..., update=PathwiseUpdate())    # perturbed observations, consumes the key
 ```
 
-Both are two lines over `pyeki.gauss`, and the choice is the one
+Both are two lines over `enskit.gauss`, and the choice is the one
 {doc}`conditioning` describes. `TransformUpdate` is the default because the
 exactness property above holds *exactly* under it and only *in expectation*
 under the stochastic update; it is also deterministic, so your first two runs
@@ -238,7 +238,7 @@ does the posterior predictive look like*, cost nothing more.
 Moments beyond the mean are one line through the layer below:
 
 ```python
-from pyeki.gauss import Gaussian
+from enskit.gauss import Gaussian
 
 fit = Gaussian.from_samples(result.ensemble)
 fit.cov.diag()                       # (P,) per-coordinate variances
@@ -268,7 +268,7 @@ returns. Use `restart()`:
 phase2 = result.state.restart()      # step = 0, beta = 0.0, same ensemble and key
 ```
 
-A run that does no work at all logs at `WARNING` on the `pyeki.eki` logger, so
+A run that does no work at all logs at `WARNING` on the `enskit.eki` logger, so
 the silent case is at least not silent.
 
 ## Failed members
@@ -279,7 +279,7 @@ forward model that may crash, time out, or lose a worker must catch that itself
 and return a non-finite row** for the affected members. An exception that
 escapes the callable propagates out of the driver and stops the run.
 
-By default failed members are *repaired* — moved to the valid members' centre,
+By default failed members are *repaired* — moved to the valid members' center,
 with the valid members left exactly where they were. The ensemble size never
 changes, so no downstream shape becomes dynamic. The cost is that the step
 conditions on a covariance damped by $(J_v - 1)/(J - 1)$, which is exactly the
@@ -305,7 +305,7 @@ external executable.
 ## Inflation
 
 ```python
-from pyeki.eki import AdditiveInflation, MultiplicativeInflation
+from enskit.eki import AdditiveInflation, MultiplicativeInflation
 
 run(..., inflation=MultiplicativeInflation(anomaly_factor=1.02))
 run(..., inflation=AdditiveInflation(0.01 * prior.cov))
@@ -330,7 +330,7 @@ leave it off, which is the default.
 
 "Inflation" is also an overloaded word. Here it means *ensemble* inflation. In
 much of the ensemble-Kalman literature the same word names inflating the
-*observation noise* by a factor $\alpha$, which in pyEKI is the tempering
+*observation noise* by a factor $\alpha$, which in EnsKit is the tempering
 increment $\Delta\beta = 1/\alpha$ and is the schedule's business. Read any
 external formula's definition before transcribing it.
 :::
@@ -343,7 +343,7 @@ needs to *observe* or *interrupt*: per-step checkpointing, custom logging, a
 wall-clock budget, an early `break`.
 
 ```python
-from pyeki.eki import INTERRUPTED, EKIResult, iterate
+from enskit.eki import INTERRUPTED, EKIResult, iterate
 
 records = []
 for state, record, evaluation in iterate(state, forward, y, noise_cov,
@@ -363,14 +363,14 @@ using an evaluation you already have. One evaluation therefore serves any
 number of trial increments:
 
 ```python
-from pyeki.eki import assimilate, evaluate
+from enskit.eki import assimilate, evaluate
 
 s, delta = state, 1.0
 current = evaluate(s, forward, y, noise_cov)
 while not done(current):
     trial, record = assimilate(s, current, increment=delta, y=y, noise_cov=noise_cov)
     probe = evaluate(trial, forward, y, noise_cov)
-    if probe.centre_misfit < current.centre_misfit:
+    if probe.center_misfit < current.center_misfit:
         s, current, delta = trial, probe, delta * 1.5   # accept, lengthen
     else:
         delta = delta / 2                               # reject, reuse `current`
@@ -396,7 +396,7 @@ and one small static, so serializing it is your choice of format.
 `EKIError` carries the run, on every raise path:
 
 ```python
-from pyeki.eki import EKIError
+from enskit.eki import EKIError
 
 try:
     result = run(state, forward, y, noise_cov, schedule=sched)
@@ -406,7 +406,7 @@ except EKIError as exc:
 ```
 
 There is no `"max_steps"` status, because exceeding `max_steps` **raises**: a
-sampling run that silently returned an ensemble at $\beta = 0.7$ labelled as a
+sampling run that silently returned an ensemble at $\beta = 0.7$ labeled as a
 posterior is the failure the two termination booleans exist to expose.
 `max_steps` bounds the steps of *this call*, not `state.step`, so a
 resumed run gets the allowance you asked for.
@@ -414,7 +414,7 @@ resumed run gets the allowance you asked for.
 ## Progress reporting
 
 The driver emits one `logging` record per step at `INFO` on the logger named
-`pyeki.eki`, carrying the step, the level, the increment and the mean misfit,
+`enskit.eki`, carrying the step, the level, the increment and the mean misfit,
 and one at `WARNING` when any member fails. No handler is installed and no
 configuration is read, so by default you see nothing:
 
@@ -429,7 +429,7 @@ Timings, profiles and progress bars are yours to add around an `iterate` loop.
 
 Each axis is a **protocol**, not a base class: an implementation is anything
 with the right call signature — a frozen dataclass, or a plain function where
-the protocol has a single method. This is the one place where pyEKI is
+the protocol has a single method. This is the one place where EnsKit is
 deliberately open to extension at the algorithm level.
 
 Two rules bind every policy. Everything after the key is **keyword-only**,
@@ -438,10 +438,10 @@ $P = N$ and a positional protocol would let them be transposed with no error at
 all. And a policy must be **pure**: no state across steps, no counters, which is
 what keeps a run resumable.
 
-`pyeki.eki.testing` is the harness for one, and purity is the reason it exists:
+`enskit.eki.testing` is the harness for one, and purity is the reason it exists:
 
 ```python
-from pyeki.eki.testing import check_schedule, check_update, synthetic_evaluation
+from enskit.eki.testing import check_schedule, check_update, synthetic_evaluation
 
 check_schedule(MySchedule())
 check_update(MyUpdate())

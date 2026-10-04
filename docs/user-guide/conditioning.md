@@ -1,13 +1,13 @@
 # Gaussian conditioning
 
-`pyeki.gauss` conditions a joint Gaussian over two blocks on a noisy
+`enskit.gauss` conditions a joint Gaussian over two blocks on a noisy
 observation of the second. It provides a Gaussian distribution, a joint
 Gaussian, a container for paired samples, and the operations that connect
 them.
 
 This page is about *when and why* to reach for each piece. The
 {doc}`../gaussian-contract` reference page specifies exactly *what* each one
-does — precise shapes, error behaviour, the conditioning mathematics — and
+does — precise shapes, error behavior, the conditioning mathematics — and
 {doc}`../joint-factor` derives the representation they all share.
 
 The layer knows nothing about inversion. {doc}`running-an-inversion` is where
@@ -17,11 +17,11 @@ observations.
 ## The three objects
 
 ```python
-import pyeki  # enables float64; import this before creating arrays
+import enskit  # enables float64; import this before creating arrays
 import jax
 import jax.numpy as jnp
-from pyeki.gauss import Gaussian, GaussianJoint, EmpiricalJoint
-from pyeki.linalg import PSDDiagonal, DensePSD, Dense, block_diag
+from enskit.gauss import Gaussian, GaussianJoint, EmpiricalJoint
+from enskit.linalg import PSDDiagonal, DensePSD, Dense, block_diag
 
 prior = Gaussian(jnp.zeros(12), DensePSD(C0))   # mean + covariance
 u = prior.sample(key, 40)                       # (40, 12) samples
@@ -113,7 +113,7 @@ methods, and both return the `u` block only. A caller that needs a matching
 
 **Why `condition` is not a method on `EmpiricalJoint`.** Conditioning a set of
 samples means conditioning a Gaussian fitted to their moments. That fit is a
-modelling step, so it is written out — `samples.to_gaussian_joint().condition(...)`
+modeling step, so it is written out — `samples.to_gaussian_joint().condition(...)`
 — rather than hidden inside a method whose name would suggest you had
 conditioned the samples themselves.
 
@@ -189,7 +189,7 @@ never re-factorizes the noise operator, however many candidates it tries.
 ## The posterior is low rank, and says so
 
 `condition` returns a `Gaussian` whose covariance is a
-{class}`~pyeki.linalg.PSDLowRank` holding a factor of width $k$ — never a
+{class}`~enskit.linalg.PSDLowRank` holding a factor of width $k$ — never a
 dense $P \times P$ matrix. That is the honest representation: a posterior
 whose joint came from $J$ samples has rank at most $J - 1$, so it is genuinely
 singular whenever $J - 1 < P$, which is the usual regime here.
@@ -232,13 +232,13 @@ fact*, so by default it surfaces as `nan` rather than an exception. Under
 that `nan` into a `ValueError` naming the likely cause:
 
 ```python
-from pyeki.linalg import debug_checks
+from enskit.linalg import debug_checks
 
 with debug_checks(True):
     samples.transform_update(y, singular_noise)   # ValueError, not a nan block
 ```
 
-Like every value-level check in pyEKI this reads array contents, so it is
+Like every value-level check in EnsKit this reads array contents, so it is
 skipped on tracers: it fires in eager code and in tests, and not inside a
 `jit`-compiled loop. It is a debugging aid, not a guard on production runs.
 
@@ -274,7 +274,7 @@ Everything above routes through one computation, and the two pieces of it are
 public:
 
 ```python
-from pyeki.gauss import gain_weights, sqrt_transform
+from enskit.gauss import gain_weights, sqrt_transform
 
 w = gain_weights(s, b)      # (k, N), (..., N) -> (..., k)
 T = sqrt_transform(s)       # (k, N) -> (k, k)

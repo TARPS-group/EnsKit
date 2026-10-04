@@ -9,7 +9,7 @@ parameter vector that fits the observations best, with the uncertainty being
 somebody else's problem. Ensemble Kalman Inversion does both, and it is used
 in the literature for both, often without saying which.
 
-In pyEKI they are the same driver with a different destination on the same
+In EnsKit they are the same driver with a different destination on the same
 ladder. This page is about choosing, and about what the ensemble means in each
 case — because in one of them the ensemble's spread is the answer, and in the
 other it means almost nothing.
@@ -17,10 +17,10 @@ other it means almost nothing.
 The problem and the initial ensemble are the ones the previous two pages used:
 
 ```python
-import pyeki
+import enskit
 import jax
-from pyeki import toy
-from pyeki.eki import EKIState
+from enskit import toy
+from enskit.eki import EKIState
 
 problem = toy.exponential_decay()
 state = EKIState.from_prior(jax.random.key(0), problem.prior, n_members=64)
@@ -56,7 +56,7 @@ A budget of $\beta = 1$, an adaptive ladder, and no stopping rule — which is
 what {doc}`01-first-inversion` and {doc}`02-reading-a-run` used.
 
 ```python
-from pyeki.eki import AdaptiveESSSchedule, run
+from enskit.eki import AdaptiveESSSchedule, run
 
 sampled = run(state, problem.forward, problem.y, problem.noise_cov,
               schedule=AdaptiveESSSchedule())
@@ -77,7 +77,7 @@ evaluations.
 Unit steps, no budget, and a rule that decides when to stop.
 
 ```python
-from pyeki.eki import DiscrepancyStop, FixedSchedule
+from enskit.eki import DiscrepancyStop, FixedSchedule
 
 fit = run(state, problem.forward, problem.y, problem.noise_cov,
           schedule=FixedSchedule.constant(1.0, n_steps=200),
@@ -112,10 +112,10 @@ Stop when you reach it.
 In numbers: the misfit of a member that fits as well as the noise allows is
 about $N/2$, which is 6 for this problem's twelve observations.
 `DiscrepancyStop(tau=1.0)` fires when the misfit of the ensemble's mean
-prediction — `centre_misfit` — drops to that level. In this run:
+prediction — `center_misfit` — drops to that level. In this run:
 
 ```python
-fit.stacked.centre_misfit    # [9654.0285  577.3526  6.5196  4.5978]
+fit.stacked.center_misfit    # [9654.0285  577.3526  6.5196  4.5978]
 ```
 
 6.52 is above the threshold of 6, so the run continued; 4.60 is below it, so

@@ -2,7 +2,7 @@
 
 Call the check matching your policy's axis on an instance of it, or
 :func:`check_forward_model` on a model, to verify it against the requirements
-:mod:`pyeki.eki` places on that axis.
+:mod:`enskit.eki` places on that axis.
 
 ============================= ==============================================
 function                      checks
@@ -16,7 +16,7 @@ function                      checks
 :func:`check_stopping_rule`   a Python ``bool`` is returned, and purity
 :func:`check_forward_model`   shape, dtype, row independence and determinism
                               of a forward model
-:func:`synthetic_evaluation`  a small :class:`~pyeki.eki.Evaluation` to run
+:func:`synthetic_evaluation`  a small :class:`~enskit.eki.Evaluation` to run
                               the checks against
 ============================= ==============================================
 
@@ -41,11 +41,11 @@ a bare function has nowhere to put an attribute.
 
 Notes
 -----
-The behaviour these checks verify is specified by the "Ensemble Kalman
+The behavior these checks verify is specified by the "Ensemble Kalman
 Inversion contract" page of the documentation.
 
 The four policy checks each take a policy and a small
-:class:`~pyeki.eki.Evaluation`, which :func:`synthetic_evaluation` builds, so
+:class:`~enskit.eki.Evaluation`, which :func:`synthetic_evaluation` builds, so
 testing a schedule never means running a forward model.
 :func:`check_forward_model` is the exception, and is here for two reasons. A
 forward model is not a policy and has no protocol to conform to — the layer
@@ -80,70 +80,8 @@ __all__ = [
 _ATOL = 1e-9
 
 
-def _close(got, want, what: str, atol: float = _ATOL) -> None:
-    got, want = np.asarray(got), np.asarray(want)
-    assert got.shape == want.shape, f"{what}: shape {got.shape} != {want.shape}"
-    err = np.abs(got - want).max() if got.size else 0.0
-    assert err <= atol, f"{what}: max abs err {err:.3e}"
-
-
-def _identical(got, want, what: str) -> None:
-    got, want = np.asarray(got), np.asarray(want)
-    assert got.shape == want.shape, f"{what}: shape {got.shape} != {want.shape}"
-    assert np.array_equal(got, want), f"{what}: not bit-identical"
-
-
-def synthetic_evaluation(
-    *,
-    n_members: int = 6,
-    u_dim: int = 3,
-    v_dim: int = 4,
-    step: int = 0,
-    beta: float = 0.25,
-    seed: int = 0,
-) -> Evaluation:
-    """A small :class:`~pyeki.eki.Evaluation` to run the checks against.
-
-    A user testing their own schedule should not have to run a forward model
-    to get one. The arrays are pseudo-random and independent of one another —
-    there is no observation to make the residuals agree with the predictions —
-    so this is a shape-and-purity fixture, not a physically consistent step.
-    The residuals do have spread, so a schedule's criterion has something to
-    measure.
-
-    Parameters
-    ----------
-    n_members, u_dim, v_dim
-        The sizes :math:`J`, :math:`P` and :math:`N`. Keyword-only.
-    step, beta
-        The step index and the level entering the step. Keyword-only.
-    seed
-        Seeds the NumPy generator that fills the arrays. Keyword-only.
-
-    Returns
-    -------
-    Evaluation
-        Unbatched, with every member valid.
-    """
-    rng = np.random.default_rng(seed)
-    ensemble = rng.normal(size=(n_members, u_dim))
-    predictions = rng.normal(size=(n_members, v_dim))
-    residuals = rng.normal(size=(n_members, v_dim))
-    anomalies = ensemble - ensemble.mean(axis=0)
-    spread = np.linalg.norm(anomalies) / np.sqrt((n_members - 1) * u_dim)
-    return Evaluation(
-        step=step,
-        beta=beta,
-        ensemble=jnp.asarray(ensemble),
-        predictions=jnp.asarray(predictions),
-        whitened_residuals=jnp.asarray(residuals),
-        rms_parameter_spread=jnp.asarray(spread),
-        n_valid=n_members,
-    )
-
-
 def check_schedule(schedule, evaluation: Evaluation | None = None) -> None:
-    """Check a :class:`~pyeki.eki.Schedule` against its protocol.
+    """Check a :class:`~enskit.eki.Schedule` against its protocol.
 
     Verifies that ``n_steps`` and ``beta_target`` are present, of the right
     types, and unchanged by reads; that ``next_increment`` returns either
@@ -219,7 +157,7 @@ def check_update(
     step: int = 0,
     beta=0.25,
 ) -> None:
-    """Check an :class:`~pyeki.eki.EnsembleUpdate` against its protocol.
+    """Check an :class:`~enskit.eki.EnsembleUpdate` against its protocol.
 
     Verifies that the result is ``(J, P)`` with the incoming dtype; that the
     rule is deterministic given its key; that new members lie in the
@@ -302,7 +240,7 @@ def check_update(
 
 
 def check_inflation(inflation, key=None, ensemble=None, *, step: int = 0, beta=0.25):
-    """Check an :class:`~pyeki.eki.Inflation` against its protocol.
+    """Check an :class:`~enskit.eki.Inflation` against its protocol.
 
     Verifies shape and dtype preservation; purity, by calling twice on the
     same arguments and comparing bit-exactly; and that the ensemble mean is
@@ -358,7 +296,7 @@ def check_inflation(inflation, key=None, ensemble=None, *, step: int = 0, beta=0
 
 
 def check_stopping_rule(stop, evaluation: Evaluation | None = None) -> None:
-    """Check a :class:`~pyeki.eki.StoppingRule` against its protocol.
+    """Check a :class:`~enskit.eki.StoppingRule` against its protocol.
 
     Verifies that a Python ``bool`` is returned — not a 0-d array, which is
     truthy in a way that hides a traced value — and that the rule is pure.
@@ -409,7 +347,7 @@ def check_forward_model(
     ============================================ ============================
     checked                                      not checked
     ============================================ ============================
-    the return is array-like of shape ``(J, N)`` failure signalling on your
+    the return is array-like of shape ``(J, N)`` failure signaling on your
     at two ensemble sizes                        model's own error paths
     the return's dtype is real floating and no   whether a non-finite row
     narrower than the argument's                 *should* have been produced
@@ -551,6 +489,68 @@ def check_forward_model(
         f"on row j of the argument alone. A model that normalizes across the "
         f"ensemble does this, and a run cannot detect it",
     )
+
+
+def synthetic_evaluation(
+    *,
+    n_members: int = 6,
+    u_dim: int = 3,
+    v_dim: int = 4,
+    step: int = 0,
+    beta: float = 0.25,
+    seed: int = 0,
+) -> Evaluation:
+    """A small :class:`~enskit.eki.Evaluation` to run the checks against.
+
+    A user testing their own schedule should not have to run a forward model
+    to get one. The arrays are pseudo-random and independent of one another —
+    there is no observation to make the residuals agree with the predictions —
+    so this is a shape-and-purity fixture, not a physically consistent step.
+    The residuals do have spread, so a schedule's criterion has something to
+    measure.
+
+    Parameters
+    ----------
+    n_members, u_dim, v_dim
+        The sizes :math:`J`, :math:`P` and :math:`N`. Keyword-only.
+    step, beta
+        The step index and the level entering the step. Keyword-only.
+    seed
+        Seeds the NumPy generator that fills the arrays. Keyword-only.
+
+    Returns
+    -------
+    Evaluation
+        Unbatched, with every member valid.
+    """
+    rng = np.random.default_rng(seed)
+    ensemble = rng.normal(size=(n_members, u_dim))
+    predictions = rng.normal(size=(n_members, v_dim))
+    residuals = rng.normal(size=(n_members, v_dim))
+    anomalies = ensemble - ensemble.mean(axis=0)
+    spread = np.linalg.norm(anomalies) / np.sqrt((n_members - 1) * u_dim)
+    return Evaluation(
+        step=step,
+        beta=beta,
+        ensemble=jnp.asarray(ensemble),
+        predictions=jnp.asarray(predictions),
+        whitened_residuals=jnp.asarray(residuals),
+        rms_parameter_spread=jnp.asarray(spread),
+        n_valid=n_members,
+    )
+
+
+def _close(got, want, what: str, atol: float = _ATOL) -> None:
+    got, want = np.asarray(got), np.asarray(want)
+    assert got.shape == want.shape, f"{what}: shape {got.shape} != {want.shape}"
+    err = np.abs(got - want).max() if got.size else 0.0
+    assert err <= atol, f"{what}: max abs err {err:.3e}"
+
+
+def _identical(got, want, what: str) -> None:
+    got, want = np.asarray(got), np.asarray(want)
+    assert got.shape == want.shape, f"{what}: shape {got.shape} != {want.shape}"
+    assert np.array_equal(got, want), f"{what}: not bit-identical"
 
 
 def _forward_call(forward, ensemble, name: str, u_dim: int, v_dim: int):

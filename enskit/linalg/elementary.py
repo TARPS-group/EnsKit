@@ -16,8 +16,8 @@ Elementary operators at the PSD level whose unrestricted mathematical
 namesake is not PSD carry the ``PSD`` prefix; the generic names stay
 reserved for unrestricted classes, should one ever be needed.
 
-See :mod:`pyeki.linalg.base` for the shape convention shared by all
-operators, and :mod:`pyeki.linalg.composite` for operators built out of
+See :mod:`enskit.linalg.base` for the shape convention shared by all
+operators, and :mod:`enskit.linalg.composite` for operators built out of
 these.
 
 Notes
@@ -61,26 +61,6 @@ __all__ = [
     "DensePSD",
     "PSDLowRank",
 ]
-
-
-def _check_size(cls_name: str, size) -> None:
-    """Validate a static side-length field."""
-    if not isinstance(size, int) or isinstance(size, bool):
-        raise TypeError(f"{cls_name}.size must be an int, got {type(size).__name__}")
-    if size < 1:
-        raise ValueError(f"{cls_name}.size must be positive, got {size}")
-
-
-def _check_square_field(cls_name: str, field_name: str, value) -> None:
-    """Structural check for a stored square-matrix field: rank exactly 2
-    and equal axes."""
-    _check_core_rank(cls_name, field_name, value, 2)
-    shape = getattr(value, "shape", None)
-    if shape is not None and shape[-1] != shape[-2]:
-        raise ValueError(
-            f"{cls_name}.{field_name}: expected a square matrix, got core shape "
-            f"({shape[-2]}, {shape[-1]})"
-        )
 
 
 @linop
@@ -137,7 +117,7 @@ class PSDDiagonal(PSDLinOp):
     diagonal
         The diagonal entries, strictly positive. Their number sets the
         size. (Named ``diagonal`` rather than ``diag``, which would shadow
-        the inherited :meth:`~pyeki.linalg.SquareLinOp.diag` method.)
+        the inherited :meth:`~enskit.linalg.SquareLinOp.diag` method.)
 
     Notes
     -----
@@ -234,71 +214,11 @@ class Dense(LinOp):
         return self.A
 
 
-def _lu_is_nonsingular(lu: Array) -> bool:
-    """Whether an LU factor is finite and numerically nonsingular.
-
-    Rounding rarely leaves an exactly zero pivot, even for an exactly
-    singular matrix, so a pivot counts as zero when it is below ``n`` units
-    of roundoff relative to the largest entry of the factor.
-    """
-    n = lu.shape[-1]
-    pivots = jnp.abs(jnp.diagonal(lu, axis1=-2, axis2=-1))
-    tol = n * jnp.finfo(lu.dtype).eps * jnp.max(jnp.abs(lu))
-    return bool(jnp.all(jnp.isfinite(lu)) & jnp.all(pivots > tol))
-
-
-def _check_given_lu(A: Array, lu: Array, piv: Array) -> None:
-    """Check the shapes and pivot dtype of an LU passed to :class:`DenseSquare`."""
-    n = A.shape[-1]
-    _check_core_rank("DenseSquare", "lu", lu, 2)
-    _check_core_rank("DenseSquare", "piv", piv, 1)
-    if lu.shape[-2:] != (n, n):
-        raise ValueError(
-            f"DenseSquare.lu: expected core shape ({n}, {n}) to match A, got "
-            f"{lu.shape[-2:]}"
-        )
-    if piv.shape[-1] != n:
-        raise ValueError(
-            f"DenseSquare.piv: expected length {n} to match A, got {piv.shape[-1]}"
-        )
-    if not jnp.issubdtype(piv.dtype, jnp.integer):
-        raise TypeError(
-            f"DenseSquare.piv must be an integer array, got dtype {piv.dtype}"
-        )
-
-
-def _check_lu_factorizes(
-    A: Array, lu: Array, piv: Array, lu_of_transpose: bool
-) -> None:
-    """Debug check that an LU passed to :class:`DenseSquare` factorizes ``A``.
-
-    Solves with it for one right-hand side and requires a backward-stable
-    residual, which any factorization of a different matrix misses.
-    """
-    n = A.shape[-1]
-
-    def factorizes(M):
-        x = jnp.linspace(1.0, 2.0, n)
-        b = dense_matvec(M, x)
-        y = jax.scipy.linalg.lu_solve((lu, piv), b, trans=int(lu_of_transpose))
-        residual = jnp.linalg.norm(dense_matvec(M, y) - b)
-        scale = jnp.linalg.norm(M) * jnp.linalg.norm(y) + jnp.linalg.norm(b)
-        return bool(residual <= 1e-8 * scale)
-
-    value_check(
-        A,
-        factorizes,
-        "DenseSquare: lu and piv do not factorize A"
-        + (".T" if lu_of_transpose else "")
-        + ". To factorize a new matrix, build DenseSquare(A).",
-    )
-
-
 @linop
 class DenseSquare(SquareLinOp):
     """A dense square matrix with no symmetry assumed, stored with its LU.
 
-    What :func:`~pyeki.linalg.densify` returns for a square non-PSD operator.
+    What :func:`~enskit.linalg.densify` returns for a square non-PSD operator.
     ``DenseSquare(A)`` computes the LU factorization once, at construction.
 
     Parameters
@@ -656,7 +576,7 @@ class PSDLowRank(PSDLinOp):
     extends to ``k >= n``, and to ``logdet``, because a capability asserts
     a *cheap* implementation, and none of the three is cheap at any width:
     each needs the ``(n, n)`` Gram matrix ``F F.T`` formed and factorized,
-    which is what :func:`~pyeki.linalg.densify` already does.
+    which is what :func:`~enskit.linalg.densify` already does.
     Rank is a second reason: capabilities that varied with the stored width
     would advertise a ``solve`` that is ``nan`` for every rank-deficient
     wide factor, which no shape can rule out.
@@ -664,7 +584,7 @@ class PSDLowRank(PSDLinOp):
     Densifying is therefore the route to those operations, and it is only
     valid on an instance known to be full rank. Densifying a thin-factor
     instance returns ``nan`` without raising, except under
-    :func:`~pyeki.linalg.debug_checks`.
+    :func:`~enskit.linalg.debug_checks`.
 
     Construction validates the rank and sizes of ``F`` always, and its
     finiteness when debug checks are enabled — the same check
@@ -699,3 +619,83 @@ class PSDLowRank(PSDLinOp):
 
     def _to_dense(self) -> Array:
         return self.F @ self.F.swapaxes(-1, -2)
+
+
+def _check_size(cls_name: str, size) -> None:
+    """Validate a static side-length field."""
+    if not isinstance(size, int) or isinstance(size, bool):
+        raise TypeError(f"{cls_name}.size must be an int, got {type(size).__name__}")
+    if size < 1:
+        raise ValueError(f"{cls_name}.size must be positive, got {size}")
+
+
+def _check_square_field(cls_name: str, field_name: str, value) -> None:
+    """Structural check for a stored square-matrix field: rank exactly 2
+    and equal axes."""
+    _check_core_rank(cls_name, field_name, value, 2)
+    shape = getattr(value, "shape", None)
+    if shape is not None and shape[-1] != shape[-2]:
+        raise ValueError(
+            f"{cls_name}.{field_name}: expected a square matrix, got core shape "
+            f"({shape[-2]}, {shape[-1]})"
+        )
+
+
+def _lu_is_nonsingular(lu: Array) -> bool:
+    """Whether an LU factor is finite and numerically nonsingular.
+
+    Rounding rarely leaves an exactly zero pivot, even for an exactly
+    singular matrix, so a pivot counts as zero when it is below ``n`` units
+    of roundoff relative to the largest entry of the factor.
+    """
+    n = lu.shape[-1]
+    pivots = jnp.abs(jnp.diagonal(lu, axis1=-2, axis2=-1))
+    tol = n * jnp.finfo(lu.dtype).eps * jnp.max(jnp.abs(lu))
+    return bool(jnp.all(jnp.isfinite(lu)) & jnp.all(pivots > tol))
+
+
+def _check_given_lu(A: Array, lu: Array, piv: Array) -> None:
+    """Check the shapes and pivot dtype of an LU passed to :class:`DenseSquare`."""
+    n = A.shape[-1]
+    _check_core_rank("DenseSquare", "lu", lu, 2)
+    _check_core_rank("DenseSquare", "piv", piv, 1)
+    if lu.shape[-2:] != (n, n):
+        raise ValueError(
+            f"DenseSquare.lu: expected core shape ({n}, {n}) to match A, got "
+            f"{lu.shape[-2:]}"
+        )
+    if piv.shape[-1] != n:
+        raise ValueError(
+            f"DenseSquare.piv: expected length {n} to match A, got {piv.shape[-1]}"
+        )
+    if not jnp.issubdtype(piv.dtype, jnp.integer):
+        raise TypeError(
+            f"DenseSquare.piv must be an integer array, got dtype {piv.dtype}"
+        )
+
+
+def _check_lu_factorizes(
+    A: Array, lu: Array, piv: Array, lu_of_transpose: bool
+) -> None:
+    """Debug check that an LU passed to :class:`DenseSquare` factorizes ``A``.
+
+    Solves with it for one right-hand side and requires a backward-stable
+    residual, which any factorization of a different matrix misses.
+    """
+    n = A.shape[-1]
+
+    def factorizes(M):
+        x = jnp.linspace(1.0, 2.0, n)
+        b = dense_matvec(M, x)
+        y = jax.scipy.linalg.lu_solve((lu, piv), b, trans=int(lu_of_transpose))
+        residual = jnp.linalg.norm(dense_matvec(M, y) - b)
+        scale = jnp.linalg.norm(M) * jnp.linalg.norm(y) + jnp.linalg.norm(b)
+        return bool(residual <= 1e-8 * scale)
+
+    value_check(
+        A,
+        factorizes,
+        "DenseSquare: lu and piv do not factorize A"
+        + (".T" if lu_of_transpose else "")
+        + ". To factorize a new matrix, build DenseSquare(A).",
+    )
