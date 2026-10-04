@@ -97,7 +97,7 @@ layers = [
     "enskit.eki",
     "enskit.gauss",
     "(enskit.algorithms)",
-    "(enskit.maps) | enskit.kalman",
+    "enskit.maps | enskit.kalman",
     "enskit.distribution",
     "enskit.linalg",
 ]

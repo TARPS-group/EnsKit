@@ -161,6 +161,31 @@ Distributions over named blocks, conditioning and conditional maps. See
 .. autofunction:: enskit.distribution.exact_moment_ensemble
 ```
 
+## enskit.maps
+
+Pushing distributions through maps, and the simulator contract. See
+{doc}`../user-guide/maps` for when to use each route, and
+{doc}`../maps-contract` for the full behavioral contract.
+
+```{eval-rst}
+.. automodule:: enskit.maps
+   :no-members:
+
+.. autofunction:: enskit.maps.pushforward
+
+.. autoclass:: enskit.maps.StructuredMap
+   :members: push_ensemble, push_gaussian
+
+.. autoclass:: enskit.maps.Linear
+   :members: op, output_dim, __call__, push_ensemble, push_gaussian
+
+.. autoclass:: enskit.maps.AdditiveNoise
+   :members: dim, push_ensemble, push_gaussian
+
+.. autoclass:: enskit.maps.BlackBox
+   :members: __call__
+```
+
 ## enskit.kalman
 
 Ensemble Kalman updates, inflation and relaxation. See
@@ -206,12 +231,14 @@ Ensemble Kalman updates, inflation and relaxation. See
 
 ## enskit.testing
 
-Conformance checks for an update rule or a conditional map you wrote.
+Conformance checks for code written against EnsKit's interfaces: a
+simulator, an update rule, a conditional map.
 
 ```{eval-rst}
 .. automodule:: enskit.testing
    :no-members:
 
+.. autofunction:: enskit.testing.check_simulator
 .. autofunction:: enskit.testing.check_update_rule
 .. autofunction:: enskit.testing.check_conditional_map
 ```

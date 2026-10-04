@@ -99,19 +99,18 @@ a function `(ensemble, noise) -> Gaussian`:
 
 ```python
 import math
+from enskit import maps
 from enskit.distribution import Gaussian
-from enskit.linalg import Dense, product
 
 def hybrid(ensemble, noise, alpha=0.2):
     """alpha * sample covariance + (1 - alpha) * B on "x", and "y" = H x."""
     fit = ensemble.marginal("x").project()
     blend = Gaussian({"x": fit.mean("x")},
                      factors={"x": fit.factor("x") * math.sqrt(alpha)},
-                     block_covs={"x": B * (1 - alpha)}).absorb("x")
-    Fx = blend.factor("x")                  # [sqrt(alpha) X, sqrt(1 - alpha) L_B]
-    joint = Gaussian({"x": blend.mean("x"), "y": H @ blend.mean("x")},
-                     factors={"x": Fx, "y": product(Dense(H), Fx)})
-    return joint.add_noise(noise)
+                     block_covs={"x": B * (1 - alpha)})
+    return (blend
+            .pipe(maps.pushforward, maps.Linear(H), inputs="x", output="y")
+            .add_noise(noise))
 
 post = kalman.update(ens, y=y, noise={"y": R}, update_rule=kalman.Matheron(),
                      approximation=hybrid, key=key)
@@ -119,8 +118,9 @@ post = kalman.update(ens, y=y, noise={"y": R}, update_rule=kalman.Matheron(),
 
 A static covariance $B$ blended with the sample covariance, as in a hybrid
 filter (Hamill & Snyder, 2000), fills in directions a small ensemble cannot
-represent. The `absorb` matters: it moves $B$ into the shared factor, so that
-it correlates `x` with `y` and enters the gain. Left as `x`'s independent term,
+represent. Pushing `x` through `maps.Linear` first *absorbs* its independent
+term (`Gaussian.absorb`): $B$ moves into the shared factor, so that it
+correlates `x` with `y` and enters the gain. Left as `x`'s independent term,
 $B$ would be variation independent of `y`, and `Matheron` would add a draw of
 it to every particle, which is additive inflation rather than a hybrid
 covariance. `Matheron` works with any approximation. `SymmetricSquareRoot`

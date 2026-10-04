@@ -1444,6 +1444,14 @@ Composing two inflations is a three-line callable and is not packaged
 (eki-failures)=
 ## Forward models and failed members
 
+:::{note}
+For the new layers, the simulator contract of {doc}`maps-contract`
+({ref}`maps-simulators`) generalizes this section to several inputs and
+outputs, and settles issue #19: a return wider than the working dtype raises,
+naming the simulator. This section keeps governing `enskit.eki` until PR 7
+replaces it.
+:::
+
 **The forward model is any callable** `(J, P) -> (J, N)`. That is the whole
 interface, and it is fixed by the package's permanent scope boundary: EnsKit
 ships no forward models for real use and defines no forward-model base class,

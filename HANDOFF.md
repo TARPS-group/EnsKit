@@ -7,8 +7,8 @@ vocabulary was fixed, 2026-09-02 after the joint was split into a
 Gaussian and a sample container, 2026-10-03 when the EnsKit redesign was
 adopted, the same day after PR 1's renames, again after PR 2's linalg
 additions, and 2026-10-04 after PR 3's distribution contract, PR 10's
-Kronecker operators, PR 4's `enskit.distribution`, the fix for #60, and PR 6's
-`enskit.kalman`. Read
+Kronecker operators, PR 4's `enskit.distribution`, the fix for #60, PR 5's
+`enskit.maps` and PR 6's `enskit.kalman`. Read
 `CLAUDE.md` first for conventions, including the layer rules, which the
 redesign replaced; then the two sections below; then the rest of this file,
 which describes the code as it stands before the redesign lands. That
@@ -22,12 +22,12 @@ first: `update`, `gaussian_approximation`, the `UpdateRule` and
 `ParticleUpdate` protocols, `SymmetricSquareRoot`, `Matheron`, and the four
 functions `inflate_multiplicative`, `inflate_additive`,
 `relax_to_prior_spread` and `relax_to_prior_perturbations`. The modules are
-private (`_common`, `_update`, `_rules`, `_inflation`). `enskit.testing` now
-exists, as a package with private modules, holding `check_update_rule` and
-`check_conditional_map`. The user-guide page is `docs/user-guide/updates.md`;
-the API reference has both modules; the import-linter contract names
-`enskit.kalman` and `enskit.testing` without parentheses; and the
-fresh-interpreter test in `tests/test_toy.py` now checks that no layer loads
+private (`_common`, `_update`, `_rules`, `_inflation`). `enskit.testing`
+gained `check_update_rule` and `check_conditional_map`, as private modules
+beside PR 5's `_simulator.py`. The user-guide page is
+`docs/user-guide/updates.md`; the API reference has a section; the
+import-linter contract names `enskit.kalman` without parentheses; and the
+fresh-interpreter test in `tests/test_toy.py` checks that no layer loads
 `enskit.testing` either.
 
 **Decided here** (each is in the contract's *Departures from the design*):
@@ -86,17 +86,89 @@ so a hybrid's static covariance must be absorbed into the shared factor, or
   port with PR 7.
 - **PR 8 (EnKF).** The hybrid approximation of Example 11 is a plain
   `Gaussian`, so only `Matheron` (general path, $k + J$ whitened vectors)
-  accepts it. Its static covariance must be absorbed before the linear map
-  (the user guide's example does it explicitly); `maps.pushforward` through
-  `Linear` should do it for a block with a term, as the distribution
-  contract's consumer section says.
+  accepts it. Its static covariance must be absorbed before the linear map;
+  `maps.pushforward` through `maps.Linear` does that, as the user guide's
+  example shows.
 - **PR 9 (localization).** Add `LocalizedUpdateRule`, `DomainLocalization`
   and `gaspari_cohn` to `enskit.kalman`, and a section to the contract. Reuse
   `_common.check_build_arguments`, `check_particles_finite` and
   `check_alignment`; run each new rule through `check_update_rule`.
-- **PR 5 (maps), if it merges after this.** It may add `check_simulator` to
-  `enskit.testing`; put it in its own private module and add one line to
-  `enskit/testing/__init__.py`.
+
+## 2026-10-04: PR 5, `enskit.maps` and the simulator contract
+
+The layer exists, implementing the new normative page
+`docs/maps-contract.md`: `pushforward`, the `StructuredMap` protocol,
+`Linear`, `AdditiveNoise` and `BlackBox`. Beside it, `enskit.testing` now
+exists, with `check_simulator`. Both are packages with private modules
+(`enskit/maps/_pushforward.py`, `_structured.py`, `_blackbox.py`,
+`_common.py`; `enskit/testing/_simulator.py`), and the import-linter
+contract names both without parentheses. The user-guide page is
+`docs/user-guide/maps.md`, whose code blocks a test executes and checks; the
+API reference has two new sections. `tests/test_maps.py` works through the
+contract's 17 obligations, then the ported regressions.
+
+**The simulator contract moved here.** It is the EKI forward-model contract
+generalized to several inputs and outputs (a tuple, mapping or `NamedTuple`
+from one call), with randomness declared by `needs_key = True` on any
+callable. **#19 is settled**: a return wider than the ensemble's dtype
+raises, naming the simulator; integer, boolean, complex and incomparable
+dtypes (float16 against bfloat16) raise too; narrower is promoted with one
+warning per call. The old `enskit.eki` driver keeps its own rule until PR 7;
+`docs/eki-contract.md` and `docs/user-guide/writing-a-forward-model.md` now
+point at the new page.
+
+**Departures from the stub**, each listed in the contract's *Departures*
+section: `needs_key` is a declaration any callable makes, not a `BlackBox`
+argument only; `BlackBox` takes a tuple `output_dim` for several outputs,
+checks the host's return inside the callback (the prototype's
+`np.asarray(..., dtype=...)` silently truncated an integer or wider return),
+and gets its zero derivative from `stop_gradient` on its inputs rather than a
+custom JVP; a `StructuredMap` pushes one output; `Linear` accepts arrays;
+`check_simulator(f, input_dims, output_dims, ...)` runs through `pushforward`.
+
+**Measured on JAX 0.10.2**, and pinned by tests:
+
+- An exception inside a `pure_callback`, including `BlackBox`'s own checks,
+  surfaces as `jax.errors.JaxRuntimeError` carrying the original message,
+  eagerly too. Warnings raised inside it do reach the caller's filters.
+- `stop_gradient` on the callback's inputs gives exact zeros under `grad`,
+  `jvp` and `jacfwd`, with no derivative rule on `pure_callback` needed.
+- Operators refuse leading axes at construction, so a vmapped family of
+  maps or operators comes only from stacking a pytree's leaves; the maps
+  refuse one outside `vmap`, as the distributions do.
+
+**Open from this PR**, from its adversarial review, each with measurements
+and options:
+
+- **#63**: the bit-exact permutation check of `check_simulator` rejects a
+  row-independent NumPy simulator at odd `n_particles` (BLAS kernels depend
+  on a row's position). It was inherited from `check_forward_model`; the
+  default `n_particles = 6` hides it on the macOS BLAS.
+- **#64**: `check_simulator` cannot check a float32 simulator.
+- **#65**: its subset check uses one fixed subset, and a `min`-coupled
+  simulator passes at 6 of 15 seeds.
+
+The review's defects were fixed here. The worst was a wider NumPy return
+demoted silently by `jnp.asarray` with x64 off; the dtype is now read before
+any conversion.
+
+**For later PRs.**
+
+- **PR 6 (kalman).** `enskit.testing` is a package: add `check_update_rule`
+  and `check_conditional_map` as private modules beside `_simulator.py`,
+  and to its index table. `kalman` never imports `maps`.
+- **PR 7 (EKI).** Evaluate with `maps.pushforward(ens, forward, inputs="u",
+  output="g")` and read `all_finite`. The promotion warning is **per
+  pushforward call**, where the old contract promised once per run: the
+  driver must either deduplicate it or the EKI contract must change.
+  Delete `check_forward_model`, its section of the EKI contract, and its
+  tests in `tests/test_toy.py`; the ported copies are in `tests/test_maps.py`
+  under the maps contract's *Ported regression tests* table.
+- **PR 8 (EnKF).** The forecast is a replacement plus a noise pushforward:
+  `pushforward(ens, transition, inputs="x", output="x")` then
+  `AdditiveNoise(Q)` with a key, or exactly on a projection.
+- **PR 11.** `writing-a-forward-model.md` describes the old driver's
+  callable; fold what it still says into `maps.md` when the old driver goes.
 
 ## 2026-10-04: failed particles in `enskit.distribution` (#60)
 
@@ -631,9 +703,9 @@ pyEKI. Nothing domain-specific should come back across.
 
 Follow the plan in `docs/redesign/index.md`, one pull request at a time, in
 a fresh session for each, as described in "Pull requests and handoffs" in
-`CLAUDE.md`. PRs 1 (#35), 2 (#36), 3 (#37), 4 (#38), 6 (#40) and 10 (#44)
-are done. PR 5 (#39, `enskit.maps`) depends only on PR 4; PR 9 (#43,
-localization) only on PR 6; PR 7 (#41, EKI) needs both 5 and 6.
+`CLAUDE.md`. PRs 1 (#35), 2 (#36), 3 (#37), 4 (#38), 5 (#39), 6 (#40) and
+10 (#44) are done. PR 7 (#41, EKI) and PR 9 (#43, localization) both have
+their dependencies met and can run side by side.
 #54's fix would change the regressions pinned in
 obligation 17, by design. The notes below, written before the redesign,
 still apply to the pull requests they name; their `pyeki` modules are now

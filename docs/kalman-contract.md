@@ -964,8 +964,8 @@ it, and its adversarial review, changed it as follows:
    says what its fixture does not cover; **`check_conditional_map` can check
    the keyed path** (`keyed_noise_free`).
 6. **A target's independent term is stated never to enter the gain**
-   ({ref}`kalman-matheron`), and the user guide's hybrid example absorbs its
-   static covariance.
+   ({ref}`kalman-matheron`), and the user guide's hybrid example pushes
+   through `maps.Linear`, which absorbs its static covariance first.
 
 (kalman-excluded)=
 ## Deliberately excluded
