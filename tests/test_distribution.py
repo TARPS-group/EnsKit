@@ -2732,3 +2732,20 @@ def test_conditional_map_satisfies_the_protocol():
     )
     out = cmap(ens.assign(z=jnp.ones((J, 1))), g=jnp.zeros(3))
     assert out.names == ("x", "z")
+
+
+def test_public_names_report_the_package_they_are_imported_from():
+    """The modules are private, so tracebacks, ``type()`` and pickles name
+    ``enskit.distribution``, the only place the names are importable from
+    by contract."""
+    import pickle
+
+    import enskit.distribution as dist
+
+    for name in dist.__all__:
+        assert getattr(dist, name).__module__ == "enskit.distribution", name
+    ens = Ensemble(x=jnp.asarray(RNG.normal(size=(3, 2))))
+    assert repr(type(ens.project())) == "<class 'enskit.distribution.EnsembleGaussian'>"
+    back = pickle.loads(pickle.dumps(ens))
+    assert type(back) is Ensemble
+    np.testing.assert_array_equal(back["x"], ens["x"])

@@ -99,3 +99,9 @@ __all__ = [
     "resample",
     "exact_moment_ensemble",
 ]
+
+# The modules above are private, so the public names report the package they
+# are imported from, in tracebacks, ``type()`` and pickles.
+for _name in __all__:
+    globals()[_name].__module__ = __name__
+del _name
