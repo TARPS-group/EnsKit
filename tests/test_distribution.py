@@ -2708,6 +2708,121 @@ def test_regression_a_factor_row_array_of_another_dtype_is_refused():
         Gaussian({"u": jnp.zeros(2, jnp.float32)}, factors={"u": np.ones((2, 3))})
 
 
+def _failed_particle_problem(bad: int, failed_log_weight: float = -np.inf):
+    """Six particles, ``bad`` failed (``nan``) and given a log weight whose
+    weight is zero, with the dense moments of the five others as the
+    reference. At ``-1000`` the weight underflows to zero while its square
+    root, about ``1e-217``, does not."""
+    J, d = 6, 2
+    X = np.random.default_rng(3).normal(size=(J, d))
+    lw = np.random.default_rng(4).normal(size=J)
+    lw[bad] = failed_log_weight
+    keep = np.arange(J) != bad
+    w = np.exp(lw[keep] - lw[keep].max())
+    w /= w.sum()
+    mean = w @ X[keep]
+    a = X[keep] - mean
+    cov = (a.T * w) @ a / (1 - np.sum(w**2))
+    Xb = X.copy()
+    Xb[bad] = np.nan
+    return jnp.asarray(Xb), jnp.asarray(lw), keep, mean, a, cov
+
+
+@pytest.mark.parametrize("failed_log_weight", [-np.inf, -1000.0])
+@pytest.mark.parametrize("bad", [0, 3])
+def test_regression_a_failed_particle_at_weight_zero_affects_no_moment(
+    bad, failed_log_weight
+):
+    """A failed particle is a ``nan`` row given log weight ``-inf``. Weighted
+    sums that multiply it by its zero weight return ``nan``, since
+    ``0 * nan`` is ``nan``: the mean, every anomaly and the projection were
+    all ``nan`` (issue #60). Particle 0 was also the reference of the
+    differences, which poisons them whatever the weights. Every moment must
+    instead equal the moment of the other five particles, and the failed
+    particle's factor column must be exactly zero. A finite log weight
+    whose weight underflows must count as weight zero too, in the mean and
+    the factor row alike, although its square root is positive."""
+    X, lw, keep, mean, a, cov = _failed_particle_problem(bad, failed_log_weight)
+    ens = Ensemble(x=X, log_weights=lw)
+    np.testing.assert_array_equal(ens.weights[bad], 0.0)
+    _close(ens.mean("x"), mean)
+    _close(ens.anomalies("x")[keep], a)
+    _close(_cov_dense(ens, "x"), cov)
+    for g in (ens.project(), jax.jit(lambda e: e.project())(ens)):
+        _close(g.mean("x"), mean)
+        _close(_cov_dense(g, "x"), cov)
+        np.testing.assert_array_equal(g.factor("x").to_dense()[:, bad], 0.0)
+
+
+@pytest.mark.parametrize("failed_log_weight", [-np.inf, -1000.0])
+@pytest.mark.parametrize("bad", [0, 3])
+def test_regression_a_failed_particle_at_weight_zero_has_finite_derivatives(
+    bad, failed_log_weight
+):
+    """Masking a product after it is formed still differentiates the product:
+    its derivative with respect to the weight is the ``nan`` particle. The
+    derivatives must be those of the ensemble without the failed particle,
+    and exactly zero with respect to the failed particle itself."""
+    X, lw, keep, *_ = _failed_particle_problem(bad, failed_log_weight)
+
+    def f(x, log_weights):
+        g = Ensemble(x=x, log_weights=log_weights).project()
+        return jnp.sum(g.mean("x") ** 3) + jnp.sum(g.factor("x").to_dense() ** 2)
+
+    gx, gl = jax.grad(f, argnums=(0, 1))(X, lw)
+    want_x, want_l = jax.grad(f, argnums=(0, 1))(X[keep], lw[keep])
+    np.testing.assert_array_equal(gx[bad], 0.0)
+    np.testing.assert_array_equal(gl[bad], 0.0)
+    _close(gx[keep], want_x)
+    _close(gl[keep], want_l)
+
+
+def test_regression_a_finite_outlier_at_weight_zero_costs_nothing():
+    """Differences taken from particle 0 at ``1e12`` and weight zero cost
+    about ``1e-4`` in the mean and the anomalies (issue #60), although the
+    particle contributes nothing. The reference is a particle of largest
+    weight, and particles of weight zero are left out of the sum."""
+    X, lw, keep, mean, a, _ = _failed_particle_problem(0)
+    ens = Ensemble(x=X.at[0].set(1e12), log_weights=lw)
+    _close(ens.mean("x"), mean, factor=10)
+    _close(ens.anomalies("x")[keep], a, factor=10)
+
+
+def test_regression_a_weighted_collapsed_ensemble_with_a_failed_particle_is_exact():
+    """The reference particle moves with the weights, and must still give
+    exactly zero anomalies for identical particles, with a failed one
+    beside them at weight zero."""
+    x = jnp.full((5, 2), 6.02e23).at[0].set(jnp.nan)
+    lw = jnp.asarray([-jnp.inf, -1.0, 2.0, 0.5, 2.0])
+    ens = Ensemble(x=x, log_weights=lw)
+    np.testing.assert_array_equal(ens.mean("x"), jnp.full(2, 6.02e23))
+    np.testing.assert_array_equal(ens.anomalies("x")[1:], jnp.zeros((4, 2)))
+    np.testing.assert_array_equal(ens.project().factor("x").to_dense(), 0.0)
+
+
+def test_regression_a_failed_particle_is_a_valid_ensemble_in_debug_mode():
+    """Non-finite rows are how a failed particle is marked, and the layers
+    above build ensembles holding them before deciding on repair. Debug mode
+    rejected them at construction (issue #60). Construction and ``assign``
+    accept them; ``project`` and ``cov`` refuse a failed particle of positive
+    weight, and accept it once ``reweight`` gives it weight zero."""
+    X, *_ = _failed_particle_problem(3)
+    with debug_checks():
+        ens = Ensemble(x=X)
+        ens = ens.assign(y=2 * X)
+        np.testing.assert_array_equal(ens.all_finite, np.arange(6) != 3)
+        for method in (lambda e: e.project(), lambda e: e.cov("y")):
+            with pytest.raises(ValueError, match="1 particle.*not finite in block"):
+                method(ens)
+        one_sided = Ensemble(x=jnp.nan_to_num(X), y=X)
+        with pytest.raises(ValueError, match="not finite in block 'y'"):
+            one_sided.cov("x", "y")
+        dropped = reweight(ens, jnp.where(ens.all_finite, 0.0, -jnp.inf))
+        g = dropped.project()
+        assert bool(jnp.all(jnp.isfinite(g.factor("y").to_dense())))
+        assert bool(jnp.all(jnp.isfinite(dropped.cov("x", "y").to_dense())))
+
+
 def test_pipe_refuses_a_family():
     J = 4
     ens, approx, *_ = _ensemble_problem(J, {"x": 2, "g": 3})

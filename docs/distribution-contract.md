@@ -552,6 +552,8 @@ with log weights $\ell$, or $w_j = 1/J$ when unweighted.
   values only in `is_weighted`.
 - Arrays are stored as given (converted with `jnp.asarray`, never copied to a
   different dtype).
+- Particles need not be finite, in debug mode or not: a non-finite row is
+  how a failed particle is marked ({ref}`dist-failed-particles`).
 
 **Introspection.** `names` (tuple, in order), `dims` (dict, in order),
 `n_particles` (`int`), `is_weighted` (`bool`), `log_weights` (the stored array
@@ -586,12 +588,13 @@ reads values, so it is an array, never a Python `bool`.
 
 **Moments.**
 
-- `mean(name)`: $\bar x = \sum_j w_j x_j$, `(d,)`.
+- `mean(name)`: $\bar x = \sum_j w_j x_j$, `(d,)`, computed as
+  $x_r + \sum_{i : w_i > 0} w_i (x_i - x_r)$.
 - `anomalies(name)`: $a_j = x_j - \bar x$, `(J, d)`. Formed by subtracting
-  the first particle, then the mean of the differences:
+  a reference particle $x_r$, then the mean of the differences:
 
   $$
-  a_j = (x_j - x_1) - \sum_i w_i (x_i - x_1),
+  a_j = (x_j - x_r) - \sum_{i : w_i > 0} w_i (x_i - x_r),
   $$
 
   so particles that are identical give exactly zero anomalies however large
@@ -600,6 +603,19 @@ reads values, so it is an array, never a Python `bool`.
   moves them by order 1 where it should leave them unchanged. The means are taken over the particle axis with the
   axis kept, so an operand whose leading axis happens to equal $J$ cannot
   broadcast against the wrong axis.
+
+  The reference $x_r$ is the first particle when unweighted, and a particle
+  of largest log weight when weighted, so it never has weight zero.
+  The sums run over the particles of positive weight $w_i$, as `weights`
+  reports it: the term of a particle of weight zero is not computed, rather
+  than computed as $0 \cdot (x_i - x_r)$, which is `nan` when the particle
+  is not finite. Its own anomaly $a_j$ is still formed, and is non-finite
+  when the particle is. For a particle of weight zero whose difference
+  $x_i - x_r$ is finite, the term was an exact zero anyway, so the mask
+  changes nothing there. The choice of reference is a separate matter: a
+  reference of weight zero far from the others made every difference
+  inaccurate (a particle at $10^{12}$ cost $10^{-4}$ in the mean), and a
+  particle of largest weight does not.
 - `cov(a, b=None)`: the sample covariance
 
   $$
@@ -641,8 +657,9 @@ m_b = \sum_j w_j x^{(b)}_j, \qquad
 $$
 
 $\sqrt{w_j}$ is computed in log space, $\exp\big((\ell_j - \operatorname{lse}(\ell))/2\big)$,
-so a particle of weight zero contributes an exact zero column with a finite
-derivative. The divisor is computed as
+and the anomaly is masked to zero before it is scaled, so a particle of
+weight zero contributes an exact zero column with a finite derivative, even
+when the particle is not finite. The divisor is computed as
 $1 - \sum_i w_i^2 = -\operatorname{expm1}\big(\operatorname{lse}(2\ell) - 2\operatorname{lse}(\ell)\big)$,
 which stays accurate when one weight dominates. Each $\operatorname{lse}$
 factors out the largest term and sums the rest through `log1p`: a plain
@@ -656,6 +673,44 @@ When the weights are concentrated on one particle to working precision, the
 divisor rounds to zero and the weighted covariance is undefined. That is a
 value precondition: in debug mode `project` raises `ValueError` naming the
 effective sample size; otherwise the factor rows are `inf` or `nan`.
+
+Every particle of positive weight must be finite. That too is a value
+precondition, of `project` and of `cov`: in debug mode they raise
+`ValueError` naming the block and the number of such particles, checked
+block by block before the concentrated weights; otherwise the means or
+factor rows are `nan`.
+
+(dist-failed-particles)=
+### Failed particles
+
+A particle with a non-finite entry in any block is *failed*; `all_finite`
+finds them. The layers above produce them and decide what to do about
+them. This layer never repairs, and it treats a failed particle as a
+valid state of an `Ensemble`:
+
+- construction, `assign`, the structural methods, `weights`, `all_finite`,
+  `effective_sample_size`, `reweight` and `resample` accept one, in debug
+  mode or not;
+- the moments and `project` leave out every particle of weight zero, so
+  a failed particle given log weight $-\infty$, or a finite log weight
+  whose weight underflows to zero, affects no mean, covariance or
+  projection, no other particle's anomaly, and none of their derivatives;
+  `resample` never selects it;
+- `project` and `cov` refuse a failed particle of positive weight, in debug
+  mode ({ref}`dist-project`). With one, `mean` is `nan`, and so is every
+  anomaly.
+
+The conditional maps are not on the first list: their tier-4 check on
+samples covers every row.
+
+Giving every failed particle weight zero, without resampling, is
+
+```python
+ens = reweight(ens, jnp.where(ens.all_finite, 0.0, -jnp.inf))
+```
+
+and the alternative is the algorithms' repair, which replaces the failed
+rows.
 
 (dist-gaussian)=
 ## `Gaussian`
@@ -1324,7 +1379,7 @@ outcome is not concrete.
 | ---- | ------ | -------- |
 | 2. construction | ranks, sizes, dtypes, operator types and shapes, block names, the representation rules | a mean not 1-D; an ensemble block not 2-D; $J < 2$; a factor row of the wrong height or width; a term not a `PSDLinOp`; a block with neither part; `n_particles` not the factor width; mixed dtypes |
 | 3. call | block names; static arguments; value core shapes; structural conditions on the given blocks; capabilities; key presence and type | an unknown block; a block given twice; a value not `(d_c,)`; mixed noisy and exact given blocks; exact size conditions; `n_particles` not an `int` $\ge 2$; a raw `uint32` key |
-| 4. value (debug) | finiteness of means and particles at construction; centering of an `EnsembleGaussian`; finiteness of values and samples at call; the whitening check; exact-case rank; concentrated weights in `project`; non-finite increments in `reweight`; the result check | violations give `nan`, `inf`, or a finite wrong answer outside debug mode |
+| 4. value (debug) | finiteness of means at construction; finiteness of particles of positive weight in `project` and `cov`; centering of an `EnsembleGaussian`; finiteness of values and samples at call; the whitening check; exact-case rank; concentrated weights in `project`; non-finite increments in `reweight`; the result check | violations give `nan`, `inf`, or a finite wrong answer outside debug mode |
 
 **Order of checks** within a method, so that when two things are wrong the
 same one is always reported:
@@ -1528,7 +1583,9 @@ local noise is tapered (`diag_congruence`), so the local whitened factor
 differs from any slice of a global $S$ and is computed anew in any case.
 
 **The algorithms** read `all_finite` to find failed particles, and decide
-repair themselves; this layer never repairs.
+repair themselves; this layer never repairs. An `Ensemble` holding failed
+particles is valid, so `pushforward` builds one directly from a simulator's
+output ({ref}`dist-failed-particles`).
 
 (dist-conformance)=
 ## Conformance
@@ -1677,8 +1734,13 @@ docstrings' reasoning, updated to this layer's names:
 New regression tests join them: the weighted projection with one dominant
 weight; exact moments jointly across blocks; exact conditioning with $J = N$;
 the latent width kept by a marginal over blocks without factor rows; the
-cancelling log-density form; and a structured factor row left undensified by
-noisy conditioning. (The design review's dropped target noise, a variance of
+cancelling log-density form; a structured factor row left undensified by
+noisy conditioning; and, for failed particles ({ref}`dist-failed-particles`),
+a `nan` particle at weight zero, first and in the middle, affecting no
+moment, projection or derivative, a finite outlier at weight zero costing
+nothing, a weighted collapsed ensemble staying exact beside one, and debug
+mode accepting one at construction and refusing it at positive weight in
+`project` and `cov`. (The design review's dropped target noise, a variance of
 0.044 where the conditional has 4.04, was a defect of the stochastic rule,
 which samples target terms; its regression belongs to PR 6.)
 
@@ -1731,7 +1793,8 @@ this page governs. Each departure, and why:
 ## Changes made while implementing
 
 PR 4 implemented this page and corrected it where the implementation showed
-it to be wrong or incomplete. Each change, and why:
+it to be wrong or incomplete; change 8 followed it, from issue #60. Each
+change, and why:
 
 1. **The accuracy claim is narrowed** ({ref}`dist-accuracy`). The page said
    the conditional mean was accurate to a few $\varepsilon$ at every
@@ -1766,6 +1829,16 @@ it to be wrong or incomplete. Each change, and why:
    marked. The positions are now scaled by the cumulative sum's last entry,
    and the index is bounded by the last particle of positive weight
    ({ref}`dist-prng`).
+8. **Failed particles are a valid state** ({ref}`dist-failed-particles`,
+   issue #60). Tier 4 checked the particles' finiteness at construction,
+   which rejected, in debug mode, every ensemble holding a failed particle,
+   before the layers above could repair it. And a `nan` particle
+   of weight zero made every weighted moment `nan`, since $0 \cdot
+   \mathrm{nan} = \mathrm{nan}$, whether it was the reference of the
+   differences (particle 1, as it was) or not. The finiteness check moved
+   to `project` and `cov`, for particles of positive weight; the sums leave
+   out particles of weight zero; and the reference of a weighted ensemble is
+   a particle of largest weight.
 
 (dist-excluded)=
 ## Deliberately excluded

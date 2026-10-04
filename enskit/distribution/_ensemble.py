@@ -51,10 +51,18 @@ class Ensemble:
     ValueError
         If there are no blocks, a block is not 2-D or has no columns, the
         blocks disagree on ``J``, ``J < 2``, or ``log_weights`` is not
-        ``(J,)``. In debug mode, also if a particle is not finite.
+        ``(J,)``.
     TypeError
         If a block is not a real floating array, the blocks' dtypes differ,
         ``log_weights`` has another dtype, or a block is given twice.
+
+    Notes
+    -----
+    Particles need not be finite. A non-finite row is how a failed particle
+    is marked, and :attr:`all_finite` finds them. The moments leave out every
+    particle whose weight is zero, so a failed particle given log weight
+    :math:`-\infty` affects no mean, covariance or projection, and no other
+    particle's anomaly.
 
     Examples
     --------
@@ -97,8 +105,6 @@ class Ensemble:
                     f"{where}: log_weights must have shape ({n_particles},), got "
                     f"{log_weights.shape}"
                 )
-        for name, arr in zip(arrays, stored, strict=True):
-            c.check_finite(where, f"block {name!r}", arr)
         object.__setattr__(self, "names", tuple(arrays))
         object.__setattr__(self, "_blocks", tuple(stored))
         object.__setattr__(self, "_log_weights", log_weights)
@@ -224,7 +230,7 @@ class Ensemble:
         ------
         ValueError
             If an array is not ``(J, d)`` with this ensemble's ``J`` and
-            ``d >= 1``. In debug mode, also if it is not finite.
+            ``d >= 1``.
         TypeError
             If an array's dtype is not this ensemble's, or a block is given
             twice.
@@ -237,8 +243,6 @@ class Ensemble:
             arr = jnp.asarray(value)
             _check_block(where, name, arr, self.n_particles, self._dtype)
             checked[name] = arr
-        for name, arr in checked.items():
-            c.check_finite(where, f"block {name!r}", arr)
         pairs = [
             (n, checked.get(n, a)) for n, a in zip(self.names, self._blocks, strict=True)
         ]
@@ -283,26 +287,35 @@ class Ensemble:
 
             \bar x = \sum_{j=1}^{J} w_j x_j .
 
-        Computed as the first particle plus the mean of the differences from
-        it, so identical particles have exactly their common value as mean.
+        Computed as a reference particle :math:`x_r` plus the mean of the
+        differences from it, so identical particles have exactly their common
+        value as mean. The reference is the first particle when unweighted,
+        and a particle of largest weight when weighted. Particles of weight
+        zero are left out of the sum, so a non-finite particle of weight zero
+        does not affect the mean.
         """
         c.guard(self, "mean")
         x = self._block(f"{self!r}.mean", name)
-        return x[..., 0, :] + jnp.squeeze(self._mean_of_differences(x), axis=-2)
+        return self._reference(x)[..., 0, :] + jnp.squeeze(
+            self._mean_of_differences(x), axis=-2
+        )
 
     def anomalies(self, name: str) -> Array:
         r"""Raw deviations from the mean, ``(J, d)``.
 
         .. math::
 
-            a_j = x_j - \bar x = (x_j - x_1) - \sum_{i=1}^{J} w_i (x_i - x_1),
+            a_j = x_j - \bar x = (x_j - x_r) - \sum_{i : w_i > 0} w_i (x_i - x_r),
 
-        computed in the second form, so particles that are identical give
-        exactly zero anomalies however large their magnitude.
+        computed in the second form, with the reference particle :math:`x_r`
+        of :meth:`mean`, so particles that are identical give exactly zero
+        anomalies however large their magnitude. A particle of weight zero
+        has its own anomaly, which is non-finite if the particle is, and does
+        not affect the others.
         """
         c.guard(self, "anomalies")
         x = self._block(f"{self!r}.anomalies", name)
-        diffs = x - x[..., :1, :]
+        diffs = x - self._reference(x)
         return diffs - self._mean_of_differences(x)
 
     def cov(self, a: str, b: str | None = None) -> LinOp:
@@ -330,10 +343,14 @@ class Ensemble:
         ------
         KeyError
             If a name is not a block.
+        ValueError
+            In debug mode, if a particle of positive weight is not finite in
+            block ``a`` or ``b``. Otherwise the result is then ``nan``.
         """
         where = f"{self!r}.cov"
         c.guard(self, "cov")
         c.check_known(where, self.names, (a,) if b is None else (a, b))
+        self._check_failed_particles(where, (a,) if b is None else (a, b))
         F_a = self._factor_row(a)
         if b is None or b == a:
             return PSDLowRank(F_a)
@@ -383,8 +400,9 @@ class Ensemble:
         ValueError
             In debug mode, if the weights are concentrated on one particle to
             working precision (:math:`1 - \sum_i w_i^2` rounds to zero),
-            where the weighted covariance is undefined. Otherwise the factor
-            rows are then ``inf`` or ``nan``.
+            where the weighted covariance is undefined; and if a particle of
+            positive weight is not finite. Otherwise the means or factor rows
+            are then ``inf`` or ``nan``.
 
         Notes
         -----
@@ -395,6 +413,7 @@ class Ensemble:
         from ._gaussian import EnsembleGaussian, Gaussian
 
         c.guard(self, "project")
+        self._check_failed_particles(f"{self!r}.project", self.names)
         if self.is_weighted:
             c.lazy_value_check(
                 self._weight_pieces()[2],
@@ -448,13 +467,33 @@ class Ensemble:
             _log_weights=self._log_weights,
         )
 
+    def _reference(self, x: Array) -> Array:
+        """The reference particle ``x_r``, ``(1, d)``: the first one when
+        unweighted, one of largest weight when weighted, so never one of
+        weight zero."""
+        if self._log_weights is None:
+            return x[..., :1, :]
+        r = jnp.argmax(self._log_weights, axis=-1)
+        return jnp.take(x, r[..., None], axis=-2)
+
+    def _positive_weight(self) -> Array:
+        """``(J,)`` boolean: ``w_j > 0``, as :attr:`weights` reports it."""
+        return jax.nn.softmax(self._log_weights) > 0
+
     def _mean_of_differences(self, x: Array) -> Array:
-        """The weighted mean of ``x_j - x_1``, with the particle axis kept."""
-        diffs = x - x[..., :1, :]
+        """The weighted mean of ``x_j - x_r``, with the particle axis kept.
+
+        Particles of weight zero are masked out of the differences before
+        they are weighted: ``0 * nan`` is ``nan``, and masking the product
+        instead would still give a ``nan`` derivative with respect to the
+        log weights.
+        """
+        diffs = x - self._reference(x)
         if self._log_weights is None:
             return jnp.mean(diffs, axis=-2, keepdims=True)
-        w = jax.nn.softmax(self._log_weights)
-        return jnp.sum(w[..., :, None] * diffs, axis=-2, keepdims=True)
+        w = jax.nn.softmax(self._log_weights)[..., :, None]
+        diffs = jnp.where(self._positive_weight()[..., :, None], diffs, 0)
+        return jnp.sum(w * diffs, axis=-2, keepdims=True)
 
     def _weight_pieces(self):
         """``(w, sqrt(w), 1 - sum(w**2))``, each computed in log space."""
@@ -471,7 +510,34 @@ class Ensemble:
         if self._log_weights is None:
             return a.T / math.sqrt(self.n_particles - 1)
         _, sqrt_w, divisor = self._weight_pieces()
+        a = jnp.where(self._positive_weight()[:, None], a, 0)
         return (sqrt_w[:, None] * a).T / jnp.sqrt(divisor)
+
+    def _check_failed_particles(self, where: str, names) -> None:
+        """Debug-mode check that every particle of positive weight is finite
+        in the named blocks."""
+
+        def failed(a):
+            """``(J,)`` boolean: a particle of positive weight is not finite."""
+            out = ~jnp.all(jnp.isfinite(a), axis=-1)
+            if self._log_weights is not None:
+                out = out & self._positive_weight()
+            return out
+
+        for name in names:
+            x = self._block(where, name)
+            c.lazy_value_check(
+                x,
+                lambda a: ~jnp.any(failed(a)),
+                lambda x=x, name=name: (
+                    f"{where}: {int(jnp.sum(failed(x)))} "
+                    f"particle(s) of positive weight are not finite in block "
+                    f"{name!r}. Failed particles are found with all_finite; "
+                    f"repair them, or give them weight zero with "
+                    f"reweight(ensemble, jnp.where(ensemble.all_finite, 0.0, "
+                    f"-jnp.inf))"
+                ),
+            )
 
 
 # ---------------------------------------------------------------------------
