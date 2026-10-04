@@ -7,11 +7,40 @@ vocabulary was fixed, 2026-09-02 after the joint was split into a
 Gaussian and a sample container, 2026-10-03 when the EnsKit redesign was
 adopted, the same day after PR 1's renames, again after PR 2's linalg
 additions, and 2026-10-04 after PR 3's distribution contract, PR 10's
-Kronecker operators and PR 4's `enskit.distribution`. Read `CLAUDE.md` first for
-conventions, including the layer rules, which the redesign replaced; then the
-two sections below; then the rest of this file, which describes the code as it
-stands before the redesign lands. That description is historical: where it
-names `pyeki.<module>`, the module is now `enskit.<module>`.
+Kronecker operators, PR 4's `enskit.distribution` and the fix for #60. Read
+`CLAUDE.md` first for conventions, including the layer rules, which the
+redesign replaced; then the two sections below; then the rest of this file,
+which describes the code as it stands before the redesign lands. That
+description is historical: where it names `pyeki.<module>`, the module is now
+`enskit.<module>`.
+
+## 2026-10-04: failed particles in `enskit.distribution` (#60)
+
+A failed particle, a row with a non-finite entry, is now a valid state of an
+`Ensemble`. The contract's new subsection *Failed particles* states the
+rules, and its *Changes made while implementing* records the change as item 8.
+
+- **Construction and `assign` accept non-finite particles**, in debug mode
+  too. The finiteness check moved to `project` and `cov`, for particles of
+  positive weight only, and names the block and the remedy.
+- **The weighted sums leave out particles of weight zero**, and a weighted
+  ensemble's reference particle is one of largest log weight
+  (`Ensemble._reference`). A `nan` particle at log weight $-\infty$ affects
+  no mean, covariance, projection, other particle's anomaly or derivative,
+  and a finite outlier at weight zero
+  no longer costs $10^{-4}$ in the mean. Unweighted ensembles compute
+  exactly as before.
+- The mask goes on the operand, not the product: `w * where(w > 0, d, 0)`.
+  `where(w > 0, w * d, 0)` gives the right values and a `nan` derivative
+  with respect to the log weights. A regression test covers each.
+- Dropping failed particles without resampling is
+  `reweight(ens, jnp.where(ens.all_finite, 0.0, -jnp.inf))`, now in the
+  user guide's *Weights* section.
+- **Still open, for PR 6 and PR 7:** the conditional maps' tier-4 check on
+  samples covers every row, so in debug mode `MatheronMap` refuses an
+  ensemble with a failed particle even at weight zero. Since the update
+  rules refuse weighted ensembles anyway, failed particles must be repaired
+  before an update; commented on #40 and #41.
 
 ## 2026-10-04: PR 4, `enskit.distribution`
 
@@ -58,11 +87,7 @@ change is listed in its new section *Changes made while implementing*:
 
 **Open from this PR:**
 
-- **#60.** Failed particles meet this layer badly in two ways. Debug mode's
-  construction check rejects non-finite particles, which is how the layers
-  above mark failures. And a `nan` particle at weight zero still poisons the
-  weighted mean, since $0\cdot\mathrm{nan}$ is `nan`. PR 5 and PR 7 should
-  settle it before relying on either.
+- **#60**, since fixed (see the section above).
 - **#33**, commented: operators carry no dtype, so the contract's "mixed
   dtypes raise" is enforced for arrays only. A float64 operator row or term on
   float32 means is accepted, and its results are promoted.
@@ -72,8 +97,8 @@ change is listed in its new section *Changes made while implementing*:
 - **PR 5 (maps).** Build Gaussians through the public constructor, with
   keyword-only `factors=` and `block_covs=` (both classes), and
   `EnsembleGaussian(..., n_particles=J)` for a result on the same latent
-  space. A pushforward that writes failed rows into an `Ensemble` hits #60's
-  debug check.
+  space. A pushforward may write failed rows into an `Ensemble` directly;
+  construction accepts them in debug mode too (#60).
 - **PR 6 (kalman).** `MatheronMap` passes the targets' independent terms
   through unsampled, so `kalman.Matheron` must add those draws itself, as
   the contract's consumer section says. `particle_coefficients(values,
@@ -524,8 +549,8 @@ Follow the plan in `docs/redesign/index.md`, one pull request at a time, in
 a fresh session for each, as described in "Pull requests and handoffs" in
 `CLAUDE.md`. PRs 1 (#35), 2 (#36), 3 (#37), 4 (#38) and 10 (#44) are done.
 PR 5 (#39, `enskit.maps`) and PR 6 (#40, `enskit.kalman`) both depend only
-on PR 4 and can run side by side. #60 is worth settling before either relies
-on failed particles. #54's fix would change the regressions pinned in
+on PR 4 and can run side by side; #60, which both rely on, is fixed.
+#54's fix would change the regressions pinned in
 obligation 17, by design. The notes below, written before the redesign,
 still apply to the pull requests they name; their `pyeki` modules are now
 `enskit` modules.

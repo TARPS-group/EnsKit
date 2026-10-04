@@ -176,6 +176,20 @@ unweighted ensemble, systematically (Kitagawa, 1996) or multinomially (Gordon
 et al., 1993). The Kalman update rules refuse weighted ensembles, whose
 projection is not aligned; resample first.
 
+**Failed particles.** A particle whose forward-model evaluation failed comes
+back as a row of `nan`, and `ens.all_finite` marks which particles are
+intact. An ensemble holding failed particles is valid, but its mean and
+covariance are `nan` until something is done about them. Giving them weight
+zero drops them from the mean, the covariance, `project`, and any later
+`resample`, without drawing anything:
+
+```python
+ens = reweight(ens, jnp.where(ens.all_finite, 0.0, -jnp.inf))
+```
+
+With debug checks on, `project` and `cov` raise if a failed particle still
+has positive weight.
+
 ## Exact moments for tests and examples
 
 `exact_moment_ensemble(key, gaussian, J)` returns particles whose sample mean
