@@ -175,6 +175,7 @@ examples/index
 :hidden:
 
 linop-contract
+distribution-contract
 gaussian-contract
 eki-contract
 joint-factor

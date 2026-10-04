@@ -6,11 +6,73 @@ against the normative contract, 2026-08-27 after `pyeki.eki` shipped,
 vocabulary was fixed, 2026-09-02 after the joint was split into a
 Gaussian and a sample container, 2026-10-03 when the EnsKit redesign was
 adopted, the same day after PR 1's renames, and again after PR 2's linalg
-additions. Read `CLAUDE.md` first for
+additions, and 2026-10-04 after PR 3's distribution contract. Read
+`CLAUDE.md` first for
 conventions, including the layer rules, which the redesign replaced; then the
 two sections below; then the rest of this file, which describes the code as it
 stands before the redesign lands. That description is historical: where it
 names `pyeki.<module>`, the module is now `enskit.<module>`.
+
+## 2026-10-04: PR 3, the distribution contract
+
+`docs/distribution-contract.md` specifies `enskit.distribution` before any
+code exists. It absorbs `docs/gaussian-contract.md`, which keeps governing
+`enskit.gauss` until PR 7 and now says so in its status box. The page lists
+its departures from the stubs in its section *Departures from the design*;
+PR 4 implements the page, not the stubs, wherever they differ.
+
+**Settled here:**
+
+- **#10.** Every conditioning path runs the same two debug-mode checks:
+  a *whitening check* right after whitening (it names the given block and
+  the likely cause, since `IdentityPlusGram` does not check `S`), and a
+  *result check* last. The whitening counts are a table in the page's
+  *Cost* section and are count-tested (obligation 15).
+- **#25.** Numerically singular noise that still whitens is not a silent
+  wrong answer: it approximates the limit (measured agreement $5\times10^{-9}$
+  for a rank-7-of-8 dense term). Exactly singular noise that whitens to
+  `inf` is caught by the whitening check in debug mode and is `nan`
+  otherwise. The covariance's loss of accuracy at large $\sigma_{\max}$ is
+  real only for a thin basis ($k > N$): about $\varepsilon\sigma_{\max}$
+  relative, of either sign. Past $\sigma_{\max}\approx1/\varepsilon$ the
+  variance is exactly $0$ along a coordinate axis and overstated by orders of
+  magnitude along a random direction. It is recorded in the page and opened
+  as **#54** against `IdentityPlusGram`, with options.
+- **Differentiability** is stated as PR 2 measured it: first derivatives
+  degenerate-safe, second derivatives exact only for the log-determinant
+  parts (#52).
+
+**Departures PR 4 and PR 6 need to know about:**
+
+- `log_density`'s quadratic term goes through `LowRankUpdate(D_c,
+  F_c).whiten`. The obvious $\lVert b\rVert^2 - \langle Sb, A^{-1}Sb\rangle$
+  cancels catastrophically, and is wrong by a factor of several at
+  $\sigma_{\max} = 10^8$. The adversarial review found this; the page has
+  the measurements.
+- `Gaussian(means, *, factors=None, block_covs=None, latent_dim=None)`: the
+  two mappings are keyword-only, since a covariance passed as a factor row is
+  silent.
+- Absent factor rows and terms, and an unweighted ensemble's `log_weights`,
+  are `None` and so pytree structure: a `lax.scan` carry cannot change them
+  (**#56**).
+- `MatheronMap.particle_coefficients(values, *, key)` is new, and its key is
+  required. It is the
+  public route to the $J+1$ whitenings that `kalman.Matheron`'s aligned path
+  needs; the prototype reached into the map's private `S` instead. It returns
+  coefficients, not particles, so the caller adds $F_x w$ to its own
+  particles and a no-op stays bit-exact.
+- Value checks follow the tiers: `project`'s concentrated-weights check and
+  `reweight`'s `nan`/`+inf` check are debug-mode only (the stubs had them
+  eager).
+- Every block has a factor row or an independent term; `square_root_map`
+  and `conditional_map` take only blocks with independent terms; `absorb`
+  raises on a block without one; `compress` always returns a plain
+  `Gaussian`; `sample` needs `n_particles >= 2`.
+- The pinned draws, including split arities, are a table in the page's
+  *Randomness* section. Snapshot them in PR 4.
+- The page's *Conformance* section ends with a table mapping each regression
+  test in `tests/test_gauss.py` to its port. PR 4 should port them under
+  those names and keep the old docstrings' reasoning.
 
 ## 2026-10-03: PR 2, the linalg additions
 
@@ -341,9 +403,11 @@ pyEKI. Nothing domain-specific should come back across.
 
 Follow the plan in `docs/redesign/index.md`, one pull request at a time, in
 a fresh session for each, as described in "Pull requests and handoffs" in
-`CLAUDE.md`. PRs 1 (#35) and 2 (#36) are done; PR 3 (#37), the
-distribution contract, is next, and PR 10 (#44), the Kronecker family, can
-run alongside it. The notes below, written before the redesign,
+`CLAUDE.md`. PRs 1 (#35), 2 (#36) and 3 (#37) are done; PR 4 (#38),
+`enskit.distribution`, is next, implementing `docs/distribution-contract.md`.
+PR 10 (#44), the Kronecker family, can run alongside it, and so can #54 if
+the maintainer wants the thin-basis fix before PR 4 pins the current
+behavior. The notes below, written before the redesign,
 still apply to the pull requests they name; their `pyeki` modules are now
 `enskit` modules.
 
@@ -474,6 +538,7 @@ layer; this is the index.
 | A run at $P \gg J$ reports a spread the exact posterior contradicts | at $P = 2000$, $N = 40$, $J = 40$ the ensemble's mean posterior sd is 0.014 against an exact 0.990, a factor of seventy, with nothing raised and no history field flagging it |
 | A deterministic square-root update can get the covariance right and the shape wrong | on a nonlinear problem `TransformUpdate` leaves the least-varying direction with a kurtosis of 19 and two members holding 72% of its variance; it is a linear recombination of existing anomalies, so more members do not help. Only visible in a scatter plot or a shape statistic — no `HistoryRecord` field reports it |
 | One grid cannot serve every tempering level | a box wide enough for the prior reports the $\beta = 1$ mean wrong in the fourth decimal; a box sized for the target reports the prior's mean as `[1.48, 1.31]` rather than `[1, 1]`. Both are silent, and invisible in a contour plot |
+| A numerically singular noise covariance that still whitens gives a *correct* conditional to about $10^{-9}$, not a wrong one | the conditional exists whenever $F_cF_c^\top + D_c$ is nonsingular; what fails silently is the thin-basis covariance at large $\sigma_{\max}$, which collapses to exactly $0$ (#54) |
 | A multi-line `:alt:` value breaks a MyST `{figure}` | the continuation lines are absorbed into the caption, and the build fails with "Figure caption must be a paragraph" pointing at the directive rather than at the option |
 
 ## Working agreements
