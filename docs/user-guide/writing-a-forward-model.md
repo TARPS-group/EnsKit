@@ -5,6 +5,12 @@ that callable must satisfy; {ref}`eki-failures` is the normative statement.
 There is nothing to subclass and nothing to register: EnsKit ships no forward
 models for real use and defines no base class, protocol or registry for one.
 
+:::{note}
+This page describes the forward model of `enskit.eki`. The redesigned layers
+call the same kind of callable a *simulator*: {doc}`maps` describes it, with
+several inputs and outputs, and `enskit.testing.check_simulator` checks it.
+:::
+
 ## The interface
 
 ```python

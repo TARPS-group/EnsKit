@@ -1076,7 +1076,8 @@ def test_12_regression_no_layer_imports_the_toy_module():
     interpreter, since this one has already imported the module.
     """
     program = (
-        "import sys; import enskit, enskit.linalg, enskit.distribution, enskit.gauss, "
+        "import sys; import enskit, enskit.linalg, enskit.distribution, enskit.maps, "
+        "enskit.gauss, "
         "enskit.eki, "
         "enskit.eki.testing, enskit.linalg.testing; "
         "print('enskit.toy' in sys.modules)"
