@@ -5,12 +5,60 @@ against the normative contract, 2026-08-27 after `pyeki.eki` shipped,
 2026-08-28 after the forward-model contract was specified and the layer
 vocabulary was fixed, 2026-09-02 after the joint was split into a
 Gaussian and a sample container, 2026-10-03 when the EnsKit redesign was
-adopted, the same day after PR 1's renames, and again after PR 2's linalg
-additions. Read `CLAUDE.md` first for
+adopted, the same day after PR 1's renames, again after PR 2's linalg
+additions, and 2026-10-04 after PR 10's Kronecker operators. Read `CLAUDE.md` first for
 conventions, including the layer rules, which the redesign replaced; then the
 two sections below; then the rest of this file, which describes the code as it
 stands before the redesign lands. That description is historical: where it
 names `pyeki.<module>`, the module is now `enskit.<module>`.
+
+## 2026-10-04: PR 10, the Kronecker operators
+
+`enskit.linalg` gained the module `enskit/linalg/kronecker.py`: three
+classes for $A \otimes B$ and the factory `kron(A, B)`, which chooses
+among them by the operands' levels, as `c * op` chooses among the scaled
+operators. They are specified in `docs/linop-contract.md`, *Kronecker
+products*, and catalogued in `docs/user-guide/operators.md`.
+
+- **`Kronecker(A, B)`**: any two operators, application and transposition
+  only. `T` is `A.T ⊗ B.T`, built without the constructor so that it works
+  on a family.
+- **`SquareKronecker(A, B)`**: two square operators; adds `solve`,
+  `logdet` ($n_B\log\lvert\det A\rvert + n_A\log\lvert\det B\rvert$) and
+  `diag`, each supported when both operands support it.
+- **`PSDKronecker(A, B)`**: two PSD operators; adds `factor`
+  (`kron(A.factor(), B.factor())`) and a primitive `whiten`
+  ($W_A \otimes W_B$).
+
+The first operand's index is the slow one, as in `numpy.kron`. Every
+operation reshapes the operand's trailing axis and applies $B$ (a vector
+method) and then $A$ (the matching matrix method). A count test checks that
+no operation forms an array of side $n_A n_B$.
+
+**Scope, settled with the maintainer.** PR 10 is `Kronecker` alone.
+`KroneckerPlusNugget` and `KroneckerLMC` moved to issue #55 with #15's
+notes and warnings, to be built when a method needs them. `LowRankPlus` was
+dropped because `LowRankUpdate` already provides it. Issue #1, closed by
+the contract rework, needed nothing further here: `factor()` of two
+`DensePSD` operands is a `SquareKronecker` of their `Triangular` factors,
+which solves, and `whiten` applies the operands' whiteners directly.
+
+**The conformance suite cannot see orientation.** It compares each
+operation with `to_dense`. An implementation reversed in every method at
+once passes `check_operator` at any sides, square or rectangular, while
+its `matvec` is off by tens. `tests/test_kronecker.py` therefore pins `matvec`, `rmatvec`,
+`solve`, `whiten`, `diag` and `to_dense` to `numpy.kron` separately, and
+under that mutation 15 of its tests fail. Any later Kronecker-structured
+operator needs the same tests, until issue #57 lets `check_operator` take
+an independent dense reference.
+
+**For later PRs.**
+
+- PR 4: a prior given as `kron(A, B)` can be a `Gaussian`'s independent
+  term, since it whitens; `LowRankUpdate(kron(...), F)` is in the
+  conformance list.
+- PR 11: the operator page has a *Kronecker products* section. The
+  user-guide level "operators" should keep it.
 
 ## 2026-10-03: PR 2, the linalg additions
 
@@ -341,40 +389,10 @@ pyEKI. Nothing domain-specific should come back across.
 
 Follow the plan in `docs/redesign/index.md`, one pull request at a time, in
 a fresh session for each, as described in "Pull requests and handoffs" in
-`CLAUDE.md`. PRs 1 (#35) and 2 (#36) are done; PR 3 (#37), the
-distribution contract, is next, and PR 10 (#44), the Kronecker family, can
-run alongside it. The notes below, written before the redesign,
+`CLAUDE.md`. PRs 1 (#35), 2 (#36) and 10 (#44) are done; PR 3 (#37), the
+distribution contract, is next. The notes below, written before the redesign,
 still apply to the pull requests they name; their `pyeki` modules are now
 `enskit` modules.
-
-### Notes for PR 10, the `Kronecker` family
-
-The operator that blocks the rest of the linalg roadmap. No shipped layer
-needs it — `pyeki.gauss` and `pyeki.eki` run on the operators already there —
-so this is a capability step rather than an unblocking one. Two variants, and
-they are not the same code:
-
-- **Square** `Kronecker(A, B)` representing $A \otimes B$. Convention: the first
-  factor's index is the *slow* one, so block $(i,j)$ of the result is
-  $A_{ij}B$. Implement `matvec` by reshaping the trailing axis to `(n_A, n_B)`,
-  applying `B` then `A`, and flattening back.
-- **Rectangular**, needed because `factor(A ⊗ B) == factor(A) ⊗ factor(B)` and
-  those factors need not be square. The square implementation does **not**
-  generalize: it reshapes input and output to the same shape, whereas a
-  rectangular Kronecker product needs input reshaped to `(k_A, k_B)` and output
-  to `(n_A, n_B)`.
-
-:::{warning}
-A transposed Kronecker orientation is silent — it yields a valid PSD matrix
-with the wrong meaning. Test `matvec` against `np.kron` directly, at leading
-batch rank 0, 1 and 2. Do **not** rely on a `to_dense` comparison: `to_dense`
-is built from `jnp.kron` of the children, a different code path, so it passes
-even when `matvec` is wrong.
-:::
-
-Then `KroneckerLMC` (a sum $\sum_q A_q \otimes B_q$), `KroneckerPlusNugget` and
-`LowRankPlus`, in that order. `docs/design.md` records the closed forms and
-their preconditions, including a log-determinant term that is easy to omit.
 
 ### Notes for PR 9, `LocalizedUpdateRule`
 
@@ -445,6 +463,10 @@ layer; this is the index.
 | Circulant embedding gives `matvec` and sampling but **not** `solve` or `logdet` on a restricted grid | a spectral log-determinant would be silently wrong |
 | For exponential correlation, the *whitener* is bidiagonal, not the factor | sampling is a sequential recurrence, not a banded solve |
 | A scalar correlation coefficient is wrong for irregular observation times | build the precision from per-interval coefficients |
+| A reversed Kronecker orientation is a valid covariance | $B \otimes A$ is PSD whenever $A \otimes B$ is, and always the same shape; nothing raises at any sizes |
+| A self-consistent `matvec`/`to_dense` pair passes the whole conformance suite | reversing the orientation in every Kronecker method passes `check_operator`; pin each method to `numpy.kron` separately |
+| The Kronecker log-determinant pairs each operand with the *other's* side | the swapped pairing is identical at equal sides, so only unequal sides test it |
+| A rectangular Kronecker product reshapes its operand and result differently | `(k_A, k_B)` in, `(n_A, n_B)` out; reshaping both alike is right only for square operands |
 | `KronPlusNugget` log-determinant needs an $n\log\det C^l$ term | omitting it is off by a factor, silently |
 | Kronecker-plus-nugget needs a strictly positive-definite nugget | a singular one has no simultaneous diagonalization |
 | A tapered covariance is PSD only if the taper is a valid PD function | dimension-dependent; use a known family |
