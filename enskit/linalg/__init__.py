@@ -18,8 +18,8 @@ documentation.
 - :mod:`~enskit.linalg.composite` holds operators built from other operators,
   and the factory functions that construct them.
 - :mod:`~enskit.linalg.gram` holds :class:`IdentityPlusGram`, the operator
-  :math:`I + S S^\top` through which conditioning is computed, with
-  derivative rules that stay finite at degenerate spectra.
+  :math:`I + S S^\top` computed from one SVD of :math:`S`, with derivative
+  rules that stay finite at degenerate spectra.
 - :mod:`~enskit.linalg.testing` holds conformance checks for new operator
   types.
 
@@ -104,7 +104,7 @@ __all__ = [
     "PSDBlockDiag",
     "PSDDiagCongruence",
     "LowRankUpdate",
-    # the conditioning core
+    # I + S S^T
     "IdentityPlusGram",
     "IdentityPlusGramInverseSqrt",
     # factories

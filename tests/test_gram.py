@@ -132,6 +132,39 @@ def test_solve_factor_is_bounded_however_large_s_is():
         assert np.linalg.norm(w) <= 0.5 * np.linalg.norm(b) * (1 + 1e-12)
 
 
+@pytest.mark.parametrize("scale", [1e4, 1e6, 1e8])
+def test_regression_large_s_with_a_square_basis_keeps_full_accuracy(scale):
+    """With k <= N the basis U is square and the complement is empty. Writing
+    A^{-1} b as b + U((I + Sigma^2)^{-1} - I)U^T b then cancels b against
+    U U^T b, leaving about eps |b| where the answer is |b| / sigma^2: a
+    relative error of 41 at scale 1e8, though A's condition number is 6.
+    The derivative of solve_factor went through the same kernel."""
+    rng = np.random.default_rng(3)
+    S = scale * rng.normal(size=(6, 10))
+    A = np.eye(6) + S @ S.T
+    b = rng.normal(size=(6,))
+    op = IdentityPlusGram(jnp.asarray(S))
+
+    def rel(got, want):
+        return np.linalg.norm(np.asarray(got) - want) / np.linalg.norm(want)
+
+    assert rel(op.solve(jnp.asarray(b)), np.linalg.solve(A, b)) < 1e-12
+    lam, Q = np.linalg.eigh(A)
+    assert rel(op.whiten(jnp.asarray(b)), (Q / np.sqrt(lam)) @ Q.T @ b) < 1e-12
+    c, dS = rng.normal(size=(10,)), rng.normal(size=(6, 10))
+    got = jax.jvp(
+        lambda S: IdentityPlusGram(S).solve_factor(jnp.asarray(c)),
+        (jnp.asarray(S),),
+        (jnp.asarray(dS),),
+    )[1]
+    want = jax.jvp(
+        lambda S: _dense_solve_factor(S, jnp.asarray(c)),
+        (jnp.asarray(S),),
+        (jnp.asarray(dS),),
+    )[1]
+    assert rel(got, np.asarray(want)) < 1e-9
+
+
 def test_solve_factor_validates_its_operand():
     op = IdentityPlusGram(jnp.asarray(RNG.normal(size=(4, 6))))
     with pytest.raises(ValueError, match="solve_factor"):
@@ -322,8 +355,7 @@ def test_second_derivatives_at_a_degenerate_spectrum_are_finite_only_for_logdet(
     """The module docstring's limit, asserted so that a change is visible:
     at a collapsed S the Hessian of logdet is finite and exact, while that of
     solve_factor is nan — linearization inlines the rule's own arithmetic,
-    which reads the decomposition. nan is the intended failure there; a
-    finite wrong Hessian is what stop-gradienting the decomposition gives."""
+    which reads the decomposition through the SVD's derivative."""
     S = jnp.zeros((4, 3))
     b = jnp.asarray(RNG.normal(size=(3,)))
     np.testing.assert_allclose(
@@ -377,6 +409,17 @@ def test_one_svd_at_construction_and_none_per_operation_even_under_grad():
         lambda op: (op.solve_factor(b_N), op.solve(b_k), op.logdet(), op.whiten(b_k))
     )(op)
     assert _count_primitive(ops_only.jaxpr, "svd") == 0
+
+
+def test_regression_logdet_gradient_allocates_nothing_of_size_n_by_n():
+    """The logdet rule once applied solve_factor to an (N, N) identity: 512 MB
+    of temporaries for a LowRankUpdate gradient at n = 8000."""
+    k, N = 3, 50
+    S = jnp.asarray(RNG.normal(size=(k, N)))
+    jaxpr = jax.make_jaxpr(jax.grad(lambda S: IdentityPlusGram(S).logdet()))(S)
+    for eqn in jaxpr.jaxpr.eqns:
+        for var in eqn.outvars:
+            assert tuple(var.aval.shape) != (N, N), eqn.primitive.name
 
 
 def test_solve_factor_derivative_needs_no_gram_matrix():

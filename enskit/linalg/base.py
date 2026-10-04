@@ -368,7 +368,9 @@ class LinOp(abc.ABC):
             True when calling the operation completes without
             :class:`UnsupportedOpError`; False when it would raise it, and
             also for operations below the operator's level (which the type
-            does not define at all).
+            does not define at all). Inside :func:`dense_fallback` an
+            unsupported operation succeeds by densifying while this still
+            returns False: it reports what the operator does cheaply.
 
         Raises
         ------
@@ -670,7 +672,13 @@ class SquareLinOp(LinOp):
             If this operator has no cheap diagonal.
         """
         self._check_not_vmap_family("diag")
-        return self._target("diag")._diag()
+        if self._require("diag"):
+            return self._diag()
+        # The fallback for a diagonal needs no factorization: densify would
+        # run an O(n^3) Cholesky or LU, and in debug mode reject a singular
+        # operator whose diagonal is perfectly well defined.
+        _warn_dense_fallback(self, "diag")
+        return jnp.diagonal(self.to_dense(), axis1=-2, axis2=-1)
 
 
 # ---------------------------------------------------------------------------
@@ -944,7 +952,8 @@ def dense_fallback(*, max_n: int = 2048):
     optional operation an operator does not support — ``solve``,
     ``solve_mat``, ``logdet``, ``diag``, ``factor``, ``whiten`` or
     ``whiten_mat`` — computes it on :func:`densify`'s result instead of
-    raising :class:`UnsupportedOpError`, and warns once per operator type and
+    raising :class:`UnsupportedOpError` (``diag`` reads the diagonal of
+    ``to_dense()`` directly), and warns once per operator type and
     operation. An operator with a side larger than ``max_n`` still raises,
     before allocating. Meant for prototyping on small problems; nothing in
     this package relies on it.

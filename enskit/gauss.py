@@ -1526,9 +1526,9 @@ def sqrt_transform(s: Array) -> Array:
         \\texttt{sqrt\\_transform}(s) = (I_k + s s^\\top)^{-1/2}
         = I_k + U\\bigl((I_\\rho + \\Sigma^2)^{-1/2} - I_\\rho\\bigr)U^\\top ,
 
-    which is symmetric, and exact at every rank: the second form is how it
-    is computed, and it is what this function returns for any correct thin
-    SVD, elementwise.
+    which is symmetric, and exact at every rank because of the identity on
+    the orthogonal complement of :math:`U`'s columns. It is what this
+    function returns for any correct thin SVD, to rounding.
 
     In conditioning, ``s`` is the whitened factor :math:`S = (W F_v)^\\top`
     of the observed block, and multiplying the other block's factor on the

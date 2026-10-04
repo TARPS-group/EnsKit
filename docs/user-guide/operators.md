@@ -86,7 +86,7 @@ log-determinant without forming the $n \times n$ matrix:
 
 ```python
 C = LowRankUpdate(PSDDiagonal(d), Dense(F))   # D + F F^T
-x = C.solve(b)        # Woodbury: two applications of D's solve and whitener
+x = C.solve(b)        # Woodbury: one whitening and one solve with D
 w = C.whiten(y)       # W_C with W_C C W_C^T = I
 ld = C.logdet()       # log det D + sum log(1 + sigma_i^2)
 ```
@@ -124,8 +124,9 @@ columns of $S$, and an exactly collapsed ensemble zeroes all of it.
 `IdentityPlusGram`'s operations carry their own derivative rules, written in
 terms of $S$ with no such division, so `jax.grad` through `solve`,
 `solve_factor`, `logdet`, `whiten` and `inverse_sqrt` is finite and correct
-at every $S$. Second derivatives are correct where the singular values are
-distinct and nonzero; at degenerate spectra only `logdet`'s are promised.
+at every $S$. Second derivatives are promised only for `logdet`: those of
+the other operations are exact at well-separated singular values but lose
+accuracy as two singular values approach each other or zero.
 The operator contract ({ref}`contract-gram`) states the rules.
 
 ## Prototyping with a dense fallback

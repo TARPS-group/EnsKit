@@ -1231,6 +1231,37 @@ def test_dense_fallback_computes_on_the_densified_operator_and_warns_once():
         op.solve(jnp.ones(4))
 
 
+def test_dense_fallback_reads_a_diagonal_without_factorizing():
+    """A diagonal needs no Cholesky or LU: routing diag through densify cost
+    O(n^3) and, in debug mode, rejected a singular operator whose diagonal
+    is well defined."""
+
+    @linop
+    class BareSquare(SquareLinOp):
+        A: Array
+
+        @property
+        def shape(self):
+            return (self.A.shape[-1], self.A.shape[-1])
+
+        @property
+        def batch_shape(self):
+            return tuple(self.A.shape[:-2])
+
+        def _matvec(self, x):
+            return jnp.einsum("ij,...j->...i", self.A, x)
+
+        def _rmatvec(self, x):
+            return jnp.einsum("ij,...i->...j", self.A, x)
+
+        def _to_dense(self):
+            return self.A
+
+    singular = BareSquare(jnp.outer(jnp.asarray([1.0, 2.0, 3.0]), jnp.ones(3)))
+    with debug_checks(True), dense_fallback(max_n=8), pytest.warns(UserWarning):
+        np.testing.assert_array_equal(singular.diag(), [1.0, 2.0, 3.0])
+
+
 def test_dense_fallback_size_guard_raises_before_densifying(monkeypatch):
     op = _wide_low_rank()
 

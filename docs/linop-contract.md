@@ -1008,7 +1008,9 @@ field `gram`. With $S = U\Sigma V^\top$:
 | `whiten(x)`  | $(I + S^\top S)^{-1/2}\, W_D x$                        | —                  |
 
 `supports(name)` is the class's answer intersected with what the table
-requires of `base`. Its `whiten` is $W_C = (I + S^\top S)^{-1/2} W_D$,
+requires of `base`. The Woodbury `solve` subtracts $Fw$ from $b$, so when
+$FF^\top$ dominates $D$ by many orders of magnitude it is less accurate
+than a dense factorization of $C$ (issue #51). Its `whiten` is $W_C = (I + S^\top S)^{-1/2} W_D$,
 which satisfies $W_C C W_C^\top = I$; it is computed from the same stored
 decomposition as everything else, so no operation computes an SVD.
 Derivatives of `solve`, `logdet` and `whiten` go through the rules of
@@ -1021,10 +1023,9 @@ columns.
 
 `IdentityPlusGram(S)` is the operator $A = I_k + SS^\top$ for a `(k, N)`
 array $S$, exactly 2-D with both sizes positive and no relation required
-between them. Every Gaussian conditioning in the package reduces to it,
-with $S$ the transpose of the given blocks' factor rows whitened by their
-noise; the consumers are `enskit.gauss` today and the distribution layer
-from PR 4.
+between them. Its `solve_factor` and inverse square root are the building
+blocks the layers above compute with; the consumers are `enskit.gauss`
+today and the distribution layer from PR 4.
 
 **One SVD, at construction.** The constructor computes the thin SVD
 $S = U\Sigma V^\top$, $r = \min(k, N)$, and stores `S`, `U`, `sigma` and
@@ -1054,9 +1055,8 @@ every $\sigma_i < \sqrt{\varepsilon}\,\sigma_{\max}$.
   identity term is required: for $r < k$ the thin form without it is
   singular.
 - Finiteness of `S` is not checked, even in debug mode. A non-finite `S`
-  gives non-finite results, and the caller that built `S` — which knows
-  the likely cause, a singular noise covariance — reports them with its
-  own message.
+  gives non-finite results, and the caller that built `S`, which knows the
+  likely cause, reports them with its own message.
 
 **Derivatives.** The operations that read the decomposition — `solve`,
 `solve_factor`, `logdet`, `whiten`, and the inverse square root's
@@ -1089,21 +1089,26 @@ None divides by a difference of singular values. The obligations:
 1. **First derivatives are finite and correct at every $S$**, including at
    exactly repeated and exactly zero singular values, where a plain SVD's
    derivative is `nan`. This holds in forward and reverse mode, under
-   `jit` and under `vmap`.
+   `jit` and under `vmap`. Forward mode at a degenerate spectrum computes
+   the SVD's own `nan` tangents and discards them, so it raises under the
+   `jax_debug_nans` flag although its result is finite; reverse mode does
+   not.
 2. **Derivatives flow through `S`.** The rules read only the tangent of
    `S` (and of the vector operand); the stored decomposition receives no
    derivative of its own. Differentiating with respect to an operator
    passed as a pytree gives the derivative in its field `S` and zeros in
    `U`, `sigma` and `Vt`.
-3. **The decomposition is not stop-gradiented.** Second derivatives
-   differentiate the rules' own arithmetic, which reads `U` and `sigma`,
-   so they must see those fields' dependence on `S`. They are therefore
-   correct wherever the singular values are distinct and nonzero. At
-   degenerate spectra only first derivatives are promised: second
-   derivatives of `logdet` are finite there, but `jax.hessian` of the
-   other operations may return `nan`. A `nan` there is the intended
-   failure; stop-gradienting the decomposition would make it a finite,
-   wrong Hessian.
+3. **Second derivatives are promised for `logdet` only**, which are exact
+   at every $S$. The decomposition is not stop-gradiented: second
+   derivatives differentiate the rules' own arithmetic, which reads `U`
+   and `sigma`, so they see those fields' dependence on `S` through the
+   SVD's derivative. That makes the other operations' second derivatives
+   exact at well-separated singular values — stop-gradienting would make
+   them wrong there too — but they lose accuracy roughly like
+   $\varepsilon/\delta$ as two singular values come within $\delta$ of
+   each other or of zero (measured: relative error $3\times10^{-3}$ for
+   `solve_factor` and $2\times10^{-2}$ for `whiten` at $\delta = 10^{-14}$),
+   and `jax.hessian` may return `nan` at exact ties (issue #52).
 4. **No SVD in any rule.** A gradient through every operation computes
    one SVD, the construction's.
 

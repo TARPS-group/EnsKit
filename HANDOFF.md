@@ -56,12 +56,15 @@ test's docstring). `uv run lint-imports` checks the layer rules in CI.
   message and cause (the gauss contract requires this, and a test pins it).
 
 **Derivatives, as measured.** First derivatives are finite and correct at
-every $S$, in forward and reverse mode, under `jit` and `vmap`. Second
-derivatives are exact at distinct nonzero singular values. At degenerate
-ones, `logdet`'s second derivatives are finite, but `jax.hessian` of
-`solve_factor` is `nan` — linearization inlines the rules' own arithmetic,
+every $S$, in forward and reverse mode, under `jit` and `vmap` (forward
+mode raises under `jax_debug_nans` at degenerate spectra, from the SVD's
+discarded tangents; issue #52). Second derivatives are promised for
+`logdet` only. The others are exact at well-separated singular values, lose
+accuracy like $\varepsilon/\delta$ near a tie of gap $\delta$ (finite and
+wrong, once with the wrong sign), and `jax.hessian` of `solve_factor` is
+`nan` at an exact tie — linearization inlines the rules' own arithmetic,
 which reads `U` and `sigma`. The decomposition is deliberately *not*
-stop-gradiented: that would turn the `nan` into a finite, wrong Hessian.
+stop-gradiented, which would make them wrong at well-separated spectra too.
 The design's §9.1 promise of "degenerate-safe" derivatives therefore holds
 for first derivatives only, and the distribution contract (PR 3) should say
 so.

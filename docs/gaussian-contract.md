@@ -286,10 +286,14 @@ T \;=\; (I_k + S S^\top)^{-1/2}
 \;\in\; \mathbb{R}^{k \times k},
 $$
 
-symmetric, built from the same SVD. The second form is the normative one:
-for a thin SVD the naive $U(I+\Sigma^2)^{-1/2}U^\top$ *omits the identity on
-the orthogonal complement* and is simply wrong whenever $\rho < k$ — the
-$I_k + U(\cdot - I)U^\top$ form is exact for every rank.
+symmetric, built from the same SVD. The identity on the orthogonal
+complement of $U$'s columns is required: for a thin SVD the naive
+$U(I+\Sigma^2)^{-1/2}U^\top$ *omits it* and is simply wrong whenever
+$\rho < k$. The implementation, `enskit.linalg.IdentityPlusGram`, computes
+$U(I+\Sigma^2)^{-1/2}U^\top + (I_k - UU^\top)$, adding the complement term
+only when $\rho < k$: when $U$ is square the term is zero, and forming it by
+subtraction would leave a residue of order $\varepsilon$ that swamps the
+$1/\sigma$-sized entries of $T$ once $\sigma$ is large.
 
 $F_u T$ is a factor of the posterior covariance, exactly:
 
@@ -311,11 +315,10 @@ Two structural facts:
   the modifier vanishes at $\sigma_i = 0$), so a centered factor conditions
   to a centered factor and the posterior mean is not silently shifted.
   In floating point the numerically-zero $\sigma$'s $U$ column need not be
-  orthogonal to $\mathbf{1}$; the property survives because the modifier
-  decays *quadratically*: the induced mean shift is
-  $O\bigl((\varepsilon\sigma_{\max})^2\bigr)$ rather than
-  $O(\varepsilon\sigma_{\max})$ — the modifier is exactly $0.0$ while
-  $\varepsilon\sigma_{\max} \lesssim 10^{-8}$, and negligible above it.
+  exactly $\mathbf{1}/\sqrt{k}$, nor the others exactly orthogonal to it,
+  but the computed $U$ is orthonormal to rounding and the numerically-zero
+  $\sigma$'s weight $(1+\sigma^2)^{-1/2}$ is exactly $1.0$, so
+  $T\mathbf{1} = \mathbf{1}$ holds to rounding.
 - **The identity is exact in exact arithmetic**, not asymptotic in $k$. The
   conformance suite checks it to floating-point tolerance
   ({ref}`gauss-conformance`).

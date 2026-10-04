@@ -673,8 +673,6 @@ class LowRankUpdate(PSDLinOp):
         supports ``whiten`` (so it is nonsingular).
     F
         :math:`F`, a :class:`~enskit.linalg.LinOp` of shape ``(n, k)``.
-        (Named ``F`` rather than ``factor``, which would shadow the inherited
-        :meth:`~enskit.linalg.PSDLinOp.factor` method.)
 
     Raises
     ------
@@ -693,6 +691,14 @@ class LowRankUpdate(PSDLinOp):
     :class:`~enskit.linalg.IdentityPlusGram`, so they are finite at exactly
     repeated and zero singular values of :math:`S`; see
     :mod:`enskit.linalg.gram`.
+
+    ``F`` is named for the matrix rather than ``factor``, which would shadow
+    the inherited :meth:`~enskit.linalg.PSDLinOp.factor` method.
+
+    ``solve`` is the Sherman–Morrison–Woodbury identity, which subtracts
+    :math:`F w` from :math:`b`: when :math:`F F^\top` dominates :math:`D` by
+    many orders of magnitude it loses accuracy that a dense factorization
+    of :math:`C` would keep.
 
     The fields are ``base``, ``F`` and ``gram``, the stored
     :class:`~enskit.linalg.IdentityPlusGram` of :math:`S`. Replacing ``base``

@@ -36,10 +36,16 @@ orthogonal with equal norms. Derivatives with respect to an operator passed
 as a pytree flow through its field ``S``; the stored decomposition receives
 no derivative of its own.
 
-Second derivatives are correct wherever the singular values are distinct
-and nonzero. At exactly repeated or zero singular values only the first
-derivative is guaranteed finite: second derivatives of ``logdet`` are finite
-there, but :func:`jax.hessian` of the other operations may return ``nan``.
+Second derivatives are promised only for ``logdet``, whose are exact at
+every :math:`S`. Those of the other operations are exact at well-separated
+singular values, lose accuracy roughly like :math:`\varepsilon/\delta` as
+two singular values come within :math:`\delta` of each other or of zero,
+and may be ``nan`` from :func:`jax.hessian` at exact ties.
+
+Forward-mode derivatives at a degenerate spectrum compute the SVD's own
+``nan`` tangents and discard them, so they raise under JAX's
+``jax_debug_nans`` flag although their results are finite; reverse mode
+does not.
 
 References
 ----------
@@ -106,8 +112,8 @@ class IdentityPlusGram(PSDLinOp):
 
     Notes
     -----
-    ``factor`` is exact but wide; a caller sampling from :math:`A` usually
-    has a cheaper route through whatever produced :math:`S`.
+    ``factor`` is exact but wide; a caller that needs a square root of
+    :math:`A` usually has a cheaper one through whatever produced :math:`S`.
 
     Finiteness of ``S`` is not checked, even in debug mode: a non-finite
     ``S`` gives non-finite results, which the caller that built ``S`` is
@@ -359,20 +365,34 @@ class IdentityPlusGramInverseSqrt(PSDLinOp):
 # the decomposition as the function of S it is. The decomposition is not
 # wrapped in stop_gradient, deliberately: a second derivative differentiates
 # a rule's own arithmetic, which reads U and sigma, and must then see their
-# dependence on S. Through the SVD's derivative that is exact at distinct
-# nonzero singular values and nan elsewhere; with stop_gradient it would be
-# finite and wrong.
+# dependence on S. Through the SVD's derivative that is exact at
+# well-separated singular values; with stop_gradient it would be wrong there
+# too.
 
 
 def _transpose(M: Array) -> Array:
     return M.swapaxes(-1, -2)
 
 
+def _spectral_apply(U: Array, weights: Array, x: Array) -> Array:
+    """``f(A) x`` for ``f(A) = U diag(weights) U^T + (I - U U^T)``.
+
+    The complement term is added only when ``U`` is thin. When ``U`` is
+    square it is zero, and computing it as ``x - U U^T x`` would leave a
+    residue of about ``eps |x|``, which swamps a result of size
+    ``|x| / sigma**2`` once ``sigma`` is large.
+    """
+    Ut_x = dense_matvec(_transpose(U), x)
+    out = dense_matvec(U, weights * Ut_x)
+    if U.shape[-1] < U.shape[-2]:
+        out = out + (x - dense_matvec(U, Ut_x))
+    return out
+
+
 @jax.custom_jvp
 def _resolvent(S: Array, U: Array, sigma: Array, Vt: Array, b: Array) -> Array:
     """``(I + S S^T)^{-1} b`` for ``b`` of shape ``(..., k)``."""
-    modifier = -(sigma**2) / (1.0 + sigma**2)
-    return b + dense_matvec(U, modifier * dense_matvec(_transpose(U), b))
+    return _spectral_apply(U, 1.0 / (1.0 + sigma**2), b)
 
 
 @_resolvent.defjvp
@@ -420,15 +440,9 @@ def _logdet_jvp(primals, tangents):
     # d log det A = tr(A^{-1} dA) = 2 <A^{-1} S, dS>
     S, U, sigma, Vt = primals
     dS = tangents[0]
-    identity = jnp.eye(S.shape[-1], dtype=S.dtype)
-    gain = _transpose(_solve_factor(S, U, sigma, Vt, identity))  # A^{-1} S, (k, N)
+    # A^{-1} S, (k, N), one column of S at a time: O(kN), no (N, N) identity
+    gain = _transpose(_resolvent(S, U, sigma, Vt, _transpose(S)))
     return _logdet(S, U, sigma, Vt), 2.0 * jnp.sum(gain * dS)
-
-
-def _inverse_sqrt_modifier(sigma: Array) -> Array:
-    # Written as the difference rather than an equivalent rational form so
-    # that it is exactly 0.0 once sigma**2 is below the resolution of 1.0.
-    return 1.0 / jnp.sqrt(1.0 + sigma**2) - 1.0
 
 
 def _divided_differences(sigma: Array) -> tuple[Array, Array]:
@@ -442,8 +456,7 @@ def _divided_differences(sigma: Array) -> tuple[Array, Array]:
 @jax.custom_jvp
 def _inverse_sqrt_apply(S: Array, U: Array, sigma: Array, x: Array) -> Array:
     """``(I + S S^T)^{-1/2} x`` for ``x`` of shape ``(..., k)``."""
-    modifier = _inverse_sqrt_modifier(sigma)
-    return x + dense_matvec(U, modifier * dense_matvec(_transpose(U), x))
+    return _spectral_apply(U, 1.0 / jnp.sqrt(1.0 + sigma**2), x)
 
 
 @_inverse_sqrt_apply.defjvp
@@ -476,11 +489,13 @@ def _inverse_sqrt_apply_jvp(primals, tangents):
 @jax.custom_jvp
 def _inverse_sqrt_dense(S: Array, U: Array, sigma: Array) -> Array:
     """``(I + S S^T)^{-1/2}`` as a dense ``(k, k)`` array."""
-    modifier = _inverse_sqrt_modifier(sigma)
-    eye = jnp.eye(S.shape[-2], dtype=U.dtype)
-    # (k, r) @ (r, k): both operands are exactly 2-D, so this is the plain
-    # matrix product, not a batch of vectors.
-    return eye + (U * modifier) @ _transpose(U)
+    # (k, r) @ (r, k): both operands are exactly 2-D, so these are plain
+    # matrix products, not batches of vectors. The complement term only when
+    # U is thin, as in _spectral_apply.
+    out = (U / jnp.sqrt(1.0 + sigma**2)) @ _transpose(U)
+    if U.shape[-1] < U.shape[-2]:
+        out = out + jnp.eye(S.shape[-2], dtype=U.dtype) - U @ _transpose(U)
+    return out
 
 
 @_inverse_sqrt_dense.defjvp
