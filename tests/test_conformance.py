@@ -40,11 +40,14 @@ from enskit.linalg import (
     DensePSD,
     DenseSquare,
     Identity,
+    IdentityPlusGram,
     LinOp,
+    LowRankUpdate,
     PSDDiagonal,
     PSDLowRank,
     Transposed,
     Triangular,
+    Zero,
     block_diag,
     diag_congruence,
     hstack,
@@ -155,6 +158,38 @@ def _instances(rng: np.random.Generator) -> list[LinOp]:
         2.0 * DenseSquare(square(4)).T,
         1.5 * Dense(normal(3, 5)),
         Dense(normal(3, 5)).T,
+        # I + S S^T at each shape of S, and at exactly repeated and exactly
+        # zero singular values, where the stored SVD's basis is arbitrary
+        IdentityPlusGram(normal(5, 3)),
+        IdentityPlusGram(normal(3, 5)),
+        IdentityPlusGram(normal(4, 4)),
+        IdentityPlusGram(uniform(0.5, 3.0, 1)[0] * jnp.eye(5, 3)),
+        IdentityPlusGram(jnp.concatenate([normal(5, 2), jnp.zeros((5, 2))], axis=1)),
+        IdentityPlusGram(normal(1, 1)),
+        IdentityPlusGram(normal(5, 3)).inverse_sqrt(),
+        IdentityPlusGram(normal(3, 5)).inverse_sqrt(),
+        IdentityPlusGram(
+            jnp.concatenate([normal(5, 2), jnp.zeros((5, 2))], axis=1)
+        ).inverse_sqrt(),
+        # the zero operator, alone and as a block a composite skips
+        Zero(3, 4),
+        Zero(4, 4),
+        Zero(1, 1),
+        hstack(Dense(normal(5, 2)), Zero(5, 3)),
+        hstack(Zero(4, 1), Zero(4, 2)),
+        product(Dense(normal(4, 3)), Zero(3, 2)),
+        # a PSD base plus a low-rank term, over bases of each kind, a wide
+        # factor, and a zero-padded factor (exact zero singular values)
+        LowRankUpdate(PSDDiagonal(d), Dense(normal(6, 2))),
+        LowRankUpdate(Identity(5), Dense(normal(5, 5))),
+        LowRankUpdate(DensePSD(psd(4)), Dense(normal(4, 7))),
+        LowRankUpdate(
+            block_diag(PSDDiagonal(d[:3]), DensePSD(psd(2))), Dense(normal(5, 2))
+        ),
+        LowRankUpdate(PSDDiagonal(d), hstack(Dense(normal(6, 2)), Zero(6, 2))),
+        LowRankUpdate(
+            2.0 * DensePSD(psd(3)), product(Dense(normal(3, 2)), Dense(normal(2, 2)))
+        ),
     ]
 
 

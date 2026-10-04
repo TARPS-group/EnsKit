@@ -28,6 +28,7 @@ contract.
 
 ```{eval-rst}
 .. autoclass:: enskit.linalg.Identity
+.. autoclass:: enskit.linalg.Zero
 .. autoclass:: enskit.linalg.PSDDiagonal
 .. autoclass:: enskit.linalg.Dense
 .. autoclass:: enskit.linalg.DenseSquare
@@ -48,6 +49,19 @@ contract.
 .. autoclass:: enskit.linalg.BlockDiag
 .. autoclass:: enskit.linalg.PSDBlockDiag
 .. autoclass:: enskit.linalg.PSDDiagCongruence
+.. autoclass:: enskit.linalg.LowRankUpdate
+```
+
+### The conditioning core
+
+```{eval-rst}
+.. automodule:: enskit.linalg.gram
+   :no-members:
+
+.. autoclass:: enskit.linalg.IdentityPlusGram
+   :members: solve_factor, inverse_sqrt
+
+.. autoclass:: enskit.linalg.IdentityPlusGramInverseSqrt
 ```
 
 ### Factory functions
@@ -67,6 +81,7 @@ contract.
 .. autofunction:: enskit.linalg.dense_matvec
 .. autofunction:: enskit.linalg.tri_solve
 .. autofunction:: enskit.linalg.densify
+.. autofunction:: enskit.linalg.dense_fallback
 .. autofunction:: enskit.linalg.set_debug_checks
 .. autofunction:: enskit.linalg.debug_checks
 .. autofunction:: enskit.linalg.value_check

@@ -77,6 +77,7 @@ from __future__ import annotations
 import abc
 import dataclasses
 import typing
+import warnings
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 
@@ -90,6 +91,7 @@ __all__ = [
     "PSDLinOp",
     "UnsupportedOpError",
     "densify",
+    "dense_fallback",
     "linop",
     "static_field",
     "dense_matvec",
@@ -121,6 +123,11 @@ _PRIMITIVE_HOOKS = {
 #: Derived operations: supported iff the dependency is, or the class
 #: overrides the derived hook with a direct implementation.
 _DERIVED_DEPS = {"solve_mat": "solve", "whiten_mat": "whiten"}
+
+#: The active :func:`dense_fallback` size limit, or ``None`` when it is off,
+#: and the (operator type, operation) pairs it has warned about.
+_dense_fallback_max_n: int | None = None
+_dense_fallback_warned: set[tuple[str, str]] = set()
 
 
 # ---------------------------------------------------------------------------
@@ -402,12 +409,37 @@ class LinOp(abc.ABC):
         """
         return frozenset(n for n in _OPTIONAL_OPS if self.supports(n))
 
-    def _require(self, name: str) -> None:
-        """Raise :class:`UnsupportedOpError` unless ``name`` is supported."""
-        if not self.supports(name):
-            raise UnsupportedOpError(
-                name, type(self).__name__, tuple(sorted(self.capabilities()))
+    def _require(self, name: str) -> bool:
+        """Check that the optional operation ``name`` can be carried out.
+
+        Returns True when this operator supports ``name``, and False when it
+        does not but :func:`dense_fallback` is active and covers its size.
+        Raises :class:`UnsupportedOpError` in every other case.
+        """
+        if self.supports(name):
+            return True
+        detail = ""
+        if _dense_fallback_max_n is not None:
+            if max(self.shape) <= _dense_fallback_max_n:
+                return False
+            detail = (
+                f"dense_fallback(max_n={_dense_fallback_max_n}) is active, but "
+                f"this operator's shape {self.shape} exceeds max_n."
             )
+        raise UnsupportedOpError(
+            name, type(self).__name__, tuple(sorted(self.capabilities())), detail
+        )
+
+    def _target(self, name: str) -> LinOp:
+        """The operator that carries out the optional operation ``name``.
+
+        This operator itself when it supports ``name``, or the result of
+        :func:`densify` where :meth:`_require` allows the dense fallback.
+        """
+        if self._require(name):
+            return self
+        _warn_dense_fallback(self, name)
+        return densify(self, max_n=_dense_fallback_max_n)
 
     def _check_not_vmap_family(self, method: str) -> None:
         """Refuse the operation on a vmapped family, before any other check."""
@@ -573,8 +605,8 @@ class SquareLinOp(LinOp):
             If ``b`` has no axes, or its trailing axis is not ``n``.
         """
         self._check_not_vmap_family("solve")
-        self._require("solve")
-        return self._solve(_check_vec(self, "solve", b, self.dim))
+        target = self._target("solve")
+        return target._solve(_check_vec(self, "solve", b, self.dim))
 
     def solve_mat(self, B) -> Array:
         """Solve ``A X = B`` for a matrix right-hand side.
@@ -600,8 +632,8 @@ class SquareLinOp(LinOp):
             If ``B`` has fewer than two axes, or axis ``-2`` is not ``n``.
         """
         self._check_not_vmap_family("solve_mat")
-        self._require("solve_mat")
-        return self._solve_mat(_check_mat(self, "solve_mat", B, self.dim))
+        target = self._target("solve_mat")
+        return target._solve_mat(_check_mat(self, "solve_mat", B, self.dim))
 
     def logdet(self) -> Array:
         """Return the log magnitude of the determinant, ``log |det A|``.
@@ -622,8 +654,7 @@ class SquareLinOp(LinOp):
             If this operator has no cheap log-determinant.
         """
         self._check_not_vmap_family("logdet")
-        self._require("logdet")
-        return self._logdet()
+        return self._target("logdet")._logdet()
 
     def diag(self) -> Array:
         """Return the diagonal of the operator.
@@ -639,8 +670,7 @@ class SquareLinOp(LinOp):
             If this operator has no cheap diagonal.
         """
         self._check_not_vmap_family("diag")
-        self._require("diag")
-        return self._diag()
+        return self._target("diag")._diag()
 
 
 # ---------------------------------------------------------------------------
@@ -693,8 +723,7 @@ class PSDLinOp(SquareLinOp):
             If this operator has no cheap square root.
         """
         self._check_not_vmap_family("factor")
-        self._require("factor")
-        return self._factor()
+        return self._target("factor")._factor()
 
     def whiten(self, x) -> Array:
         """Whiten a batch of vectors: apply ``W`` with ``W A W.T == I``.
@@ -728,8 +757,8 @@ class PSDLinOp(SquareLinOp):
             If ``x`` has no axes, or its trailing axis is not ``n``.
         """
         self._check_not_vmap_family("whiten")
-        self._require("whiten")
-        return self._whiten(_check_vec(self, "whiten", x, self.dim))
+        target = self._target("whiten")
+        return target._whiten(_check_vec(self, "whiten", x, self.dim))
 
     def whiten_mat(self, X) -> Array:
         """Whiten a matrix operand: ``W X`` for the same ``W`` as :meth:`whiten`.
@@ -755,8 +784,8 @@ class PSDLinOp(SquareLinOp):
             If ``X`` has fewer than two axes, or axis ``-2`` is not ``n``.
         """
         self._check_not_vmap_family("whiten_mat")
-        self._require("whiten_mat")
-        return self._whiten_mat(_check_mat(self, "whiten_mat", X, self.dim))
+        target = self._target("whiten_mat")
+        return target._whiten_mat(_check_mat(self, "whiten_mat", X, self.dim))
 
 
 # ---------------------------------------------------------------------------
@@ -832,6 +861,8 @@ class UnsupportedOpError(NotImplementedError):
         Name of the operator's class.
     capabilities
         Names of the optional operations the operator does support.
+    detail
+        Optional further explanation, appended to the message.
 
     Notes
     -----
@@ -841,20 +872,26 @@ class UnsupportedOpError(NotImplementedError):
     """
 
     def __init__(
-        self, name: str, operator_type: str, capabilities: tuple[str, ...] = ()
+        self,
+        name: str,
+        operator_type: str,
+        capabilities: tuple[str, ...] = (),
+        detail: str = "",
     ) -> None:
         capabilities = tuple(capabilities)
-        super().__init__(name, operator_type, capabilities)
+        super().__init__(name, operator_type, capabilities, detail)
         self.name = name
         self.operator_type = operator_type
         self.capabilities = capabilities
+        self.detail = detail
 
     def __str__(self) -> str:
         have = ", ".join(sorted(self.capabilities)) or "none"
-        return (
+        message = (
             f"{self.operator_type} has no cheap `{self.name}`. It supports: {have}. "
             f"Use densify(op) for an explicit dense fallback."
         )
+        return f"{message} {self.detail}" if self.detail else message
 
 
 def densify(op: LinOp, *, max_n: int = 4096) -> LinOp:
@@ -897,6 +934,57 @@ def densify(op: LinOp, *, max_n: int = 4096) -> LinOp:
     if isinstance(op, SquareLinOp):
         return DenseSquare(A)
     return Dense(A)
+
+
+@contextmanager
+def dense_fallback(*, max_n: int = 2048):
+    """Context manager: let unsupported operations fall back to dense algebra.
+
+    Off by default. Inside ``with dense_fallback(max_n=...):``, calling an
+    optional operation an operator does not support — ``solve``,
+    ``solve_mat``, ``logdet``, ``diag``, ``factor``, ``whiten`` or
+    ``whiten_mat`` — computes it on :func:`densify`'s result instead of
+    raising :class:`UnsupportedOpError`, and warns once per operator type and
+    operation. An operator with a side larger than ``max_n`` still raises,
+    before allocating. Meant for prototyping on small problems; nothing in
+    this package relies on it.
+
+    Parameters
+    ----------
+    max_n
+        Largest side length that falls back, a positive int.
+
+    Raises
+    ------
+    TypeError
+        If ``max_n`` is not an int.
+    ValueError
+        If ``max_n`` is not positive.
+
+    Notes
+    -----
+    ``supports`` and ``capabilities`` are unchanged inside the context: they
+    report what an operator does cheaply, so code that gates on them keeps
+    its structured branch.
+
+    Each fallback densifies anew, at :math:`O(n^3)` cost per call; nothing is
+    cached. The setting is read when an operation is called, which under
+    :func:`jax.jit` is when the function is traced: a function traced inside
+    the context keeps its dense path when called after the context exits.
+    The densified form of a singular operator gives ``nan``, exactly as
+    :func:`densify` does.
+    """
+    if not isinstance(max_n, int) or isinstance(max_n, bool):
+        raise TypeError(f"dense_fallback: max_n must be an int, got {max_n!r}")
+    if max_n < 1:
+        raise ValueError(f"dense_fallback: max_n must be positive, got {max_n}")
+    global _dense_fallback_max_n, _dense_fallback_warned
+    previous = (_dense_fallback_max_n, _dense_fallback_warned)
+    _dense_fallback_max_n, _dense_fallback_warned = max_n, set()
+    try:
+        yield
+    finally:
+        _dense_fallback_max_n, _dense_fallback_warned = previous
 
 
 # ---------------------------------------------------------------------------
@@ -1009,6 +1097,24 @@ def value_check(x, predicate, message: str) -> None:
         return
     if not bool(outcome):
         raise ValueError(message)
+
+
+# ---------------------------------------------------------------------------
+# private: the dense fallback
+# ---------------------------------------------------------------------------
+
+
+def _warn_dense_fallback(op: LinOp, name: str) -> None:
+    """Warn that ``name`` falls back to dense algebra, once per type and name."""
+    key = (type(op).__name__, name)
+    if key in _dense_fallback_warned:
+        return
+    _dense_fallback_warned.add(key)
+    warnings.warn(
+        f"dense_fallback: {key[0]} has no cheap `{name}`; computing it on a "
+        f"densified {op.shape} operator.",
+        stacklevel=4,
+    )
 
 
 # ---------------------------------------------------------------------------

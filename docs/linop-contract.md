@@ -25,8 +25,8 @@ defective; substantive changes to the layer change this page first.
 
 The layer represents matrices implicitly, by how they act on vectors, so
 that structure — diagonal, block, triangular, low-rank, Kronecker — is
-exploited rather than materialized. It is scoped to what Ensemble Kalman
-Inversion needs: applying operators and their transposes, solving against
+exploited rather than materialized. It is scoped to what ensemble Kalman
+methods need: applying operators and their transposes, solving against
 them, and taking square roots to sample and whiten. It is deliberately not
 a general-purpose linear algebra library; {ref}`contract-excluded` lists
 what is left out and why.
@@ -518,6 +518,12 @@ queryable, with one load-bearing invariant:
 > `False` without raising, and calling them fails with `AttributeError`,
 > like any missing attribute.
 
+The one exception is the opt-in `dense_fallback` context
+({ref}`contract-dense-fallback`), inside which an unsupported operation on
+a small operator succeeds by densifying while `supports` still answers
+`False`: `supports` reports what is *cheap*, and code that gates on it
+keeps its structured branch inside the context.
+
 Both directions matter. `supports` must not report an operation that then
 raises, and must not deny an operation that works — including the derived
 ones: an operator implementing `_solve` supports `solve_mat`, and
@@ -573,8 +579,9 @@ prevent, so it must be visible at the call site. The exception:
 - is picklable and reconstructible from its `args`, because forward-model
   evaluation runs in worker processes and exceptions cross that boundary
   by pickling. Concretely, it is constructed as
-  `UnsupportedOpError(name, operator_type, capabilities)` — a string, a
-  string, and a tuple of strings — so `type(e)(*e.args)` rebuilds it.
+  `UnsupportedOpError(name, operator_type, capabilities, detail="")` — a
+  string, a string, a tuple of strings and an optional string appended to
+  the message — so `type(e)(*e.args)` rebuilds it.
 
 :::{warning}
 The raise happens **at trace time**, and inside `jit` both branches of a
@@ -623,6 +630,32 @@ LU diagonal — pivot signs are irrelevant under the log-magnitude
 convention), and `diag`; and it overrides `T` to return the transposed
 operator backed by the same factorization, so transposition does not cost
 it its `solve`.
+
+(contract-dense-fallback)=
+### The opt-in fallback: `dense_fallback`
+
+`with dense_fallback(max_n=2048):` turns the explicit fallback into an
+implicit one, for prototyping on small problems. It is **off by default**,
+and nothing in the package relies on it.
+
+- Inside the context, calling any of the seven optional operations on an
+  operator that does not support it computes the operation on
+  `densify(op, max_n=max_n)` instead of raising `UnsupportedOpError`.
+- It warns (`UserWarning`) once per operator type and operation within
+  one activation of the context, naming both.
+- An operator with a side larger than `max_n` still raises
+  `UnsupportedOpError`, **before allocating**, with a message that names
+  the active `max_n`.
+- `supports` and `capabilities` are unchanged
+  ({ref}`contract-capabilities`).
+- Each fallback densifies anew, at $O(n^3)$ per call; nothing is cached,
+  for the reason {ref}`contract-jax` forbids lazy caches.
+- The setting is process-global and is read when an operation is called.
+  Under `jit` that is trace time: a function traced inside the context
+  keeps its dense path when called after the context exits. Contexts nest,
+  and exiting one restores the previous setting.
+- The densified form of a singular operator gives `nan`, exactly as
+  `densify` does.
 
 (contract-psd-low-rank)=
 ### The singular-by-construction case: `PSDLowRank`
@@ -798,7 +831,9 @@ explicitly separated data and metadata:
 ### Constructors compute eagerly and store the result
 
 A constructor may compute from its arguments — `DensePSD(A)` runs the
-Cholesky, `DenseSquare(A)` the LU — but it computes **once, eagerly**, and
+Cholesky, `DenseSquare(A)` the LU, `IdentityPlusGram(S)` the thin SVD, and
+`LowRankUpdate(base, F)` the whitening and the `IdentityPlusGram` — but it
+computes **once, eagerly**, and
 everything the operator needs afterward lands in its fields. A
 factorization the caller already has is passed by keyword instead
 (`DensePSD(L=L)`, `DenseSquare(A, lu=lu, piv=piv)`) and stored as given.
@@ -921,6 +956,159 @@ localization: inflating each local observation's noise by the reciprocal
 taper is the congruence with $s_i = 1/\sqrt{\tau_i}$, so inflated noise
 whitens as cheaply as the original — including for correlated
 (non-diagonal) noise blocks.
+
+(contract-zero)=
+### Zero blocks
+
+`Zero(n_out, n_in, *, dtype=None)` is the `(n_out, n_in)` zero matrix. It
+stores **no array**: its sizes and dtype are static fields, so it has no
+pytree leaves, and padding an operator with zero blocks costs no memory.
+
+- Both sizes are positive ints, like every operator's
+  ({ref}`contract-validation`).
+- `dtype` is a real floating dtype, defaulting to the default float
+  (float64 under the package default). `to_dense` returns zeros of that
+  dtype; the application methods return zeros of that dtype promoted with
+  the operand's, as any operator's arithmetic would. It is the one
+  operator with a dtype attribute, because it has no array to carry one.
+- The application methods return zeros **without reading the operand's
+  values**: a non-finite operand gives zeros. It is a structural zero, not
+  a multiplication by zero.
+- `T` is `Zero(n_in, n_out)` with the same dtype.
+- Composites skip it where they can: an `HStack` applies only its
+  non-`Zero` blocks, and a `Product` with a `Zero` factor applies as a
+  `Zero` without applying its other factors. The factories still return
+  `HStack` and `Product`; skipping is a property of application, not of
+  construction.
+
+The consumer is the distribution layer, which grows a Gaussian's latent
+space by appending columns to one block's factor row and zero columns to
+every other.
+
+(contract-low-rank-update)=
+### Low-rank updates: `LowRankUpdate`
+
+`LowRankUpdate(base, F)` represents $C = D + FF^\top$ for a `PSDLinOp`
+$D$ (`base`) that supports `whiten`, and any `LinOp` $F$ of shape
+`(n, k)`. It is the structured sum that the exclusion of `+`
+({ref}`contract-excluded`) defers to a dedicated class. The parameter is
+`F` because a field named `factor` would shadow the method.
+
+Its constructor whitens $F$ once, $S = (W_D F)^\top$ at $k$ applications
+of $W_D$, and stores `IdentityPlusGram(S)` ({ref}`contract-gram`) as the
+field `gram`. With $S = U\Sigma V^\top$:
+
+| operation    | in terms of $D$, $F$ and $A = I + SS^\top$            | requires of `base` |
+| ------------ | ------------------------------------------------------ | ------------------ |
+| `matvec(x)`  | $Dx + F(F^\top x)$                                     | —                  |
+| `solve(b)`   | $D^{-1}\big(b - F\,A^{-1}S\,W_D b\big)$ (Woodbury)     | `solve`            |
+| `logdet()`   | $\log\det D + \sum_i \log(1 + \sigma_i^2)$             | `logdet`           |
+| `diag()`     | $\operatorname{diag}(D) + \sum_j F_{ij}^2$             | `diag`             |
+| `factor()`   | $[\,L_D \ \ F\,]$, an `HStack`                        | `factor`           |
+| `whiten(x)`  | $(I + S^\top S)^{-1/2}\, W_D x$                        | —                  |
+
+`supports(name)` is the class's answer intersected with what the table
+requires of `base`. Its `whiten` is $W_C = (I + S^\top S)^{-1/2} W_D$,
+which satisfies $W_C C W_C^\top = I$; it is computed from the same stored
+decomposition as everything else, so no operation computes an SVD.
+Derivatives of `solve`, `logdet` and `whiten` go through the rules of
+{ref}`contract-gram`, so they are finite at exactly repeated and zero
+singular values of $S$ — for example, when $F$ is padded with `Zero`
+columns.
+
+(contract-gram)=
+## The conditioning core: `IdentityPlusGram`
+
+`IdentityPlusGram(S)` is the operator $A = I_k + SS^\top$ for a `(k, N)`
+array $S$, exactly 2-D with both sizes positive and no relation required
+between them. Every Gaussian conditioning in the package reduces to it,
+with $S$ the transpose of the given blocks' factor rows whitened by their
+noise; the consumers are `enskit.gauss` today and the distribution layer
+from PR 4.
+
+**One SVD, at construction.** The constructor computes the thin SVD
+$S = U\Sigma V^\top$, $r = \min(k, N)$, and stores `S`, `U`, `sigma` and
+`Vt`. No operation computes another, and no derivative rule does either.
+Neither $SS^\top$ nor $S^\top S$ is formed by any operation that reads the
+decomposition: forming either squares the condition number and rounds away
+every $\sigma_i < \sqrt{\varepsilon}\,\sigma_{\max}$.
+
+| operation          | value                                                               |
+| ------------------ | ------------------------------------------------------------------- |
+| `matvec(x)`        | $x + S(S^\top x)$                                                   |
+| `solve(b)`         | $b + U\big((I+\Sigma^2)^{-1} - I\big)U^\top b$                      |
+| `logdet()`         | $\sum_i \log(1 + \sigma_i^2)$                                       |
+| `whiten(x)`        | $A^{-1/2}x$, the symmetric whitener                                 |
+| `factor()`         | $[\,I_k \ \ S\,]$, an `HStack` of shape `(k, k + N)`                 |
+| `diag()`           | $1 + \sum_j S_{ij}^2$                                               |
+| `solve_factor(b)`  | $A^{-1}Sb = U\operatorname{diag}\big(\sigma_i/(1+\sigma_i^2)\big)V^\top b$, `(..., N) -> (..., k)` |
+| `inverse_sqrt()`   | $A^{-1/2} = I_k + U\big((I+\Sigma^2)^{-1/2} - I\big)U^\top$, an `IdentityPlusGramInverseSqrt` |
+
+- `solve_factor` is a public method beyond the hierarchy's operations. It
+  follows the batch contract (trailing core axis of length $N$, leading
+  batch axes carried through), validates its operand like `matvec`, and
+  refuses vmapped families. Its multipliers are at most $1/2$, so it is
+  bounded however collapsed or large $S$ is.
+- `inverse_sqrt()` returns an `IdentityPlusGramInverseSqrt`, a `PSDLinOp`
+  sharing the decomposition, with `matvec` and `to_dense` only. The
+  identity term is required: for $r < k$ the thin form without it is
+  singular.
+- Finiteness of `S` is not checked, even in debug mode. A non-finite `S`
+  gives non-finite results, and the caller that built `S` — which knows
+  the likely cause, a singular noise covariance — reports them with its
+  own message.
+
+**Derivatives.** The operations that read the decomposition — `solve`,
+`solve_factor`, `logdet`, `whiten`, and the inverse square root's
+`matvec` and `to_dense` — carry custom derivative rules written in terms
+of $S$ alone:
+
+$$
+\begin{aligned}
+d(A^{-1}Sb) &= A^{-1}S\,(db - dS^\top w) + A^{-1}dS\,(b - S^\top w),
+  \qquad w = A^{-1}Sb,\\
+d(A^{-1}b) &= A^{-1}(db - dS\,S^\top y) - A^{-1}S\,(dS^\top y),
+  \qquad y = A^{-1}b,\\
+d\log\det A &= 2\,\langle A^{-1}S,\ dS\rangle,
+\end{aligned}
+$$
+
+and, for $T = A^{-1/2}$, the Daleckii–Krein formula in the thin basis, with
+$P = I - UU^\top$, $s_i = (1+\sigma_i^2)^{1/2}$ and
+$dA = dS\,S^\top + S\,dS^\top$,
+
+$$
+dT = U\big(G\circ(U^\top dA\,U)\big)U^\top
+   + U\operatorname{diag}(g)\,U^\top dA\,P
+   + P\,dA\,U\operatorname{diag}(g)\,U^\top,
+\quad G_{ij} = \frac{-1}{s_is_j(s_i+s_j)},\quad g_i = \frac{-1}{s_i(s_i+1)}.
+$$
+
+None divides by a difference of singular values. The obligations:
+
+1. **First derivatives are finite and correct at every $S$**, including at
+   exactly repeated and exactly zero singular values, where a plain SVD's
+   derivative is `nan`. This holds in forward and reverse mode, under
+   `jit` and under `vmap`.
+2. **Derivatives flow through `S`.** The rules read only the tangent of
+   `S` (and of the vector operand); the stored decomposition receives no
+   derivative of its own. Differentiating with respect to an operator
+   passed as a pytree gives the derivative in its field `S` and zeros in
+   `U`, `sigma` and `Vt`.
+3. **The decomposition is not stop-gradiented.** Second derivatives
+   differentiate the rules' own arithmetic, which reads `U` and `sigma`,
+   so they must see those fields' dependence on `S`. They are therefore
+   correct wherever the singular values are distinct and nonzero. At
+   degenerate spectra only first derivatives are promised: second
+   derivatives of `logdet` are finite there, but `jax.hessian` of the
+   other operations may return `nan`. A `nan` there is the intended
+   failure; stop-gradienting the decomposition would make it a finite,
+   wrong Hessian.
+4. **No SVD in any rule.** A gradient through every operation computes
+   one SVD, the construction's.
+
+`matvec`, `diag`, `factor` and the base `to_dense` read `S` directly and
+are differentiated by JAX as written.
 
 (contract-arithmetic)=
 ## Operator arithmetic
@@ -1050,13 +1238,15 @@ children's arrays.
 
 For the avoidance of doubt, `enskit.linalg` exports exactly: the levels
 `LinOp`, `SquareLinOp`, `PSDLinOp`; the elementary operators `Identity`,
-`PSDDiagonal`, `Dense`, `DenseSquare`, `Triangular`,
+`Zero`, `PSDDiagonal`, `Dense`, `DenseSquare`, `Triangular`,
 `DensePSD`, `PSDLowRank`; the composites `Product`, `HStack`, `BlockDiag`,
 `PSDBlockDiag`, `Transposed`, `Scaled`, `SquareScaled`, `PSDScaled`,
-`PSDDiagCongruence`; the factories `block_diag`, `product`, `hstack`, `kron`
-(with the Kron classes, once that milestone lands), `diag_congruence`; the
-helpers `dense_matvec` and `tri_solve`; `densify`, `UnsupportedOpError`,
-`linop`, `static_field`, and the debug switch (`set_debug_checks`, the
+`PSDDiagCongruence`, `LowRankUpdate`; the conditioning core
+`IdentityPlusGram` and `IdentityPlusGramInverseSqrt`; the factories
+`block_diag`, `product`, `hstack`, `kron` (with the Kron classes, once that
+milestone lands), `diag_congruence`; the helpers `dense_matvec` and
+`tri_solve`; `densify`, `dense_fallback`, `UnsupportedOpError`, `linop`,
+`static_field`, and the debug switch (`set_debug_checks`, the
 `debug_checks` context manager, and the `value_check` helper it gates). The
 conformance suite lives in `enskit.linalg.testing`. Anything else is private, and no consumer may
 depend on it.
@@ -1178,8 +1368,9 @@ either a simplification rule per pair of types (two `PSDDiagonal`s,
 low-rank plus diagonal) or a dedicated class per structured sum. A
 registry of such rules is machinery the current type count does not
 justify, and a generic sum class would advertise almost nothing. Structured
-sums get their own classes as EKI needs them; revisit `__add__` when
-`enskit.gauss` exists and real call sites are visible.
+sums get their own classes as a method needs them — `LowRankUpdate`
+({ref}`contract-low-rank-update`) is the first; revisit `__add__` when the
+distribution layer's call sites are visible.
 
 **`@` between an operator and an array.** Excluded with a guided error;
 the reasoning is in {ref}`contract-arithmetic`.
@@ -1196,7 +1387,9 @@ deferred until a consumer needs it; see the box in that section.
 **dtype tracking.** The package runs float64 end to end (enabled at
 import). A per-operator dtype attribute and promotion rules would be
 machinery without a consumer; `to_dense()` answers the question where it
-arises. Revisit if mixed precision ever becomes a requirement.
+arises. `Zero` is the one exception, because it stores no array to take a
+dtype from ({ref}`contract-zero`). Revisit if mixed precision ever becomes
+a requirement.
 
 **Iterative and matrix-free solves.** `solve` is exact and direct.
 Iterative methods have tolerances, preconditioners and failure modes that
@@ -1207,6 +1400,6 @@ solve would make `solve`'s contract untestable.
 returns new arrays. This is the only sane convention under JAX.
 
 **A general operator algebra.** The layer grows one structure at a time,
-when EKI needs it. The catalog of shipped operators lives in
+when an ensemble Kalman method needs it. The catalog of shipped operators lives in
 {doc}`user-guide/operators`; this contract constrains *how* any of them
 behave, not *which* exist.

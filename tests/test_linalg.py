@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import dataclasses
 import pickle
+import warnings
 
 import jax
 import jax.numpy as jnp
@@ -37,8 +38,10 @@ from enskit.linalg import (
     Transposed,
     Triangular,
     UnsupportedOpError,
+    Zero,
     block_diag,
     debug_checks,
+    dense_fallback,
     dense_matvec,
     densify,
     diag_congruence,
@@ -224,6 +227,9 @@ def test_unsupported_error_pickles_and_rebuilds_from_args():
     assert str(pickle.loads(pickle.dumps(e))) == str(e)
     assert str(type(e)(*e.args)) == str(e)
     assert "densify" in str(e)
+    with_detail = UnsupportedOpError("solve", "Foo", (), "Some detail.")
+    assert str(pickle.loads(pickle.dumps(with_detail))) == str(with_detail)
+    assert str(with_detail).endswith("Some detail.")
 
 
 # ---------------------------------------------------------------------------
@@ -1131,3 +1137,144 @@ def test_debug_check_catches_a_singular_dense_square_with_a_rounded_pivot():
             DenseSquare(singular)
         # ill-conditioned but not singular
         DenseSquare(jnp.asarray(np.diag([1e-6, 1.0, 1e6])))
+
+
+# ---------------------------------------------------------------------------
+# Zero
+# ---------------------------------------------------------------------------
+
+
+def test_zero_stores_nothing_and_returns_zeros_of_the_right_shape_and_dtype():
+    Z = Zero(3, 5)
+    assert jax.tree_util.tree_leaves(Z) == []
+    assert Z.to_dense().dtype == jnp.float64
+    np.testing.assert_array_equal(Z.matvec(jnp.ones((2, 4, 5))), np.zeros((2, 4, 3)))
+    np.testing.assert_array_equal(Z.rmatmat(jnp.ones((3, 0))), np.zeros((5, 0)))
+    assert Z.T.shape == (5, 3) and isinstance(Z.T, Zero)
+    narrow = Zero(2, 2, dtype=jnp.float32)
+    assert narrow.to_dense().dtype == jnp.float32
+    # applying promotes with the operand, as any operator's arithmetic does
+    assert narrow.matvec(jnp.ones(2, dtype=jnp.float64)).dtype == jnp.float64
+    assert narrow.matvec(jnp.ones(2, dtype=jnp.float32)).dtype == jnp.float32
+
+
+def test_zero_rejects_bad_sizes_and_dtypes():
+    with pytest.raises(ValueError, match="n_out"):
+        Zero(0, 3)
+    with pytest.raises(TypeError, match="n_in"):
+        Zero(3, 2.0)
+    with pytest.raises(TypeError, match="n_in"):
+        Zero(3, True)
+    with pytest.raises(TypeError, match="floating"):
+        Zero(2, 2, dtype=jnp.int32)
+
+
+def _count_dot_generals(jaxpr) -> int:
+    return sum(eqn.primitive.name == "dot_general" for eqn in jaxpr.eqns)
+
+
+def test_composites_skip_zero_blocks_instead_of_applying_them():
+    """A Product with a Zero factor applies no other factor, and an HStack
+    applies only its non-Zero blocks: padding a factor with zero columns
+    adds no arithmetic."""
+    A = Dense(jnp.asarray(RNG.normal(size=(4, 3))))
+    x = jnp.ones(3)
+    padded = hstack(A, Zero(4, 6))
+    assert _count_dot_generals(jax.make_jaxpr(padded.matvec)(jnp.ones(9)).jaxpr) == 1
+    np.testing.assert_allclose(padded.matvec(jnp.ones(9)), A.matvec(x))
+    chain = product(A, Zero(3, 2))
+    assert isinstance(chain, Product)
+    assert _count_dot_generals(jax.make_jaxpr(chain.matvec)(jnp.ones(2)).jaxpr) == 0
+    assert _count_dot_generals(jax.make_jaxpr(chain.rmatvec)(jnp.ones(4)).jaxpr) == 0
+    np.testing.assert_array_equal(chain.matvec(jnp.ones(2)), np.zeros(4))
+    # a block made entirely of Zero blocks is still zero
+    np.testing.assert_array_equal(
+        hstack(Zero(2, 1), Zero(2, 3)).matvec(jnp.ones(4)), np.zeros(2)
+    )
+
+
+# ---------------------------------------------------------------------------
+# the dense fallback
+# ---------------------------------------------------------------------------
+
+
+def _wide_low_rank() -> PSDLowRank:
+    """Nonsingular, so densifying is valid, but with no cheap solve."""
+    return PSDLowRank(jnp.asarray(RNG.normal(size=(4, 6))))
+
+
+def test_dense_fallback_is_off_by_default():
+    with pytest.raises(UnsupportedOpError):
+        _wide_low_rank().solve(jnp.ones(4))
+
+
+def test_dense_fallback_computes_on_the_densified_operator_and_warns_once():
+    op = _wide_low_rank()
+    A = np.asarray(op.to_dense())
+    b = RNG.normal(size=(2, 4))
+    with dense_fallback(max_n=16):
+        with pytest.warns(UserWarning, match="PSDLowRank has no cheap `solve`"):
+            got = op.solve(jnp.asarray(b))
+        np.testing.assert_allclose(got, np.linalg.solve(A, b.T).T, rtol=1e-10)
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")  # a second call does not warn again
+            op.solve(jnp.asarray(b))
+            PSDLowRank(jnp.asarray(RNG.normal(size=(3, 5)))).solve(jnp.ones(3))
+        with pytest.warns(UserWarning, match="`logdet`"):
+            np.testing.assert_allclose(op.logdet(), np.linalg.slogdet(A)[1], rtol=1e-10)
+        with pytest.warns(UserWarning, match="`whiten_mat`"):
+            W = np.asarray(op.whiten_mat(jnp.eye(4)))
+        np.testing.assert_allclose(W @ A @ W.T, np.eye(4), atol=1e-10)
+        # supports() still reports what is cheap
+        assert not op.supports("solve")
+    with pytest.raises(UnsupportedOpError):
+        op.solve(jnp.ones(4))
+
+
+def test_dense_fallback_size_guard_raises_before_densifying(monkeypatch):
+    op = _wide_low_rank()
+
+    def refuse(self):
+        raise AssertionError("densified despite the size guard")
+
+    monkeypatch.setattr(PSDLowRank, "_to_dense", refuse)
+    with dense_fallback(max_n=3):
+        with pytest.raises(UnsupportedOpError, match="max_n=3"):
+            op.solve(jnp.ones(4))
+
+
+def test_dense_fallback_contexts_nest_and_restore():
+    op = _wide_low_rank()
+    with dense_fallback(max_n=16):
+        with dense_fallback(max_n=2):
+            with pytest.raises(UnsupportedOpError, match="max_n=2"):
+                op.logdet()
+        with pytest.warns(UserWarning):
+            op.logdet()
+    with pytest.raises(UnsupportedOpError):
+        op.logdet()
+
+
+def test_dense_fallback_validates_max_n():
+    with pytest.raises(ValueError, match="positive"):
+        with dense_fallback(max_n=0):
+            pass
+    with pytest.raises(TypeError, match="int"):
+        with dense_fallback(max_n=10.0):
+            pass
+
+
+def test_dense_fallback_reaches_operations_called_through_other_layers():
+    """The capability gates the gauss layer applies before an operation see
+    the fallback too, so a covariance with no cheap whitener works inside it."""
+    from enskit.gauss import Gaussian
+
+    op = _wide_low_rank()
+    gaussian = Gaussian(jnp.zeros(4), op)
+    x = jnp.asarray(RNG.normal(size=(4,)))
+    with pytest.raises(UnsupportedOpError):
+        gaussian.log_density(x)
+    with dense_fallback(max_n=16), pytest.warns(UserWarning):
+        got = gaussian.log_density(x)
+    want = Gaussian(jnp.zeros(4), densify(op)).log_density(x)
+    np.testing.assert_allclose(got, want, rtol=1e-12)

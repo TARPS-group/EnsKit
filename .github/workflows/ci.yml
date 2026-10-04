@@ -29,6 +29,9 @@ jobs:
       - name: Lint
         run: uv run ruff check .
 
+      - name: Layer contracts
+        run: uv run lint-imports
+
       - name: Test
         run: uv run pytest --cov=enskit --cov-report=term-missing
 

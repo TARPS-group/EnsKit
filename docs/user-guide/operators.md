@@ -22,6 +22,7 @@ operator. The full behavioral specification is the
 | class | represents | notes |
 | --- | --- | --- |
 | `Identity(size)` | $I_n$ | every operation is free |
+| `Zero(n_out, n_in)` | the zero matrix | stores no array; composites skip it |
 | `PSDDiagonal(diagonal)` | $\mathrm{diag}(d)$ | all operations linear in $n$ |
 | `Dense(A)` | an explicit array | may be rectangular; no structure assumed |
 | `DenseSquare(A)` | a dense square matrix | stored with its LU; what `densify` returns for square non-PSD operators |
@@ -68,6 +69,84 @@ outputs, so $[A_1\ A_2]\,[x_1; x_2] = A_1 x_1 + A_2 x_2$; its transpose
 `hstack(...).T` is the corresponding block column. The block-diagonal
 classes expose their children as `op.blocks` and their shapes as
 `op.block_shapes`.
+
+Pad an operator with zero columns using `Zero`, which stores no array:
+`hstack(F, Zero(n, m))` is $[F\ \ 0]$, and applying it applies `F` alone.
+A `Product` with a `Zero` factor applies as zero without applying its other
+factors.
+
+## A PSD operator plus a low-rank term
+
+`LowRankUpdate(base, F)` represents $C = D + FF^\top$ for a PSD operator
+$D$ that supports `whiten` and any operator $F$ of shape $(n, k)$. Reach for
+it when a covariance is a cheap, invertible part plus a few directions of
+extra variance — a diagonal noise covariance plus an ensemble's anomalies,
+say — and you need to solve against it, whiten with it or take its
+log-determinant without forming the $n \times n$ matrix:
+
+```python
+C = LowRankUpdate(PSDDiagonal(d), Dense(F))   # D + F F^T
+x = C.solve(b)        # Woodbury: two applications of D's solve and whitener
+w = C.whiten(y)       # W_C with W_C C W_C^T = I
+ld = C.logdet()       # log det D + sum log(1 + sigma_i^2)
+```
+
+The constructor whitens $F$ by $D$ once, $S = (W_D F)^\top$, and stores the
+`IdentityPlusGram` of $S$ (next section), so every later call reuses one
+SVD. Its capabilities follow `base`: it can `solve` if `base` can, and so on
+for `logdet`, `diag` and `factor`; `whiten` always works.
+
+## The conditioning core: `IdentityPlusGram`
+
+`IdentityPlusGram(S)` is the operator $A = I_k + SS^\top$ for a `(k, N)`
+array $S$. Every Gaussian conditioning in EnsKit reduces to it: with $S$ the
+transpose of a factor whitened by the noise, the Kalman gain applied to a
+whitened residual is `A.solve_factor(r)` $= A^{-1}Sr$, and the conditioned
+factor is the old one multiplied by `A.inverse_sqrt()` $= A^{-1/2}$. You need
+it directly only if you are writing a conditioning of your own; the
+distributions and updates use it for you.
+
+```python
+A = IdentityPlusGram(S)          # one thin SVD of S, at construction
+w = A.solve_factor(r)            # (..., N) -> (..., k)
+T = A.inverse_sqrt()             # an operator; T.to_dense() is (k, k)
+```
+
+Everything is computed from the thin SVD $S = U\Sigma V^\top$, never from
+$SS^\top$, which would square the condition number. The multipliers of
+`solve_factor` are $\sigma_i/(1+\sigma_i^2) \le 1/2$, so it stays bounded
+however collapsed or large $S$ becomes.
+
+**Derivatives.** A plain SVD's derivative divides by differences of singular
+values, so it is `nan` whenever two singular values are exactly equal or
+exactly zero — which happens routinely here: a localization mask zeroes
+columns of $S$, and an exactly collapsed ensemble zeroes all of it.
+`IdentityPlusGram`'s operations carry their own derivative rules, written in
+terms of $S$ with no such division, so `jax.grad` through `solve`,
+`solve_factor`, `logdet`, `whiten` and `inverse_sqrt` is finite and correct
+at every $S$. Second derivatives are correct where the singular values are
+distinct and nonzero; at degenerate spectra only `logdet`'s are promised.
+The operator contract ({ref}`contract-gram`) states the rules.
+
+## Prototyping with a dense fallback
+
+An operation an operator cannot do cheaply raises `UnsupportedOpError`. While
+prototyping on small problems you may prefer it to just work:
+
+```python
+from enskit.linalg import dense_fallback
+
+with dense_fallback(max_n=2048):
+    x = cov.solve(b)    # densifies cov if it has no cheap solve, with a warning
+```
+
+Inside the context an unsupported operation is computed on `densify(op)`,
+with one warning per operator type and operation; an operator larger than
+`max_n` still raises. `supports()` is unchanged, so code that checks it keeps
+its structured branch. Each call densifies again at $O(n^3)$, and under `jit`
+the choice is made when the function is traced, so a function compiled
+inside the context keeps the dense path afterwards. Remove the context before
+running anything large.
 
 ## Operator arithmetic
 
@@ -139,7 +218,8 @@ else:
 
 `op.capabilities()` returns everything an operator supports beyond the
 always-available operations. An unknown name raises `ValueError`, so a typo
-cannot silently steer you onto the dense branch.
+cannot silently steer you onto the dense branch. For quick experiments,
+`dense_fallback` (above) makes the dense branch implicit.
 
 ## Square roots and whitening
 
@@ -172,6 +252,9 @@ For an operator of side $n$:
 | `DensePSD`, `DenseSquare` | $O(n^2)$ | $O(n^2)$ | $O(n^2)$ | $O(n)$ after the constructor's $O(n^3)$ |
 | `Triangular` | $O(n^2)$ | $O(n^2)$ | — | $O(n)$ |
 | `PSDLowRank` (factor width $k$) | $O(nk)$ | — | — | — |
+| `Zero` | $O(1)$ work, $O(n)$ output | — | — | — |
+| `IdentityPlusGram` ($S$ of shape $(k, N)$, $r = \min(k, N)$) | $O(kN)$ | $O(kr)$ | $O(kr)$ | $O(r)$ after the constructor's $O(kNr)$ |
+| `LowRankUpdate` ($F$ of width $k$) | base $+ O(nk)$ | base solve and whiten $+ O(nk)$ | base whiten $+ O(nr)$ | base $+ O(r)$ |
 | block diagonals | sum over blocks | sum over blocks | sum over blocks | sum over blocks |
 | `PSDDiagCongruence`, scaled operators | base $+ O(n)$ | base $+ O(n)$ | base $+ O(n)$ | base $+ O(n)$ |
 | `Product`, `HStack` | sum over factors | — | — | — |

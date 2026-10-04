@@ -104,9 +104,11 @@ and the posterior covariance is the same factor multiplied on the right by
     = \\bigl(F_u T\\bigr)\\bigl(F_u T\\bigr)^\\top .
 
 Neither :math:`S^\\top S` nor :math:`S S^\\top` is ever formed: their
-condition numbers are the squares of :math:`S`'s. Each class method
-computes one SVD, uses it for both pieces, and discards it; each public
-primitive computes its own.
+condition numbers are the squares of :math:`S`'s. Both pieces are computed
+by :class:`~enskit.linalg.IdentityPlusGram`, the operator
+:math:`I_k + S S^\\top`: :math:`w` is its ``solve_factor`` and :math:`T` its
+``inverse_sqrt``. Each class method builds one, so computes one SVD, uses
+it for both pieces, and discards it; each public primitive builds its own.
 """
 from __future__ import annotations
 
@@ -117,7 +119,14 @@ import jax
 import jax.numpy as jnp
 from jax import Array
 
-from .linalg import Dense, LinOp, PSDLinOp, PSDLowRank, dense_matvec, value_check
+from .linalg import (
+    Dense,
+    IdentityPlusGram,
+    LinOp,
+    PSDLinOp,
+    PSDLowRank,
+    value_check,
+)
 from .linalg.base import _broadcast_batch, _pytree_dataclass
 
 __all__ = [
@@ -1015,8 +1024,8 @@ class GaussianJoint:
         # the private kernel rather than gain_weights, so that a non-finite
         # result is diagnosed against this call rather than against a
         # primitive the caller never invoked
-        U, sigma, Vt = _thin_svd(s)
-        transported = u + self.u_factor.matvec(_weights_from_svd(U, sigma, Vt, b))
+        weights = IdentityPlusGram(s).solve_factor(b)
+        transported = u + self.u_factor.matvec(weights)
         _check_finite(
             where, "the transported realizations", transported, cause=_SINGULAR_NOISE
         )
@@ -1080,11 +1089,9 @@ class GaussianJoint:
         them agree by construction.
         """
         s, whitened_residual = self._whitened_factor_and_residual(y, noise_cov)
-        U, sigma, Vt = _thin_svd(s)
-        mean = self.u_mean + self.u_factor.matvec(
-            _weights_from_svd(U, sigma, Vt, whitened_residual)
-        )
-        transform = _transform_from_svd(U, sigma, self.latent_dim)
+        gram = IdentityPlusGram(s)
+        mean = self.u_mean + self.u_factor.matvec(gram.solve_factor(whitened_residual))
+        transform = gram.inverse_sqrt().to_dense()
         return mean, self.u_factor.matmat(transform)
 
 
@@ -1405,12 +1412,11 @@ class EmpiricalJoint:
         joint = self.to_gaussian_joint()
         eps = jax.random.normal(key, (self.n_samples, self.v_dim))
         s, whitened_residual = joint._whitened_factor_and_residual(y, noise_cov)
-        U, sigma, Vt = _thin_svd(s)
         # W(y - v_j) = W(y - v_bar) - sqrt(J-1) S_j., because these samples are
         # the factor: v_j - v_bar is exactly sqrt(J-1) times column j of F_v.
         b = whitened_residual - math.sqrt(self.n_samples - 1) * s - eps
         updated = self.u_samples + joint.u_factor.matvec(
-            _weights_from_svd(U, sigma, Vt, b)
+            IdentityPlusGram(s).solve_factor(b)
         )
         _check_finite(where, "the updated block", updated, cause=_SINGULAR_NOISE)
         return updated
@@ -1491,14 +1497,11 @@ def gain_weights(s: Array, b: Array) -> Array:
     :class:`GaussianJoint` — where those conventions are enforced — are the
     default interface and this is the escape hatch.
 
-    Differentiable wherever the singular values of ``s`` are distinct and
-    nonzero. At exactly repeated or exactly zero singular values — an
-    exactly collapsed ``s``, or the zero-padded columns a masked local
-    analysis may produce — the SVD's gradient is ``nan`` even though this
-    function is smooth there, equaling the rational form above. The
-    float-generic degeneracy of mean-centering (:math:`\\sigma_{\\min} \\sim
-    10^{-16}` when :math:`N \\ge k`) is not an exact tie and differentiates
-    finitely.
+    Computed as :meth:`enskit.linalg.IdentityPlusGram.solve_factor`, so it
+    is differentiable at every ``s``: its derivative rule is rational in
+    ``s`` and stays finite at exactly repeated or exactly zero singular
+    values — an exactly collapsed ``s``, or the zero-padded columns a masked
+    local analysis may produce — where a plain SVD's derivative is ``nan``.
     """
     s = jnp.asarray(s)
     if s.ndim != 2 or any(size < 1 for size in s.shape):
@@ -1509,8 +1512,7 @@ def gain_weights(s: Array, b: Array) -> Array:
     b = _check_batched_operand("gain_weights", "b", b, s.shape[1])
     _check_finite("gain_weights", "s", s)
     _check_finite("gain_weights", "b", b)
-    U, sigma, Vt = _thin_svd(s)
-    return _weights_from_svd(U, sigma, Vt, b)
+    return IdentityPlusGram(s).solve_factor(b)
 
 
 def sqrt_transform(s: Array) -> Array:
@@ -1567,11 +1569,10 @@ def sqrt_transform(s: Array) -> Array:
     map. On general ``s``, :math:`T\\mathbf{1}` is whatever that matrix makes
     it.
 
-    Differentiability carries the caveat documented on
-    :func:`gain_weights`; restoring gradients everywhere would need a
-    Fréchet derivative of :math:`A \\mapsto A^{-1/2}`, materially more work
-    than that function's rational form, and no conditioning path in this
-    layer requires it.
+    Computed as :meth:`enskit.linalg.IdentityPlusGram.inverse_sqrt`, so it
+    is differentiable at every ``s``: its derivative rule is the
+    Daleckii–Krein formula for :math:`A \\mapsto A^{-1/2}`, finite at
+    exactly repeated or exactly zero singular values.
     """
     s = jnp.asarray(s)
     if s.ndim != 2 or any(size < 1 for size in s.shape):
@@ -1580,8 +1581,7 @@ def sqrt_transform(s: Array) -> Array:
             f"sizes at least 1, got shape {s.shape}"
         )
     _check_finite("sqrt_transform", "s", s)
-    U, sigma, _ = _thin_svd(s)
-    return _transform_from_svd(U, sigma, s.shape[0])
+    return IdentityPlusGram(s).inverse_sqrt().to_dense()
 
 
 # ---------------------------------------------------------------------------
@@ -1873,49 +1873,3 @@ def _centered(x: Array) -> Array:
     """
     shifted = x - x[..., :1, :]
     return shifted - jnp.mean(shifted, axis=-2, keepdims=True)
-
-
-def _thin_svd(s: Array) -> tuple[Array, Array, Array]:
-    """Thin SVD :math:`s = U \\Sigma V^\\top`, as ``(U, sigma, Vt)``.
-
-    Shapes are ``(k, rho)``, ``(rho,)`` and ``(rho, N)`` for
-    ``rho = min(k, N)``. The single SVD call site of the module: a class
-    method calls this once and feeds both pieces below, so "one method call,
-    one SVD" holds by construction.
-    """
-    return jnp.linalg.svd(s, full_matrices=False)
-
-
-def _weights_from_svd(U: Array, sigma: Array, Vt: Array, b: Array) -> Array:
-    """Apply the gain multipliers in the whitened SVD basis.
-
-    Computes :math:`U \\operatorname{diag}(\\sigma_i/(1+\\sigma_i^2)) V^\\top b`,
-    contracting the trailing axis of ``b`` and carrying its batch axes.
-    Neither :math:`s^\\top s` nor :math:`s s^\\top` appears.
-    """
-    coefficients = dense_matvec(Vt, b) * (sigma / (1.0 + sigma**2))
-    return dense_matvec(U, coefficients)
-
-
-def _transform_from_svd(U: Array, sigma: Array, latent_dim: int) -> Array:
-    """Assemble :math:`T = I_k + U((I+\\Sigma^2)^{-1/2} - I)U^\\top`.
-
-    The identity completion is what makes this exact at every rank: for a
-    thin SVD the naive :math:`U(I+\\Sigma^2)^{-1/2}U^\\top` omits the identity
-    on the orthogonal complement of :math:`U`'s columns and is simply wrong
-    whenever :math:`\\rho < k`.
-
-    :math:`T\\mathbf{1} = \\mathbf{1}` survives floating point for a
-    centered factor because the modifier decays *quadratically*: the
-    numerically-zero singular value's column of :math:`U` need not be
-    orthogonal to :math:`\\mathbf{1}`, but its modifier is
-    :math:`O(\\sigma_i^2)`, so the induced mean shift is
-    :math:`O((\\varepsilon\\sigma_{\\max})^2)` rather than
-    :math:`O(\\varepsilon\\sigma_{\\max})`. Computed as written, the modifier
-    is in fact exactly ``0.0`` once :math:`\\sigma_i^2` falls below the
-    resolution of ``1.0``, which is the same bound reached the short way.
-    """
-    modifier = 1.0 / jnp.sqrt(1.0 + sigma**2) - 1.0
-    # (k, rho) @ (rho, k): both operands are exactly 2-D, so this is the
-    # plain matrix product, not a batch of vectors.
-    return jnp.eye(latent_dim, dtype=U.dtype) + (U * modifier) @ U.swapaxes(-1, -2)

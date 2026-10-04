@@ -12,6 +12,7 @@ class                         represents
 :class:`BlockDiag`            a block-diagonal matrix of arbitrary blocks
 :class:`PSDBlockDiag`         a block-diagonal matrix of PSD blocks
 :class:`PSDDiagCongruence`    ``diag(s) A diag(s)`` for a PSD ``A``
+:class:`LowRankUpdate`        ``D + F F.T`` for a PSD ``D`` and any ``F``
 ============================  ==============================================
 
 Construct through the factory functions — :func:`block_diag`,
@@ -41,6 +42,7 @@ from .base import (
     LinOp,
     PSDLinOp,
     SquareLinOp,
+    UnsupportedOpError,
     _broadcast_batch,
     _check_core_rank,
     _check_finite,
@@ -49,7 +51,8 @@ from .base import (
     linop,
     value_check,
 )
-from .elementary import PSDDiagonal
+from .elementary import PSDDiagonal, Zero
+from .gram import IdentityPlusGram, _inverse_sqrt_apply
 
 __all__ = [
     "Transposed",
@@ -61,11 +64,22 @@ __all__ = [
     "BlockDiag",
     "PSDBlockDiag",
     "PSDDiagCongruence",
+    "LowRankUpdate",
     "block_diag",
     "product",
     "hstack",
     "diag_congruence",
 ]
+
+
+#: The operation ``base`` must support for :class:`LowRankUpdate` to support
+#: each optional operation; the derived ones follow their dependencies.
+_LOW_RANK_UPDATE_NEEDS = {
+    "solve": "solve",
+    "logdet": "logdet",
+    "diag": "diag",
+    "factor": "factor",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -278,22 +292,38 @@ class Product(LinOp):
     def batch_shape(self) -> tuple[int, ...]:
         return _broadcast_batch("Product", *[op.batch_shape for op in self.ops])
 
+    @property
+    def _zero(self) -> Zero | None:
+        """A :class:`~.elementary.Zero` of this shape if any factor is one."""
+        zeros = [op for op in self.ops if isinstance(op, Zero)]
+        if not zeros:
+            return None
+        return Zero(*self.shape, dtype=zeros[0].dtype)
+
     def _matvec(self, x: Array) -> Array:
+        if (zero := self._zero) is not None:
+            return zero._matvec(x)
         for op in reversed(self.ops):
             x = op.matvec(x)
         return x
 
     def _rmatvec(self, x: Array) -> Array:
+        if (zero := self._zero) is not None:
+            return zero._rmatvec(x)
         for op in self.ops:
             x = op.rmatvec(x)
         return x
 
     def _matmat(self, X: Array) -> Array:
+        if (zero := self._zero) is not None:
+            return zero._matmat(X)
         for op in reversed(self.ops):
             X = op.matmat(X)
         return X
 
     def _rmatmat(self, X: Array) -> Array:
+        if (zero := self._zero) is not None:
+            return zero._rmatmat(X)
         for op in self.ops:
             X = op.rmatmat(X)
         return X
@@ -354,8 +384,14 @@ class HStack(LinOp):
 
     def _matvec(self, x: Array) -> Array:
         chunks = jnp.split(x, self._splits, axis=-1)
-        total = self.ops[0].matvec(chunks[0])
-        for op, chunk in zip(self.ops[1:], chunks[1:], strict=True):
+        # Zero blocks contribute nothing; one is kept only if all are Zero.
+        pairs = [
+            (op, chunk)
+            for op, chunk in zip(self.ops, chunks, strict=True)
+            if not isinstance(op, Zero)
+        ] or [(self.ops[0], chunks[0])]
+        total = pairs[0][0].matvec(pairs[0][1])
+        for op, chunk in pairs[1:]:
             total = total + op.matvec(chunk)
         return total
 
@@ -591,6 +627,158 @@ class PSDDiagCongruence(PSDLinOp):
     def _to_dense(self) -> Array:
         D = self.op._to_dense()
         return self.scale[..., :, None] * D * self.scale[..., None, :]
+
+
+# ---------------------------------------------------------------------------
+# low-rank update
+# ---------------------------------------------------------------------------
+
+
+@linop
+class LowRankUpdate(PSDLinOp):
+    r"""A PSD operator plus a low-rank term, :math:`C = D + F F^\top`.
+
+    With :math:`W_D` the whitener of :math:`D` and
+    :math:`S = (W_D F)^\top = U \Sigma V^\top` (thin SVD), held as the
+    :class:`~enskit.linalg.IdentityPlusGram` :math:`A = I + S S^\top`:
+
+    .. math::
+
+        C^{-1} b &= D^{-1}\big(b - F A^{-1} S\, W_D b\big), \\
+        \log\det C &= \log\det D + \textstyle\sum_i \log(1 + \sigma_i^2), \\
+        W_C &= (I + S^\top S)^{-1/2}\, W_D
+             = \big(I - V \operatorname{diag}\big(1 - (1+\sigma_i^2)^{-1/2}\big)
+               V^\top\big) W_D,
+
+    the first being the Sherman–Morrison–Woodbury identity, and ``factor``
+    is :math:`[\,L_D \ \ F\,]` for :math:`L_D` the factor of :math:`D`.
+    :math:`A` is computed once, at construction, from :math:`k` applications
+    of :math:`W_D`.
+
+    =============  ============================================
+    operation      requires of ``base``
+    =============  ============================================
+    ``matvec``     nothing beyond ``whiten``
+    ``whiten``     nothing beyond ``whiten``
+    ``solve``      ``solve``
+    ``logdet``     ``logdet``
+    ``diag``       ``diag``
+    ``factor``     ``factor``
+    =============  ============================================
+
+    Parameters
+    ----------
+    base
+        :math:`D`, a :class:`~enskit.linalg.PSDLinOp` of side ``n`` that
+        supports ``whiten`` (so it is nonsingular).
+    F
+        :math:`F`, a :class:`~enskit.linalg.LinOp` of shape ``(n, k)``.
+        (Named ``F`` rather than ``factor``, which would shadow the inherited
+        :meth:`~enskit.linalg.PSDLinOp.factor` method.)
+
+    Raises
+    ------
+    TypeError
+        If ``base`` is not a :class:`~enskit.linalg.PSDLinOp` or ``F`` is not
+        a :class:`~enskit.linalg.LinOp`.
+    ValueError
+        If either is a vmapped family, or ``F`` has ``F.shape[0] != n``.
+    UnsupportedOpError
+        If ``base`` does not support ``whiten``.
+
+    Notes
+    -----
+    Derivatives of ``solve``, ``logdet`` and ``whiten`` with respect to
+    ``F`` and ``base`` go through the custom rules of
+    :class:`~enskit.linalg.IdentityPlusGram`, so they are finite at exactly
+    repeated and zero singular values of :math:`S`; see
+    :mod:`enskit.linalg.gram`.
+
+    The fields are ``base``, ``F`` and ``gram``, the stored
+    :class:`~enskit.linalg.IdentityPlusGram` of :math:`S`. Replacing ``base``
+    or ``F`` with :func:`dataclasses.replace` pairs it with the old ``gram``;
+    build a new ``LowRankUpdate(base, F)`` instead.
+    """
+
+    base: PSDLinOp
+    F: LinOp
+    gram: IdentityPlusGram
+
+    def __init__(self, base, F) -> None:
+        if not isinstance(base, PSDLinOp):
+            raise TypeError(
+                f"LowRankUpdate.base must be a PSDLinOp, got {type(base).__name__}"
+            )
+        if not isinstance(F, LinOp):
+            raise TypeError(f"LowRankUpdate.F must be a LinOp, got {type(F).__name__}")
+        _check_not_family("LowRankUpdate", base)
+        _check_not_family("LowRankUpdate", F)
+        if F.shape[0] != base.dim:
+            raise ValueError(
+                f"LowRankUpdate: {F!r} has {F.shape[0]} rows, but {base!r} has side "
+                f"{base.dim}"
+            )
+        if not base.supports("whiten"):
+            raise UnsupportedOpError(
+                "whiten",
+                type(base).__name__,
+                tuple(sorted(base.capabilities())),
+                detail="LowRankUpdate needs a base that supports whiten.",
+            )
+        S = base.whiten_mat(F.to_dense()).swapaxes(-1, -2)
+        object.__setattr__(self, "base", base)
+        object.__setattr__(self, "F", F)
+        object.__setattr__(self, "gram", IdentityPlusGram(S))
+
+    @property
+    def shape(self) -> tuple[int, int]:
+        return self.base.shape
+
+    @property
+    def batch_shape(self) -> tuple[int, ...]:
+        return _broadcast_batch(
+            "LowRankUpdate",
+            self.base.batch_shape,
+            self.F.batch_shape,
+            self.gram.batch_shape,
+        )
+
+    def supports(self, name: str) -> bool:
+        if not super().supports(name):
+            return False
+        needed = _LOW_RANK_UPDATE_NEEDS.get(name)
+        return needed is None or self.base.supports(needed)
+
+    def _matvec(self, x: Array) -> Array:
+        return self.base._matvec(x) + self.F._matvec(self.F._rmatvec(x))
+
+    def _solve(self, b: Array) -> Array:
+        weights = self.gram.solve_factor(self.base._whiten(b))
+        return self.base._solve(b - self.F._matvec(weights))
+
+    def _logdet(self) -> Array:
+        return self.base._logdet() + self.gram._logdet()
+
+    def _diag(self) -> Array:
+        F = self.F._to_dense()
+        return self.base._diag() + jnp.sum(F * F, axis=-1)
+
+    def _factor(self) -> LinOp:
+        return HStack((self.base._factor(), self.F))
+
+    def _whiten(self, x: Array) -> Array:
+        # (I + S^T S)^{-1/2} from the same decomposition: S^T = V Sigma U^T.
+        gram = self.gram
+        return _inverse_sqrt_apply(
+            gram.S.swapaxes(-1, -2),
+            gram.Vt.swapaxes(-1, -2),
+            gram.sigma,
+            self.base._whiten(x),
+        )
+
+    def _to_dense(self) -> Array:
+        F = self.F._to_dense()
+        return self.base._to_dense() + F @ F.swapaxes(-1, -2)
 
 
 # ---------------------------------------------------------------------------
