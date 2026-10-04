@@ -156,6 +156,7 @@ user-guide/quickstart
 user-guide/operators
 user-guide/distributions
 user-guide/maps
+user-guide/updates
 user-guide/conditioning
 user-guide/running-an-inversion
 user-guide/writing-a-forward-model
@@ -179,6 +180,7 @@ examples/index
 linop-contract
 distribution-contract
 maps-contract
+kalman-contract
 gaussian-contract
 eki-contract
 joint-factor

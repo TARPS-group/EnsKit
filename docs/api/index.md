@@ -186,15 +186,61 @@ Pushing distributions through maps, and the simulator contract. See
    :members: __call__
 ```
 
+## enskit.kalman
+
+Ensemble Kalman updates, inflation and relaxation. See
+{doc}`../user-guide/updates` for when to use each rule, and
+{doc}`../kalman-contract` for the full behavioral contract.
+
+```{eval-rst}
+.. automodule:: enskit.kalman
+   :no-members:
+```
+
+### The update
+
+```{eval-rst}
+.. autofunction:: enskit.kalman.update
+.. autofunction:: enskit.kalman.gaussian_approximation
+
+.. autoclass:: enskit.kalman.UpdateRule
+   :members: build
+
+.. autoclass:: enskit.kalman.ParticleUpdate
+   :members: __call__
+```
+
+### Update rules
+
+```{eval-rst}
+.. autoclass:: enskit.kalman.SymmetricSquareRoot
+   :members: build
+
+.. autoclass:: enskit.kalman.Matheron
+   :members: build
+```
+
+### Inflation and relaxation
+
+```{eval-rst}
+.. autofunction:: enskit.kalman.inflate_multiplicative
+.. autofunction:: enskit.kalman.inflate_additive
+.. autofunction:: enskit.kalman.relax_to_prior_spread
+.. autofunction:: enskit.kalman.relax_to_prior_perturbations
+```
+
 ## enskit.testing
 
-Conformance checks for code written against EnsKit's interfaces.
+Conformance checks for code written against EnsKit's interfaces: a
+simulator, an update rule, a conditional map.
 
 ```{eval-rst}
 .. automodule:: enskit.testing
    :no-members:
 
 .. autofunction:: enskit.testing.check_simulator
+.. autofunction:: enskit.testing.check_update_rule
+.. autofunction:: enskit.testing.check_conditional_map
 ```
 
 ## enskit.gauss

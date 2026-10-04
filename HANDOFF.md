@@ -7,13 +7,92 @@ vocabulary was fixed, 2026-09-02 after the joint was split into a
 Gaussian and a sample container, 2026-10-03 when the EnsKit redesign was
 adopted, the same day after PR 1's renames, again after PR 2's linalg
 additions, and 2026-10-04 after PR 3's distribution contract, PR 10's
-Kronecker operators, PR 4's `enskit.distribution`, the fix for #60 and PR 5's
-`enskit.maps`. Read
+Kronecker operators, PR 4's `enskit.distribution`, the fix for #60, PR 5's
+`enskit.maps` and PR 6's `enskit.kalman`. Read
 `CLAUDE.md` first for conventions, including the layer rules, which the
 redesign replaced; then the two sections below; then the rest of this file,
 which describes the code as it stands before the redesign lands. That
 description is historical: where it names `pyeki.<module>`, the module is now
 `enskit.<module>`.
+
+## 2026-10-04: PR 6, `enskit.kalman`
+
+The layer exists, implementing `docs/kalman-contract.md`, which was written
+first: `update`, `gaussian_approximation`, the `UpdateRule` and
+`ParticleUpdate` protocols, `SymmetricSquareRoot`, `Matheron`, and the four
+functions `inflate_multiplicative`, `inflate_additive`,
+`relax_to_prior_spread` and `relax_to_prior_perturbations`. The modules are
+private (`_common`, `_update`, `_rules`, `_inflation`). `enskit.testing`
+gained `check_update_rule` and `check_conditional_map`, as private modules
+beside PR 5's `_simulator.py`. The user-guide page is
+`docs/user-guide/updates.md`; the API reference has a section; the
+import-linter contract names `enskit.kalman` without parentheses; and the
+fresh-interpreter test in `tests/test_toy.py` checks that no layer loads
+`enskit.testing` either.
+
+**Decided here** (each is in the contract's *Departures from the design*):
+
+- **Failed particles must be repaired or dropped before an update** (#60's
+  open question). Updates refuse weighted ensembles, so a zero-weight failed
+  particle can never reach an update, and the maps' every-row check needs no
+  change. Dropping is `resample(key, reweight(ens, where(all_finite, 0,
+  -inf)))`; `update` and both builds say so in debug mode.
+- **Alignment is a checked precondition.** An `EnsembleGaussian` with the
+  particles' count is trusted to realize those particles; in debug mode both
+  rules check it (the *alignment check*, tolerance
+  $\sqrt\varepsilon\max|a| + 64J\varepsilon\max|x|$). Without it, an
+  `EnsembleGaussian` from other particles, or with a rescaled factor, gives
+  wrong numbers silently on both rules. A modified approximation goes in as a
+  plain `Gaussian`; `Matheron` takes its general path and
+  `SymmetricSquareRoot` refuses it.
+- **`update` checks its rule's result** statically (type, weights, count,
+  blocks, dtype), the old EKI contract's dtype guard carried over.
+- `Matheron` splits its key into `(targets, noise)` always, so adding a
+  target term never changes the given blocks' noise draw. It draws the
+  targets' independent terms itself; the review's 0.044-vs-4.04 regression
+  is a test.
+- `SymmetricSquareRoot`'s exact-value path factorizes per call, since the
+  distribution layer offers exact conditioning only through `condition`.
+- The rule classes are pytrees with no fields, and built updates are
+  pytrees (`kalman._common.pytree_class`, explicit children, so a field may
+  be a distribution or a map); both cross `jit` as arguments.
+
+**Things not to rediscover.** `check_update_rule`'s stochastic test needs
+256 replicates at five standard errors: at 64 and six, a bias of a tenth of
+the posterior spread in a `Matheron` update passed. The aligned and general
+`Matheron` paths agree to about $10^{-15}$, so only the whitening count
+(`tests/test_kalman.py::test_7_*`) catches a regression from one to the
+other; four mutations (dropping target draws, forcing the general path,
+removing the alignment check, unweighted centering in `inflate_additive`)
+each fail at least one test. The adversarial review found, and this PR fixed
+(the contract's *Changes made while implementing*): a float64 term on a
+float32 approximation gave a result with blocks of two dtypes, since
+operators carry no dtype (#33) and results are assembled without the
+`Ensemble` constructor, so `update` now checks every block and `Matheron`
+refuses it; the alignment check's magnitude term must take the largest
+magnitude over *all* blocks, because a block built by a linear map of
+another rounds at the source's scale (float32, offset $10^5$, differencing:
+gap $6\times10^{-3}$); and a target's independent term never enters the gain,
+so a hybrid's static covariance must be absorbed into the shared factor, or
+`Matheron` turns it into additive inflation.
+
+**For later PRs.**
+
+- **PR 7 (EKI).** Call `kalman.update(ens, {prediction: y},
+  noise={prediction: R * (1 / delta)}, update_rule=..., approximation=...,
+  key=...)`; repair failed particles before it. The policies wrap the four
+  inflation functions. The update and inflation regressions of
+  `tests/test_eki.py` are already ported (the contract's table); the driver's
+  port with PR 7.
+- **PR 8 (EnKF).** The hybrid approximation of Example 11 is a plain
+  `Gaussian`, so only `Matheron` (general path, $k + J$ whitened vectors)
+  accepts it. Its static covariance must be absorbed before the linear map;
+  `maps.pushforward` through `maps.Linear` does that, as the user guide's
+  example shows.
+- **PR 9 (localization).** Add `LocalizedUpdateRule`, `DomainLocalization`
+  and `gaspari_cohn` to `enskit.kalman`, and a section to the contract. Reuse
+  `_common.check_build_arguments`, `check_particles_finite` and
+  `check_alignment`; run each new rule through `check_update_rule`.
 
 ## 2026-10-04: PR 5, `enskit.maps` and the simulator contract
 
@@ -624,9 +703,9 @@ pyEKI. Nothing domain-specific should come back across.
 
 Follow the plan in `docs/redesign/index.md`, one pull request at a time, in
 a fresh session for each, as described in "Pull requests and handoffs" in
-`CLAUDE.md`. PRs 1 (#35), 2 (#36), 3 (#37), 4 (#38), 5 (#39) and 10 (#44)
-are done. PR 6 (#40, `enskit.kalman`) depends only on PR 4; PR 7 (#41) waits
-for PR 6. PR 9 (#43) waits for PR 6.
+`CLAUDE.md`. PRs 1 (#35), 2 (#36), 3 (#37), 4 (#38), 5 (#39), 6 (#40) and
+10 (#44) are done. PR 7 (#41, EKI) and PR 9 (#43, localization) both have
+their dependencies met and can run side by side.
 #54's fix would change the regressions pinned in
 obligation 17, by design. The notes below, written before the redesign,
 still apply to the pull requests they name; their `pyeki` modules are now
