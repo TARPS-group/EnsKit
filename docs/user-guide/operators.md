@@ -63,6 +63,7 @@ class for the ingredients:
 | `product(*ops)` | `Product` | $A_1 A_2 \cdots A_m$, applied right to left |
 | `hstack(*ops)` | `HStack` | $[A_1\ A_2\ \cdots\ A_m]$, a block *row* |
 | `diag_congruence(op, scale)` | `PSDDiagCongruence` | $\mathrm{diag}(s)\,A\,\mathrm{diag}(s)$ for PSD $A$ |
+| `kron(A, B)` | `PSDKronecker`, `SquareKronecker` or `Kronecker`, by the operands' levels | $A \otimes B$; see {ref}`operator-kronecker` |
 
 `HStack` splits its input along the trailing axis and sums the blocks'
 outputs, so $[A_1\ A_2]\,[x_1; x_2] = A_1 x_1 + A_2 x_2$; its transpose
@@ -95,6 +96,50 @@ The constructor whitens $F$ by $D$ once, $S = (W_D F)^\top$, and stores the
 `IdentityPlusGram` of $S$ (next section), so every later call reuses one
 SVD. Its capabilities follow `base`: it can `solve` if `base` can, and so on
 for `logdet`, `diag` and `factor`; `whiten` always works.
+
+(operator-kronecker)=
+## Kronecker products
+
+`kron(A, B)` represents $A \otimes B$. Reach for it when a quantity is
+indexed by two things at once and its covariance separates into one
+covariance per index — a field over a grid of locations and times, say,
+with $A$ the covariance over $n_A$ locations and $B$ over $n_B$ times. The
+product has side $n_A n_B$, but every operation is carried out on $A$ and
+$B$ separately, so its cost is set by the two sides, not by their product:
+
+```python
+C = kron(A, B)          # A ⊗ B; nothing of side n_A n_B is formed
+y = C.matvec(x)         # vec(A X B^T), X = x reshaped to (n_A, n_B)
+z = C.solve(b)          # (A^-1 ⊗ B^-1) b
+w = C.whiten(y)         # (W_A ⊗ W_B) y
+ld = C.logdet()         # n_B log det A + n_A log det B
+L = C.factor()          # kron(A.factor(), B.factor())
+```
+
+`kron` chooses the class from the operands: a `PSDKronecker` for two PSD
+operands, a `SquareKronecker` (with `solve`, `logdet` and `diag`) for two
+square ones, and a plain `Kronecker` otherwise. Each operation is available
+when both operands support it, so `kron(A, PSDLowRank(F))` can sample but
+not solve. The factor is itself a Kronecker product: of two `DensePSD`
+operands it is the Kronecker product of their triangular Cholesky factors,
+which is the Cholesky factor of $A \otimes B$ and still solves. When either
+operand's factor is a plain operator — rectangular, or the `Dense` that
+`PSDLowRank.factor()` returns — it is a plain `Kronecker`, without `solve`.
+
+**The first operand's index is the slow one**, as in `numpy.kron`: block
+$(i, j)$ of the product is $A_{ij}B$, so a vector of length $n_A n_B$ is
+laid out with $B$'s index varying fastest. Reshaped row-major to
+`(n_A, n_B)`, its rows are indexed by $A$ and its columns by $B$.
+
+:::{warning}
+Swapping the operands is not an error that anything will report.
+`kron(B, A)` is a different matrix from `kron(A, B)`, but it is positive
+definite whenever `kron(A, B)` is, and it always has the same shape,
+whatever the sides of $A$ and $B$. A swapped order therefore gives a valid
+covariance with the wrong meaning, and no shape check anywhere will catch
+it. Check the order once on a small instance against `numpy.kron` of the
+dense operands.
+:::
 
 ## The conditioning core: `IdentityPlusGram`
 
@@ -259,3 +304,4 @@ For an operator of side $n$:
 | block diagonals | sum over blocks | sum over blocks | sum over blocks | sum over blocks |
 | `PSDDiagCongruence`, scaled operators | base $+ O(n)$ | base $+ O(n)$ | base $+ O(n)$ | base $+ O(n)$ |
 | `Product`, `HStack` | sum over factors | — | — | — |
+| `Kronecker` products (operands of sides $n_A$, $n_B$) | $n_B$ applications of $A$ and $n_A$ of $B$ | the same, with `solve` | the same, with `whiten` | $A$'s and $B$'s |

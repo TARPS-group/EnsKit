@@ -52,6 +52,17 @@ contract.
 .. autoclass:: enskit.linalg.LowRankUpdate
 ```
 
+### Kronecker products
+
+```{eval-rst}
+.. automodule:: enskit.linalg.kronecker
+   :no-members:
+
+.. autoclass:: enskit.linalg.Kronecker
+.. autoclass:: enskit.linalg.SquareKronecker
+.. autoclass:: enskit.linalg.PSDKronecker
+```
+
 ### The conditioning core
 
 ```{eval-rst}
@@ -71,6 +82,7 @@ contract.
 .. autofunction:: enskit.linalg.product
 .. autofunction:: enskit.linalg.hstack
 .. autofunction:: enskit.linalg.diag_congruence
+.. autofunction:: enskit.linalg.kron
 ```
 
 ### Helpers for defining operators

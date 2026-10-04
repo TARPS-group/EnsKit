@@ -892,7 +892,7 @@ class**:
 | `block_diag(*blocks)`   | `PSDBlockDiag` if every block is a `PSDLinOp`, else `BlockDiag` |
 | `product(*ops)`         | `Product` (a square variant will be added when an EKI consumer needs `solve`/`logdet` through a product) |
 | `hstack(*ops)`          | `HStack`                                     |
-| `kron(A, B)`            | the PSD Kron variant if both children are `PSDLinOp`, else the general variant — the rectangular factor-Kron is the general one *(classes arrive with the Kron milestone)* |
+| `kron(A, B)`            | `PSDKronecker` if both operands are `PSDLinOp`, `SquareKronecker` if both are `SquareLinOp`, else `Kronecker` (see below) |
 | `diag_congruence(op, scale)`| `PSDDiagCongruence` (see below)             |
 
 Variadic factories require at least one operand (`ValueError` otherwise);
@@ -1017,6 +1017,101 @@ Derivatives of `solve`, `logdet` and `whiten` go through the rules of
 {ref}`contract-gram`, so they are finite at exactly repeated and zero
 singular values of $S$ — for example, when $F$ is padded with `Zero`
 columns.
+
+(contract-kronecker)=
+### Kronecker products
+
+`kron(A, B)` represents the Kronecker product $A \otimes B$ of an operator
+$A$ of shape `(n_A, k_A)` and an operator $B$ of shape `(n_B, k_B)`, of
+shape `(n_A n_B, k_A k_B)`. Like the scaled operators, it comes in three
+classes, chosen by the operands' levels and never by the product's shape:
+
+| class             | operands                       | adds                              |
+| ----------------- | ------------------------------ | --------------------------------- |
+| `Kronecker`       | any two `LinOp`s               | application and transposition     |
+| `SquareKronecker` | two `SquareLinOp`s             | `solve`, `logdet`, `diag`         |
+| `PSDKronecker`    | two `PSDLinOp`s                | `factor`, `whiten`                |
+
+Two rectangular operands can have a square product — `(2, 3)` and `(3, 2)`
+give `(6, 6)` — and that product has rank at most 4, so it is singular and
+stays a plain `Kronecker`. Each class's constructor checks its operands'
+level (`TypeError`) and rejects vmapped families (`ValueError`); direct
+construction never upgrades.
+
+**Orientation is normative.** The first operand's index is the slow one,
+as in `numpy.kron`:
+
+$$
+(A \otimes B)_{\,i n_B + p,\ j k_B + q} = A_{ij}\,B_{pq},
+\qquad
+(A \otimes B)\operatorname{vec}(X) = \operatorname{vec}(A X B^\top),
+$$
+
+where $X$ is the trailing axis of the vector being applied to, reshaped
+row-major to `(k_A, k_B)`, and $\operatorname{vec}$ stacks rows. Every
+operation that takes a vector applies $B$ to the last axis of the reshaped
+vector (a vector method) and then $A$ to the axis before it (the matching
+matrix method); `diag`, `logdet` and `factor` combine the operands' own
+results. No operation but `to_dense` forms an array of side $n_A n_B$. For
+`matvec` the vector is reshaped to `(k_A, k_B)` and the result read back
+from `(n_A, n_B)`, through an intermediate of shape `(k_A, n_B)`; these
+differ whenever $A$ or $B$ is rectangular, so the vector and the result
+must not be reshaped alike.
+
+| operation on $A \otimes B$ | in terms of $A$ and $B$                                       | class             |
+| -------------------------- | ------------------------------------------------------------- | ----------------- |
+| `matvec(x)`                | $\operatorname{vec}(A X B^\top)$                              | `Kronecker`       |
+| `rmatvec(y)`               | $\operatorname{vec}(A^\top Y B)$                              | `Kronecker`       |
+| `T`                        | $A^\top \otimes B^\top$, of the class `kron` chooses for those | `Kronecker`       |
+| `solve(b)`                 | $(A^{-1} \otimes B^{-1})\, b$                                 | `SquareKronecker` |
+| `logdet()`                 | $n_B \log\lvert\det A\rvert + n_A \log\lvert\det B\rvert$      | `SquareKronecker` |
+| `diag()`                   | $\operatorname{diag}(A) \otimes \operatorname{diag}(B)$       | `SquareKronecker` |
+| `factor()`                 | `kron(A.factor(), B.factor())`                                | `PSDKronecker`    |
+| `whiten(x)`                | $(W_A \otimes W_B)\, x$                                       | `PSDKronecker`    |
+
+- **Capabilities intersect.** `supports(name)` on a `SquareKronecker` or
+  `PSDKronecker` is the class's answer and both operands' answers for the
+  same name: each operation uses only that operation of the operands, or
+  its matrix sibling (`solve` uses `A.solve_mat`, `whiten` uses
+  `A.whiten_mat`), which is supported exactly when it is.
+- **The log-determinant pairs each operand with the other's side.** The
+  coefficients coincide when $n_A = n_B$, so only a test with unequal
+  sides can tell the correct pairing from the swapped one.
+- **`factor()` keeps what the operands' factors have.** Its class is the
+  one `kron` picks for the factors' levels, not their shapes: a
+  `SquareKronecker` (or `PSDKronecker`) when both factors are
+  `SquareLinOp`s, and then it solves when they do. The Kronecker product of
+  two lower-triangular Cholesky factors is lower triangular and is the
+  Cholesky factor of the product, so `kron(DensePSD(A),
+  DensePSD(B)).factor()` keeps its triangular solve. When either factor is
+  a plain `LinOp` — rectangular, or a square `Dense` such as
+  `PSDLowRank.factor()` returns — it is a plain `Kronecker`.
+- **`whiten` is primitive.** It applies the operands' whiteners, $W_A$ to
+  one axis and $W_B$ to the other, which is a valid whitener since
+  $(W_A \otimes W_B)(A \otimes B)(W_A \otimes W_B)^\top = I$; it never
+  solves against the assembled factor.
+- **`T` is structured.** `Kronecker.T` returns `A.T ⊗ B.T` rather than a
+  `Transposed` view, so the transpose of a `SquareKronecker` whose
+  operands' transposes solve (a `DenseSquare`, a `Triangular`) also solves.
+  Since the class is chosen from the transposes, `T` may be *more* capable
+  than the operator: a directly constructed `Kronecker` of two PSD operands
+  has a `PSDKronecker` transpose, and `op.T.T` then has its capabilities.
+  It agrees with `op` in every operation `op` has, which is the sense in
+  which it behaves identically. `T` is built through the
+  constructor-bypassing path, so it works on a family. `PSDKronecker.T` is
+  the operator itself.
+
+A reversed orientation is a silent failure at any sizes: $B \otimes A$ is
+PSD whenever $A \otimes B$ is, and it always has the same shape,
+`(n_A n_B, k_A k_B)`, so it is a valid operator with the wrong meaning. The
+conformance suite cannot catch it, because it compares every operation
+with `to_dense`, and an implementation reversed in every method at once
+agrees with itself. Targeted tests therefore pin `matvec`, `rmatvec`,
+`solve` and `whiten` to `numpy.kron` directly at batch ranks 0, 1 and 2,
+and `diag`, `logdet` and `to_dense` on their own. They use operands of
+equal side as well as rectangular ones, because a *partial* reversal —
+applying $A$ along the fast axis in one method only — fails loudly at a
+reshape unless the sides are equal.
 
 (contract-gram)=
 ## The conditioning core: `IdentityPlusGram`
@@ -1246,10 +1341,10 @@ For the avoidance of doubt, `enskit.linalg` exports exactly: the levels
 `Zero`, `PSDDiagonal`, `Dense`, `DenseSquare`, `Triangular`,
 `DensePSD`, `PSDLowRank`; the composites `Product`, `HStack`, `BlockDiag`,
 `PSDBlockDiag`, `Transposed`, `Scaled`, `SquareScaled`, `PSDScaled`,
-`PSDDiagCongruence`, `LowRankUpdate`; the conditioning core
+`PSDDiagCongruence`, `LowRankUpdate`, `Kronecker`, `SquareKronecker`,
+`PSDKronecker`; the conditioning core
 `IdentityPlusGram` and `IdentityPlusGramInverseSqrt`; the factories
-`block_diag`, `product`, `hstack`, `kron` (with the Kron classes, once that
-milestone lands), `diag_congruence`; the helpers `dense_matvec` and
+`block_diag`, `product`, `hstack`, `kron`, `diag_congruence`; the helpers `dense_matvec` and
 `tri_solve`; `densify`, `dense_fallback`, `UnsupportedOpError`, `linop`,
 `static_field`, and the debug switch (`set_debug_checks`, the
 `debug_checks` context manager, and the `value_check` helper it gates). The
@@ -1356,7 +1451,8 @@ half), so the same driver applies to every operator type unchanged.
 
 Beyond conformance, the test suite keeps *targeted regression tests* — one
 per class of bug that produces wrong numbers without raising (the
-wrong-axis contraction, the vacuous `to_dense`, the discarded lazy cache).
+wrong-axis contraction, the vacuous `to_dense`, the discarded lazy cache,
+a reversed Kronecker orientation).
 These encode why the contract's rules exist and must not be deleted as
 redundant with conformance.
 
