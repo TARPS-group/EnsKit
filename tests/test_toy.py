@@ -1071,20 +1071,21 @@ def test_12_regression_the_factories_reject_infinite_scales():
 def test_12_regression_no_layer_imports_the_toy_module():
     """The architectural rule `CLAUDE.md` calls permanent, in one line.
 
+    The same holds for `enskit.testing`, which may import every layer.
     `enskit.toy` depends on two layers, so an import in the other direction
     would make toy problems load-bearing for the library. Checked in a fresh
     interpreter, since this one has already imported the module.
     """
     program = (
-        "import sys; import enskit, enskit.linalg, enskit.distribution, enskit.gauss, "
-        "enskit.eki, "
+        "import sys; import enskit, enskit.linalg, enskit.distribution, enskit.kalman, "
+        "enskit.gauss, enskit.eki, "
         "enskit.eki.testing, enskit.linalg.testing; "
-        "print('enskit.toy' in sys.modules)"
+        "print('enskit.toy' in sys.modules, 'enskit.testing' in sys.modules)"
     )
     result = subprocess.run(
         [sys.executable, "-c", program], capture_output=True, text=True, check=True
     )
-    assert result.stdout.strip() == "False", result.stdout
+    assert result.stdout.strip() == "False False", result.stdout
 
 
 @pytest.mark.parametrize("name, problem, u_dim, v_dim", PROBLEMS, ids=IDS)

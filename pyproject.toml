@@ -93,11 +93,11 @@ root_package = "enskit"
 name = "Layers import downward only"
 type = "layers"
 layers = [
-    "enskit.toy | (enskit.testing)",
+    "enskit.toy | enskit.testing",
     "enskit.eki",
     "enskit.gauss",
     "(enskit.algorithms)",
-    "(enskit.maps) | (enskit.kalman)",
+    "(enskit.maps) | enskit.kalman",
     "enskit.distribution",
     "enskit.linalg",
 ]

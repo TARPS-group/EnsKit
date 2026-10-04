@@ -161,6 +161,61 @@ Distributions over named blocks, conditioning and conditional maps. See
 .. autofunction:: enskit.distribution.exact_moment_ensemble
 ```
 
+## enskit.kalman
+
+Ensemble Kalman updates, inflation and relaxation. See
+{doc}`../user-guide/updates` for when to use each rule, and
+{doc}`../kalman-contract` for the full behavioral contract.
+
+```{eval-rst}
+.. automodule:: enskit.kalman
+   :no-members:
+```
+
+### The update
+
+```{eval-rst}
+.. autofunction:: enskit.kalman.update
+.. autofunction:: enskit.kalman.gaussian_approximation
+
+.. autoclass:: enskit.kalman.UpdateRule
+   :members: build
+
+.. autoclass:: enskit.kalman.ParticleUpdate
+   :members: __call__
+```
+
+### Update rules
+
+```{eval-rst}
+.. autoclass:: enskit.kalman.SymmetricSquareRoot
+   :members: build
+
+.. autoclass:: enskit.kalman.Matheron
+   :members: build
+```
+
+### Inflation and relaxation
+
+```{eval-rst}
+.. autofunction:: enskit.kalman.inflate_multiplicative
+.. autofunction:: enskit.kalman.inflate_additive
+.. autofunction:: enskit.kalman.relax_to_prior_spread
+.. autofunction:: enskit.kalman.relax_to_prior_perturbations
+```
+
+## enskit.testing
+
+Conformance checks for an update rule or a conditional map you wrote.
+
+```{eval-rst}
+.. automodule:: enskit.testing
+   :no-members:
+
+.. autofunction:: enskit.testing.check_update_rule
+.. autofunction:: enskit.testing.check_conditional_map
+```
+
 ## enskit.gauss
 
 Joint Gaussian distributions and conditioning. See
