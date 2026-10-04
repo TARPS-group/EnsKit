@@ -26,6 +26,11 @@ The conformance obligations of {ref}`gauss-conformance` are met by
 `tests/test_gauss.py`; {doc}`joint-factor` derives the representation this
 page specifies, and the user guide's {doc}`user-guide/conditioning` page
 covers when to reach for each piece.
+
+`enskit.gauss` is being replaced. The new layer, `enskit.distribution`, is
+specified by {doc}`distribution-contract`, which absorbs this page; this page
+keeps governing `enskit.gauss` until that module is deleted in PR 7 of the
+redesign plan.
 :::
 
 (gauss-scope)=
