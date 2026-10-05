@@ -47,11 +47,18 @@ the old modules. `enskit.testing` gained `check_schedule`, `check_inflation`,
   `HistoryRecord.from_evaluation(evaluation, increment=None)` is public: it is
   how the driver builds every record, and how a hand loop gets the same ones.
   `iterate` still yields `(state, record, evaluation)`.
-- **The promotion warning stays once per run**: the driver records each
-  evaluation's warnings, re-issues them at their own location with a
-  per-run registry, and drops every promotion warning after the first. It
-  recognizes the maps layer's warning by its text (`_PROMOTION_TEXT` in
-  `_driver.py`); test 29 pins the coupling.
+- **The promotion warning is issued at every promoting evaluation** (the
+  maps layer's rule), not once per run as the old contract promised. A first
+  version recorded each evaluation's warnings and re-issued them; the
+  adversarial review showed that this replaced a failing run's `EKIError` by
+  the warning under an `error` filter, broke module filters, and defeated
+  Python's once-per-location (every `catch_warnings` invalidates the
+  registries). Python's default filter shows the warning once.
+- **The adaptive schedules absorb a round-off remainder** below
+  $10^{-9}\beta_{\text{target}}$ into the step before it, and the entry
+  budget check counts with that tolerance (`_steps_needed`). Without it,
+  $10^5$ floor-sized steps, or a budget a hair above a multiple of the floor,
+  passed the entry check and then exhausted `max_steps`.
 - **The update runs eagerly**, about 3 ms per step at $J = 64$; the debug
   checks of the layers below therefore run. Test 14 counts compilations with
   `jax.monitoring` across whole runs.
@@ -97,6 +104,10 @@ the old modules. `enskit.testing` gained `check_schedule`, `check_inflation`,
   particles were multiples of the rows of `G`. The new `Gaussian.sample`
   splits once more and avoids it by accident; deriving the toy's keys with
   `fold_in` would make it robust but changes every toy number.
+- **Open from this PR**: #71 (relaxation relaxes toward the inflated
+  particles, so the two compound; PR 8 should decide), #72 (an update rule
+  cannot see the increment, so the ensemble Kalman sampler is a hand loop),
+  #73 (the toy keys, above).
 - **Float32 runs** raise at the first update with either rule (#68: scaling
   an operator promotes it to float64). A strict expected failure,
   `tests/test_eki.py::test_29_a_float32_run_stays_float32`, flips when #68 is

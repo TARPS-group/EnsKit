@@ -663,9 +663,8 @@ and nothing in the package relies on it.
 `PSDLowRank(F)` represents $F F^\top$ for a stored factor $F$. It is the
 layer's one shipped class subject to the singular-by-construction rule
 stated under `factor` above — its thin-factor instances are what that rule
-governs — and the covariance representation `enskit.distribution` returns
-for an ensemble's sample covariance, whose rank is bounded by the number of
-particles.
+governs — and the covariance representation the layers above use for a
+sample covariance, whose rank is bounded by the number of rows of the sample.
 
 - **One data field**, `F`, an `Array` of shape `(n, k)` with $n, k \ge 1$.
   **No relation is imposed between $n$ and $k$**: the factor may be thin,
@@ -704,9 +703,9 @@ Constructor validation is tier 2 and shape-only: `F` must have rank
 exactly 2, and both core sizes at least 1. Tier 4, in debug mode,
 additionally asserts that `F` is finite — the same check `DensePSD` applies
 to its own factor, and for the same reason: a non-finite factor makes every
-operation `nan` with no exception, and `PSDLowRank` is the class
-`enskit.distribution` returns for a sample covariance, where a non-finite
-factor means a failed particle reached the projection. Neither violation is caught by
+operation `nan` with no exception, and `PSDLowRank` is the class the
+layers above use for a sample covariance, where a non-finite factor means a
+non-finite row reached it. Neither violation is caught by
 the conformance suite, which is why they are named here — a rank-3 `F`
 produces a *directly constructed* operator reporting a non-empty
 `batch_shape`, which {ref}`contract-families` forbids, and $k = 0$

@@ -15,6 +15,7 @@ from ... import kalman, maps
 from ...linalg import PSDLinOp
 from .. import _common as c
 from ._helpers import repair_failed_particles
+from ._schedules import _SNAP_RELATIVE
 from ._values import (
     PREDICTION,
     SCHEDULE_EXHAUSTED,
@@ -38,9 +39,6 @@ _BUDGET_TOL_RELATIVE = 1e-12
 
 _ON_FAILURE = ("raise", "repair")
 
-#: The text by which the maps layer's promotion warning is recognized, so that
-#: a run reports it once rather than at every evaluation.
-_PROMOTION_TEXT = "returned a narrower dtype than the working dtype"
 
 
 def evaluate(
@@ -248,7 +246,9 @@ def advance(
 
     Exactly ``assimilate(state, evaluate(state, forward, y, noise_cov,
     inflation=..., inputs=..., on_failure=...), increment, y, noise_cov,
-    update_rule=..., approximation=..., relaxation=...)``.
+    update_rule=..., approximation=..., relaxation=...)``, except that the
+    increment, the update rule and the callables are checked first, before
+    the forward model is called.
 
     Parameters
     ----------
@@ -266,6 +266,11 @@ def advance(
     EKIError, ValueError, TypeError
         As :func:`evaluate` and :func:`assimilate` raise them.
     """
+    where = "eki.advance"
+    _check_increment(where, increment)
+    _check_update_rule(where, update_rule)
+    _check_optional_callable(where, "approximation", approximation)
+    _check_optional_callable(where, "relaxation", relaxation)
     evaluation = evaluate(
         state, forward, y, noise_cov, inflation=inflation, inputs=inputs,
         on_failure=on_failure,
@@ -427,8 +432,9 @@ def run(
     Warns
     -----
     UserWarning
-        Once per run whose forward model returned a narrower dtype than the
-        particles', and once per run in which a particle was repaired.
+        From :func:`enskit.maps.pushforward`, at each evaluation whose forward
+        model returned a narrower dtype than the particles'; and once per run
+        in which a particle was repaired.
 
     Notes
     -----
@@ -521,7 +527,6 @@ def _drive(
 
     records: list[HistoryRecord] = []
     completed = 0
-    promotion = _OncePerRun()
     while True:
         if _ladder_finished(schedule, state.step, state.beta):
             status = SCHEDULE_EXHAUSTED
@@ -536,11 +541,10 @@ def _drive(
                 history=records,
             )
         try:
-            with promotion:
-                evaluation, n_valid = _evaluate(
-                    where, state, forward, y, noise_cov, inflation, inputs,
-                    on_failure, data_dim,
-                )
+            evaluation, n_valid = _evaluate(
+                where, state, forward, y, noise_cov, inflation, inputs,
+                on_failure, data_dim,
+            )
         except EKIError as failure:
             failure.history = tuple(records)
             raise
@@ -595,39 +599,6 @@ def _drive(
             float(state.beta),
         )
     return status
-
-
-class _OncePerRun:
-    """Pass every warning through, but the maps layer's promotion warning once.
-
-    The warnings of one evaluation are recorded and then re-issued, at the
-    location they were attributed to, with a registry private to the run, so a
-    warning the default filter shows once per location is shown once per run.
-    """
-
-    def __init__(self) -> None:
-        self.seen = False
-        self.registry: dict = {}
-        self._context = None
-
-    def __enter__(self):
-        self._context = warnings.catch_warnings(record=True)
-        self._caught = self._context.__enter__()
-        warnings.simplefilter("always")
-        return self
-
-    def __exit__(self, *exc_info):
-        caught = list(self._caught)
-        self._context.__exit__(*exc_info)
-        for w in caught:
-            if issubclass(w.category, UserWarning) and _PROMOTION_TEXT in str(w.message):
-                if self.seen:
-                    continue
-                self.seen = True
-            warnings.warn_explicit(
-                w.message, w.category, w.filename, w.lineno, registry=self.registry
-            )
-        return False
 
 
 def _check_schedule(where: str, schedule) -> None:
@@ -730,6 +701,7 @@ def _assimilate(
     )
     if posterior.names != names:
         posterior = posterior.marginal(*names)
+    _check_finite_result(where, state, posterior, f"the update {update_rule!r}")
     if relaxation is not None:
         posterior = relaxation(
             prior=evaluation.ensemble, posterior=posterior, step=state.step,
@@ -738,17 +710,25 @@ def _assimilate(
         c.check_policy_output(
             where, f"the relaxation {relaxation!r}", posterior, state.ensemble
         )
-    if not bool(jnp.all(posterior.all_finite)):
-        raise EKIError(
-            f"{where}: the update returned a non-finite particle at step "
-            f"{state.step}, beta {float(state.beta):g}, with {update_rule!r}. A "
-            f"non-finite particle would make every later step nan, so the run "
-            f"stops here.",
-            state=state,
-        )
+        _check_finite_result(where, state, posterior, f"the relaxation {relaxation!r}")
     return EKIState(
         posterior, key=key_next, beta=state.beta + dbeta, step=state.step + 1
     )
+
+
+def _check_finite_result(where, state, posterior, who) -> None:
+    """Raise :class:`EKIError`, carrying the state, on a non-finite particle.
+
+    Checked on the update's result before a relaxation sees it, so that a
+    relaxation's own debug-mode check cannot raise first without the state.
+    """
+    if not bool(jnp.all(posterior.all_finite)):
+        raise EKIError(
+            f"{where}: {who} returned a non-finite particle at step {state.step}, "
+            f"beta {float(state.beta):g}. A non-finite particle would make every "
+            f"later step nan, so the run stops here.",
+            state=state,
+        )
 
 
 def _split_key(key):
@@ -880,8 +860,12 @@ def _check_increment(where: str, increment) -> Array:
         raise ValueError(
             f"{where}: the increment must be a scalar, got shape {value.shape}"
         )
-    if not jnp.issubdtype(value.dtype, jnp.floating):
-        value = value.astype(jnp.result_type(float))
+    if not (
+        jnp.issubdtype(value.dtype, jnp.floating)
+        or jnp.issubdtype(value.dtype, jnp.integer)
+    ):
+        raise TypeError(f"{where}: the increment must be real, got dtype {value.dtype}")
+    value = value.astype(jnp.result_type(float))
     if not bool(jnp.isfinite(value) & (value > 0.0)):
         raise ValueError(
             f"{where}: the increment must be finite and strictly positive, got "
@@ -928,10 +912,9 @@ def _check_budget_against_bound(where: str, schedule, beta, max_steps: int) -> N
     """Refuse a bound too small for the schedule's own floor-bound worst case.
 
     A schedule exposing ``beta_target`` and ``min_increment`` needs at most
-    ``ceil((beta_target - beta) / min_increment)`` further steps; this raises
-    before the first evaluation when ``max_steps`` is below that. The
-    remaining budget is used, not the whole, so a resumed run is bounded
-    exactly.
+    ``_steps_needed`` further steps; this raises before the first evaluation
+    when ``max_steps`` is below that. The remaining budget is used, not the
+    whole, so a resumed run is bounded exactly.
     """
     beta_target = getattr(schedule, "beta_target", None)
     floor = getattr(schedule, "min_increment", None)
@@ -939,7 +922,7 @@ def _check_budget_against_bound(where: str, schedule, beta, max_steps: int) -> N
         return
     try:
         remaining = float(beta_target) - float(beta)
-        worst_case = _steps_needed(remaining, float(floor))
+        worst_case = _steps_needed(remaining, float(floor), float(beta_target))
     except (TypeError, ValueError, ZeroDivisionError):
         return
     if worst_case > max_steps:
@@ -951,12 +934,17 @@ def _check_budget_against_bound(where: str, schedule, beta, max_steps: int) -> N
         )
 
 
-def _steps_needed(remaining: float, floor: float) -> int:
-    """``ceil(remaining / floor)``, robust to the division's own round-off."""
-    if remaining <= 0.0:
+def _steps_needed(remaining: float, floor: float, beta_target: float) -> int:
+    """The most steps of at least ``floor`` that a remaining budget can take.
+
+    The exhaustion check ends the ladder within ``_BUDGET_TOL_RELATIVE`` of the
+    target, and the clamp takes a remainder below ``_SNAP_RELATIVE`` with the
+    step before it, so the count is ``ceil((remaining - snap) / floor)``, and
+    one step for a remainder between the two tolerances. Subtracting the snap
+    before dividing also makes a quotient that is an integer up to round-off
+    count as that integer.
+    """
+    if remaining <= _BUDGET_TOL_RELATIVE * beta_target:
         return 0
-    quotient = remaining / floor
-    nearest = round(quotient)
-    if abs(quotient - nearest) <= 1e-9 * max(1.0, abs(quotient)):
-        return int(nearest)
-    return math.ceil(quotient)
+    snap = _SNAP_RELATIVE * beta_target
+    return max(1, math.ceil((remaining - snap) / floor))

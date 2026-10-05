@@ -392,11 +392,33 @@ class _FloorsANan(_Schedule):
 
     def next_increment(self, evaluation):
         spread = jnp.var(evaluation.misfits)
-        return jnp.where(spread > 1.0, 0.2, 0.01)
+        step = jnp.where(spread > 1.0, 0.02, 0.01)
+        return jnp.minimum(step, self.beta_target - evaluation.beta)
 
 
 class _BadAttributes(_Schedule):
     n_steps = 0
+
+
+class _NanBecomesLargestStep(_Schedule):
+    """A guarded division whose fallback is ``inf`` alone, as the contract forbids."""
+
+    def next_increment(self, evaluation):
+        mean = jnp.mean(evaluation.misfits)
+        criterion = jnp.where(mean > 0, 2.0 / jnp.where(mean > 0, mean, 1.0), jnp.inf)
+        return jnp.minimum(
+            jnp.maximum(criterion, 1e-3), self.beta_target - evaluation.beta
+        )
+
+
+class _FloorBeatsBudget(_Schedule):
+    """The clamp inversion that lets a ladder pass its budget."""
+
+    def next_increment(self, evaluation):
+        criterion = 2.0 / jnp.mean(evaluation.misfits)
+        return jnp.maximum(
+            jnp.minimum(criterion, self.beta_target - evaluation.beta), 1e-3
+        )
 
 
 def test_check_schedule_passes_a_conforming_schedule():
@@ -413,6 +435,8 @@ def test_check_schedule_passes_a_conforming_schedule():
         pytest.param(_NonPositive(), "strictly positive", id="zero-increment"),
         pytest.param(_FloorsANan(), "nan misfit", id="floors-a-nan"),
         pytest.param(_BadAttributes(), "n_steps", id="bad-n-steps"),
+        pytest.param(_NanBecomesLargestStep(), "nan misfit", id="nan-to-inf"),
+        pytest.param(_FloorBeatsBudget(), "past its beta_target", id="floor-last"),
     ],
 )
 def test_check_schedule_fails_each_mutant(schedule, message):

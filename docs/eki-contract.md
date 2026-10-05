@@ -327,9 +327,10 @@ continue.
 - `key`: keyword-only and **required**, a typed key of shape `()`
   (`TypeError` for a raw `uint32` key or any other value, `ValueError` for
   another shape). It is the run's only source of randomness.
-- `beta`: keyword-only, a real scalar stored as a 0-d floating array
-  (`ValueError` for another shape, `TypeError` for a `bool`); in debug mode
-  finite and not negative.
+- `beta`: keyword-only, a real scalar stored as a 0-d array of the default
+  float, whatever its own dtype, so that a narrow level cannot round the
+  increments added to it (`ValueError` for another shape, `TypeError` for a
+  `bool` or a complex value); in debug mode finite and not negative.
 - `step`: keyword-only, a non-negative Python `int`, static (`TypeError`,
   `ValueError`). Position-dependent schedules index with it.
 
@@ -376,7 +377,7 @@ with an empty history and the particles unchanged. A new ladder needs
 | -------- | ---- | ------- |
 | `evaluate(state, forward, y, noise_cov, *, inflation=None, inputs=None, on_failure="raise")` | inflate, evaluate, find failures, repair or raise, whiten | an `Evaluation` |
 | `assimilate(state, evaluation, increment, y, noise_cov, *, update_rule, approximation=None, relaxation=None)` | validate, update, relax, check finiteness, build the state | the next `EKIState` |
-| `advance(state, forward, y, noise_cov, increment, *, update_rule, inflation=None, relaxation=None, inputs=None, on_failure="raise", approximation=None)` | `assimilate(state, evaluate(state, ...), increment, ...)` | the next `EKIState` |
+| `advance(state, forward, y, noise_cov, increment, *, update_rule, inflation=None, relaxation=None, inputs=None, on_failure="raise", approximation=None)` | `assimilate(state, evaluate(state, ...), increment, ...)`, with the increment, the rule and the callables checked before the forward model is called | the next `EKIState` |
 
 The phases are public because the evaluation is the resource a run is
 organized around: one `Evaluation` serves any number of trial increments, and
@@ -419,12 +420,14 @@ a schedule or stopping rule can be consulted outside the driver.
    approximation=approximation, key=key_update)`, the increment converted to
    the particles' dtype. Its result is the parameter blocks, checked by
    `update` ({ref}`kalman-update`) and put in the state's block order.
-7. **Relax**: `relaxation(prior=evaluation.ensemble, posterior=...,
-   step=state.step, beta=state.beta)`, checked like an inflation's result; or
-   the update's result when `relaxation is None`.
-8. **Finiteness**: a non-finite particle raises `EKIError` naming the step,
+7. **Finiteness**: a non-finite particle raises `EKIError` naming the step,
    the level and the rule. Silent `nan` through a long run is the worst
-   outcome available to this layer, and the check is one reduction.
+   outcome available to this layer, and the check is one reduction. It runs
+   before the relaxation, whose own debug-mode check would otherwise raise
+   first, without the state.
+8. **Relax**: `relaxation(prior=evaluation.ensemble, posterior=...,
+   step=state.step, beta=state.beta)`, checked like an inflation's result and
+   for finiteness again; or nothing when `relaxation is None`.
 9. **Build the state**: `EKIState(posterior, key=key_next, beta=state.beta +
    increment, step=state.step + 1)`.
 
@@ -587,11 +590,19 @@ $$
 the budget term present only when `beta_target` is not `None`. **The order is
 normative**, and both inversions are silent bugs: the floor beats the
 criterion, so a step is always taken; the budget beats the floor, so the
-ladder never passes its target. A budgeted run therefore takes at most
-$\lceil(\beta_{\text{target}} - \beta)/\delta_{\min}\rceil$ further steps, and
+ladder never passes its target. Then **a step that would leave less than
+$10^{-9}\beta_{\text{target}}$ of the budget takes the rest of it**: that
+remainder is the round-off of accumulating many floor-sized increments
+(past the exhaustion tolerance of $10^{-12}$ after about $10^5$ of them), and
+a step of its own would cost an evaluation for nothing. A budgeted run
+therefore takes at most
+$\lceil(\beta_{\text{target}} - \beta - 10^{-9}\beta_{\text{target}})/\delta_{\min}\rceil$
+further steps (one, for a remainder between the two tolerances), exactly, and
 **the driver checks that bound against `max_steps` at entry**, raising
 `ValueError` before any evaluation (the shipped defaults meet it exactly:
-$1/10^{-3} = 1000$). When every misfit is equal no increment changes the
+1000 steps). A `FixedSchedule` longer than `max_steps` is not checked at
+entry: it raises when the bound is reached, carrying the state, which is how
+a caller takes a fixed ladder in pieces. When every misfit is equal no increment changes the
 weights, and each schedule takes the largest allowed step.
 
 ### `AdaptiveESSSchedule`
@@ -715,7 +726,9 @@ In EKI, inflation runs on the state's particles before the evaluation
 (operation 2), so a run with inflation never evaluates the initial particles
 as given, and never returns inflated ones. Relaxation runs on the update's
 result, with `prior` the evaluated particles (inflated and repaired, with the
-prediction block), so its default `names` are the parameter blocks. **Both
+prediction block), so its default `names` are the parameter blocks. Used
+together, the two compound: a relaxation restores spread toward the inflated
+particles' (#71). **Both
 change the target on purpose**: a run that uses them is not a tempering ladder
 for $\pi_\beta$, and the sampling form should use neither.
 
@@ -744,13 +757,13 @@ what the driver adds.
   evaluation noise, the adaptive schedules read a noisier $\Phi$ and shorten
   their steps, and telescoping is a statement about $\tilde G$.
 - **The dtype rule is the simulator contract's**: a narrower floating return
-  is promoted with a `UserWarning`, a wider one, or an integer, boolean or
-  complex one, raises `ValueError` naming the simulator. **`run` and
-  `iterate` issue the promotion warning once per run**, at the caller's line;
-  every other warning is passed through, shown once per location per run.
-  `evaluate` warns at each call, having no run to be once per. Promotion does
-  not recover digits the simulator never computed, which is why the caller is
-  told.
+  is promoted with a `UserWarning` at each evaluation, attributed to the
+  caller's line, and a wider one, or an integer, boolean or complex one,
+  raises `ValueError` naming the simulator. The driver neither records nor
+  re-issues warnings, so Python's filters decide what is shown (the default
+  shows the promotion once per location; an `error` filter raises it at the
+  first evaluation). Promotion does not recover digits the simulator never
+  computed, which is why the caller is told.
 - **A float32 run is not yet supported.** Scaling an operator by a scalar
   promotes it to float64 (#68), so the tempered noise $R/\Delta\beta$ of a
   float32 run is float64, and the first update raises `TypeError` from the
@@ -890,7 +903,9 @@ not stack.
 step: `beta_next = beta + increment`, the three misfit summaries,
 `center_misfit`, `spread` the evaluation's `rms_parameter_spread`, and `ess`
 the tempering weights' ESS **at the increment taken**, for every schedule.
-With `increment=None` it builds a **terminal record**: `increment` exactly 0,
+The increment must be finite and strictly positive (`ValueError`, or
+`TypeError` for a complex one): only `increment=None` builds a **terminal
+record**: `increment` exactly 0,
 `beta_next == beta`, and `ess` exactly $J$ (written, not computed: `exp(log
 J)` is not $J$). A terminal record appears at most once, last, when a stopping
 rule fired or a schedule returned `None`; a zero increment in a record means
@@ -1088,7 +1103,7 @@ nothing raised. For a posterior the initial ensemble must be diffuse.
 
 *A Langevin-type sampler* (the ensemble Kalman sampler of Garbuno-Iñigo et
 al., 2020) needs the increment as a step size and the prior's precision, which
-an update rule does not see. It is a loop over `evaluate` with its own move,
+an update rule does not see (#72). It is a loop over `evaluate` with its own move,
 using the evaluation's whitened residuals; it needs `solve` of the prior
 covariance where a run needs only `factor`.
 
@@ -1186,7 +1201,9 @@ hand-written in NumPy, and exactness is checked against closed forms.
    schedules reach their budget without passing it, keep the clamp
    precedence in all three regimes, take the largest step on a degenerate
    ensemble, run unbounded, take exactly four steps under a 0.3 ceiling and
-   ten (not eleven) of 0.1; the bisection returns its safe end against a
+   ten (not eleven) of 0.1, never spend a step on a round-off remainder (the
+   count against the entry check's, for floors down to $10^{-6}$); the
+   bisection returns its safe end against a
    hand-written one; the misfit schedule takes the larger bound in each regime
    and guards both divisions; the entry budget check raises before any
    evaluation, measured on the remaining budget.
@@ -1218,15 +1235,18 @@ hand-written in NumPy, and exactness is checked against closed forms.
     round-trip with sentinel leaves; families report and refuse; `n_valid` is
     data.
 15. **The history stacks**, `step` and `n_valid` included, and an empty one
-    gives `(0,)` fields.
+    gives `(0,)` fields; a float32 level is stored in the default float, so a
+    tiny increment is not recorded as zero, and `from_evaluation` refuses a
+    non-positive one.
 16. **The phases compose**: `advance` equals `assimilate` of `evaluate`; one
-    evaluation serves two increments with no further call; the increment is
-    checked before any work; `iterate` yields what a hand-written loop with
+    evaluation serves two increments with no further call; the increment and
+    the rule are checked before any work, by `assimilate` and by `advance`; `iterate` yields what a hand-written loop with
     `HistoryRecord.from_evaluation` yields; the provenance check catches a
     stale evaluation and, as documented, not a foreign one.
 17. **Degeneracy**: $J = 2$, $N = 1$, $P = 1$ with both rules; a collapsed
     ensemble does not move; an all-failing model and a non-finite update
-    raise.
+    raise, the latter as an `EKIError` with the state even with a relaxation
+    in debug mode.
 18. **Validation, repr and snapshots**: every tier-2 and tier-3 rule; the
     reprs; the pinned prior draw and a short `Matheron` run snapshotted.
 19. **The result**: `stop_fired` and `budget_complete` on four fixtures, the
@@ -1261,10 +1281,11 @@ hand-written in NumPy, and exactness is checked against closed forms.
 27. **The forward model receives** concrete, read-only `jax.Array`s of the
     particles' dtype, the inflated ones when inflating.
 28. **A jax array, a NumPy array and a nested list** give bit-identical runs.
-29. **The promotion warning** is issued once per run at the caller's line,
-    other warnings pass through, `evaluate` warns per call, and an integer
-    return raises. A float32 run staying float32 is a strict expected failure
-    until #68 is fixed.
+29. **The promotion warning** is issued at each promoting evaluation, at the
+    caller's line, shown once under the default filter; an `error` filter
+    raises it at its origin and leaves a failing run's `EKIError` intact; an
+    integer return raises. A float32 run staying float32 is a strict expected
+    failure until #68 is fixed.
 30. **Counts**: `n_evaluations` and `n_completed_steps` on all four exits,
     exact in both directions, and `max_steps` an exact cap on calls.
 31. **Several blocks**: a problem split into two blocks gives the
@@ -1351,8 +1372,6 @@ design; where this page differs, it governs.
    too.
 9. **`repair_failed_members` is `repair_failed_particles`**, for the
    package's one word per concept.
-10. **The promotion warning is deduplicated by the driver**, once per run, as
-   the old contract promised, where `pushforward` warns once per call.
 
 (eki-changes)=
 ## Changes from the previous contract
@@ -1380,7 +1399,16 @@ design; where this page differs, it governs.
    takes a covariance per block. The `changes_mean` declaration is gone.
 7. **The forward-model contract moved to the maps layer** as the simulator
    contract: a return wider than the particles' dtype now raises (#19) rather
-   than being kept; `check_forward_model` became `check_simulator`.
+   than being kept; `check_forward_model` became `check_simulator`. **The
+   promotion warning is issued at every promoting evaluation**, not once per
+   run: deduplicating it meant recording and re-issuing every warning of an
+   evaluation, which defeated `error` filters (a failing run's `EKIError` was
+   replaced by the warning), module filters, and Python's own once per
+   location (the adversarial review measured all three).
+13. **The adaptive schedules absorb a round-off remainder** into the step
+    before it, and the entry check counts with the same tolerances; before,
+    a budget a hair above a multiple of the floor, or $10^5$ floor-sized
+    steps, could pass the entry check and then exhaust `max_steps`.
 8. **The policy checks moved to `enskit.testing`**, and
    `synthetic_evaluation` was dropped: the checks build their own fixture.
 9. **`assimilate` returns the state** and takes the increment positionally;

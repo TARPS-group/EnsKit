@@ -26,12 +26,14 @@ def check_schedule(schedule, evaluation: Evaluation | None = None) -> None:
        scalar;
     3. it is pure: a second call on the same evaluation returns the same
        value, bit for bit;
-    4. it respects its own ``beta_target``: on an evaluation a quarter of the
-       budget short of it, the increment is at most what remains;
-    5. a ``nan`` misfit is never turned into a step: on an evaluation with a
-       ``nan`` whitened residual, the result is ``None``, not finite, or the
-       increment of the clean evaluation (a schedule that does not read the
-       misfits).
+    4. it respects its own ``beta_target``: on evaluations a quarter of the
+       budget short of it and a millionth short of it, the increment is at most
+       what remains;
+    5. a ``nan`` misfit is never turned into a step: on an evaluation with
+       large misfits, so that no clamp binds, and one ``nan`` whitened
+       residual, the result is ``None`` or not finite, unless the schedule
+       does not read the misfits (doubling them changes nothing) and returns
+       its clean increment.
 
     Parameters
     ----------
@@ -78,23 +80,31 @@ def check_schedule(schedule, evaluation: Evaluation | None = None) -> None:
         )
 
     if beta_target is not None and (n_steps is None or evaluation.step < n_steps):
-        level = 0.75 * beta_target
-        near = _with(evaluation, beta=level)
-        got = schedule.next_increment(near)
-        if got is not None:
+        for level in (0.75 * beta_target, beta_target * (1.0 - 1e-6)):
+            got = schedule.next_increment(_with(evaluation, beta=level))
+            if got is None:
+                continue
             got = float(_increment(name, got))
             remaining = beta_target - level
-            assert got <= remaining * (1.0 + 1e-12), (
+            assert got <= remaining * (1.0 + 1e-9), (
                 f"{name}.next_increment: returned {got} at beta {level}, past its "
                 f"beta_target {beta_target}"
             )
 
+    # The nan probe uses misfits a hundred times larger, so that no clamp binds
+    # for a schedule that reads them; whether it reads them is decided by
+    # doubling the residuals, a finite change.
     residuals = np.array(evaluation.whitened_residuals)
+    spread = _with(evaluation, whitened_residuals=jnp.asarray(10.0 * residuals))
+    doubled = _with(evaluation, whitened_residuals=jnp.asarray(20.0 * residuals))
+    clean = schedule.next_increment(spread)
+    reads_misfits = not _same_increment(clean, schedule.next_increment(doubled))
+    residuals = 10.0 * residuals
     residuals[0, 0] = np.nan
     poisoned = _with(evaluation, whitened_residuals=jnp.asarray(residuals))
     got = schedule.next_increment(poisoned)
     if got is not None and bool(jnp.all(jnp.isfinite(jnp.asarray(got)))):
-        assert first is not None and bool(jnp.asarray(got) == jnp.asarray(first)), (
+        assert not reads_misfits and _same_increment(got, clean), (
             f"{name}.next_increment: turned a nan misfit into the finite step "
             f"{got}; it must return nan (which the driver refuses) or None"
         )
@@ -279,6 +289,13 @@ def _with(evaluation: Evaluation, **changes) -> Evaluation:
     }
     fields.update(changes)
     return Evaluation(**fields)
+
+
+def _same_increment(a, b) -> bool:
+    """Whether two returns of ``next_increment`` are the same, ``None`` included."""
+    if a is None or b is None:
+        return a is None and b is None
+    return bool(jnp.asarray(a) == jnp.asarray(b))
 
 
 def _increment(name: str, value):

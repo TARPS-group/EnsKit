@@ -109,7 +109,8 @@ need not convert. One value per particle is `(J, 1)`, not `(J,)`.
 
 The dtype is read before any conversion. The particles' dtype is written as
 is. A **narrower** floating dtype, in practice `float32`, is promoted to the
-particles' dtype, and the run warns once. A **wider** one raises, naming the
+particles' dtype, with a warning at each evaluation (Python's default filter
+shows it once). A **wider** one raises, naming the
 forward model, because writing it would silently throw away digits it
 computed; an integer, boolean or complex return raises too.
 

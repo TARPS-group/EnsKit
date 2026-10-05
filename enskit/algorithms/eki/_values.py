@@ -495,7 +495,7 @@ class HistoryRecord:
             increment = jnp.zeros_like(beta)
             ess = jnp.asarray(float(evaluation.n_particles), dtype=beta.dtype)
         else:
-            increment = jnp.asarray(increment, dtype=beta.dtype)
+            increment = _as_increment("HistoryRecord.from_evaluation", increment)
             ess = _ess_from_misfits(misfits, increment)
         return cls(
             step=jnp.asarray(evaluation.step),
@@ -742,6 +742,38 @@ def _zero_record() -> HistoryRecord:
     )
 
 
+def _as_increment(where: str, value) -> Array:
+    """An increment as a 0-d array of the default float: finite and positive.
+
+    Only ``None`` makes a terminal record, so a zero here is refused rather
+    than written as a record that reads as terminal.
+    """
+    if isinstance(value, bool):
+        raise TypeError(f"{where}: the increment is the bool {value!r}")
+    inc = jnp.asarray(value)
+    if inc.ndim != 0:
+        raise ValueError(
+            f"{where}: the increment must be a scalar, got shape {inc.shape}"
+        )
+    real = jnp.issubdtype(inc.dtype, jnp.floating) or jnp.issubdtype(
+        inc.dtype, jnp.integer
+    )
+    if not real:
+        raise TypeError(f"{where}: the increment must be real, got dtype {inc.dtype}")
+    inc = inc.astype(jnp.result_type(float))
+    if not isinstance(inc, jax.core.Tracer):
+        try:
+            ok = bool(jnp.isfinite(inc) & (inc > 0.0))
+        except jax.errors.ConcretizationTypeError:
+            ok = True
+        if not ok:
+            raise ValueError(
+                f"{where}: the increment must be finite and strictly positive, got "
+                f"{inc}; a terminal record is made with increment=None."
+            )
+    return inc
+
+
 def _as_level(where: str, value) -> Array:
     """A tempering level as a 0-d floating array."""
     if isinstance(value, bool):
@@ -749,8 +781,14 @@ def _as_level(where: str, value) -> Array:
     level = jnp.asarray(value)
     if level.ndim != 0:
         raise ValueError(f"{where}: beta must be a scalar, got shape {level.shape}")
-    if not jnp.issubdtype(level.dtype, jnp.floating):
-        level = level.astype(jnp.result_type(float))
+    if not (
+        jnp.issubdtype(level.dtype, jnp.floating)
+        or jnp.issubdtype(level.dtype, jnp.integer)
+    ):
+        raise TypeError(f"{where}: beta must be a real scalar, got dtype {level.dtype}")
+    # Always the default float, so that the level and the increments added to
+    # it never round at a narrower precision than the run's bookkeeping.
+    level = level.astype(jnp.result_type(float))
     value_check(
         level,
         lambda x: bool(jnp.isfinite(x) & (x >= 0.0)),

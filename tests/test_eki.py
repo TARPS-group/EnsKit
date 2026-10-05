@@ -526,8 +526,14 @@ def test_4_the_entry_time_budget_check_raises_before_any_evaluation():
         _run(problem, schedule=AdaptiveESSSchedule(beta_target=2.0))
 
 
-def test_4_budget_tol_absorbs_a_ladder_that_lands_just_below_its_budget():
-    """Ten increments of 0.1 sum to just below 1; a bare ``>=`` takes an eleventh."""
+def test_4_a_round_off_remainder_never_costs_a_step():
+    """Ten steps of 0.1 leave about 1e-16 of the budget; no eleventh step takes it.
+
+    The clamp gives a remainder below ``1e-9 * beta_target`` to the step
+    before it, and the exhaustion check's own tolerance is ``1e-12``. Both
+    are needed: the remainder of many floor-sized steps grows with their
+    number, past the exhaustion tolerance at a hundred thousand of them.
+    """
     problem = _AffineProblem()
     accumulated = 0.0
     for _ in range(10):
@@ -536,10 +542,31 @@ def test_4_budget_tol_absorbs_a_ladder_that_lands_just_below_its_budget():
     schedule = AdaptiveMisfitSchedule(
         beta_target=1.0, min_increment=0.1, max_increment=0.1
     )
-    result = _run(problem, schedule=schedule, max_steps=12)
+    result = _run(problem, schedule=schedule, max_steps=10)
     assert result.n_evaluations == 10
-    assert float(result.beta) == pytest.approx(accumulated, abs=8 * EPS)
-    assert float(result.beta) < 1.0
+    assert float(result.beta) == pytest.approx(1.0, abs=4 * EPS)
+
+    # The entry check counts with the same tolerances, so a budget a hair
+    # above an integer number of floors is accepted and completes.
+    hair = AdaptiveMisfitSchedule(
+        beta_target=1.0000000001, min_increment=0.25, max_increment=0.25
+    )
+    done = _run(problem, schedule=hair, max_steps=4)
+    assert done.budget_complete and done.n_evaluations == 4
+
+    # And the arithmetic, where running it would take too long: the same
+    # loop in Python floats, against the count the entry check uses.
+    from enskit.algorithms.eki._driver import _steps_needed
+
+    for target, floor in ((1.0, 1e-5), (0.7, 1e-6), (1.0000000001, 1e-3)):
+        beta, steps = 0.0, 0
+        while not beta >= target - 1e-12 * target:
+            delta = min(floor, target - beta)
+            if target - beta - delta <= 1e-9 * target:
+                delta = target - beta
+            beta += delta
+            steps += 1
+        assert steps == _steps_needed(target, floor, target)
 
 
 def test_4_the_entry_budget_check_measures_the_remaining_budget():
@@ -559,10 +586,10 @@ def test_4_the_entry_budget_check_measures_the_remaining_budget():
     # The quotient is robust to its own round-off: 1e-9 / 1e-12 is 1000 steps.
     from enskit.algorithms.eki._driver import _steps_needed
 
-    assert _steps_needed(1e-9, 1e-12) == 1000
-    assert _steps_needed(1.0, 1e-3) == 1000
-    assert _steps_needed(0.55, 0.1) == 6
-    assert _steps_needed(-0.5, 1e-3) == 0
+    assert _steps_needed(1e-9, 1e-12, 1e-9) == 1000
+    assert _steps_needed(1.0, 1e-3, 1.0) == 1000
+    assert _steps_needed(0.55, 0.1, 1.0) == 6
+    assert _steps_needed(-0.5, 1e-3, 1.0) == 0
 
 
 def _reference_ess(misfit_values: np.ndarray, increment: float) -> float:
@@ -1092,9 +1119,12 @@ def test_14_a_run_compiles_a_bounded_number_of_times_whatever_its_length():
     counter = _CompileCounter()
     jax.monitoring.register_event_duration_secs_listener(counter)
     try:
-        _run(problem, schedule=FixedSchedule.constant(0.05, 3), **configuration)
+        # Distinct increments, so a compilation keyed on the increment's value
+        # would show.
+        _run(problem, schedule=FixedSchedule((0.05, 0.06, 0.07)), **configuration)
         after_short = counter.count
-        _run(problem, schedule=FixedSchedule.constant(0.05, 30), **configuration)
+        long_ladder = tuple(0.01 * (1.0 + i / 30) for i in range(30))
+        _run(problem, schedule=FixedSchedule(long_ladder), **configuration)
         after_long = counter.count
         _run(problem, schedule=AdaptiveESSSchedule(beta_target=0.5), **configuration)
         after_adaptive = counter.count
@@ -1180,6 +1210,26 @@ def test_15_the_history_stacks_including_its_two_integer_fields():
     assert empty.batch_shape == (0,)
     for name in ("step", "n_valid", "beta", "increment", "ess"):
         assert np.asarray(getattr(empty, name)).shape == (0,)
+
+
+def test_15_records_keep_the_default_float_and_refuse_a_zero_increment():
+    """A float32 level would round a tiny increment to a zero, terminal-looking one."""
+    problem = _AffineProblem()
+    state = EKIState(Ensemble(u=jnp.asarray(problem.members)), key=jax.random.key(0),
+                     beta=jnp.float32(0.0))
+    assert state.beta.dtype == jnp.result_type(float)
+    result = _run(problem, state=state, schedule=FixedSchedule((1e-50, 1.0)))
+    assert float(result.history[0].increment) == 1e-50
+    assert result.n_completed_steps == 2
+
+    evaluation = evaluate(problem.state(), problem.forward, jnp.asarray(problem.y),
+                          problem.noise_cov)
+    for bad in (0.0, -1.0, np.inf):
+        with pytest.raises(ValueError, match="increment=None"):
+            HistoryRecord.from_evaluation(evaluation, bad)
+    with pytest.raises(TypeError, match="real"):
+        EKIState(Ensemble(u=jnp.asarray(problem.members)), key=jax.random.key(0),
+                 beta=1j)
 
 
 def test_16_the_two_phases_compose_and_one_evaluation_serves_two_increments():
@@ -1275,6 +1325,33 @@ def test_17_a_collapsed_ensemble_neither_moves_nor_produces_nan():
         )
         assert np.all(np.isfinite(_u(result)))
         assert np.array_equal(_u(result), np.asarray(collapsed))
+
+
+def test_16_advance_checks_its_arguments_before_calling_the_model():
+    """A bad increment or rule costs no evaluation, through ``advance`` too."""
+    problem = _AffineProblem()
+    y, noise = jnp.asarray(problem.y), problem.noise_cov
+    for increment, rule, error in (
+        (0.0, SQRT, ValueError),
+        (np.nan, SQRT, ValueError),
+        (0.5, object(), TypeError),
+        (1j, SQRT, TypeError),
+    ):
+        with pytest.raises(error):
+            advance(problem.state(), problem.forward, y, noise, increment,
+                    update_rule=rule)
+    assert problem.calls == []
+
+
+def test_17_a_non_finite_update_raises_eki_error_before_a_relaxation_sees_it():
+    """In debug mode the relaxation would refuse it first, without the state."""
+    problem = _AffineProblem()
+    for relaxation in (RelaxToPriorSpread(0.5), RelaxToPriorPerturbations(0.5)):
+        with debug_checks(), pytest.raises(EKIError, match="non-finite") as caught:
+            _run(problem, schedule=FixedSchedule.uniform(3), update_rule=_PoisonAt(2),
+                 relaxation=relaxation)
+        assert caught.value.state.step == 1
+        assert len(caught.value.history) == 1
 
 
 def test_17_a_wholly_failing_model_and_a_nan_update_both_raise():
@@ -2067,8 +2144,15 @@ def test_28_the_accepted_containers_are_a_promise_not_a_tolerance():
         assert other.last_evaluation.ensemble[PREDICTION].dtype == jnp.float64
 
 
-def test_29_a_narrow_forward_model_is_promoted_and_warned_about_once_per_run():
-    """"Exactly once" per run is what this pins; ``evaluate`` warns per call."""
+def test_29_a_narrow_forward_model_is_promoted_and_warned_about():
+    """The maps layer's rule, through the driver, which leaves warnings alone.
+
+    Every evaluation that promotes warns, at the caller's line, and Python's
+    filters decide what is shown: under ``always`` every one, under the
+    default once per location. The driver neither records nor re-issues
+    warnings, so an ``error`` filter raises at its origin and a failing run
+    still raises its ``EKIError``, carrying the state.
+    """
     problem = _AffineProblem(J=8)
     y, noise = jnp.asarray(problem.y), problem.noise_cov
     state = problem.state()
@@ -2082,44 +2166,35 @@ def test_29_a_narrow_forward_model_is_promoted_and_warned_about_once_per_run():
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
         result = _run(problem, forward=coarse, schedule=FixedSchedule.uniform(4))
-    assert len(promotions(caught)) == 1
+    assert len(promotions(caught)) == 4
     assert "float32" in str(promotions(caught)[0].message)
     assert __file__.endswith(promotions(caught)[0].filename.rsplit("/", 1)[-1])
-    assert result.n_evaluations == 4
     assert result.last_evaluation.ensemble[PREDICTION].dtype == jnp.float64
     assert result.ensemble["u"].dtype == jnp.float64
 
-    # Every other warning a simulator raises still reaches the caller.
-    def chatty(u):
-        warnings.warn("from the simulator", RuntimeWarning, stacklevel=2)
-        return coarse(u)
-
     with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter("always")
-        _run(problem, forward=chatty, schedule=FixedSchedule.uniform(3))
+        warnings.simplefilter("default")
+        _run(problem, forward=coarse, schedule=FixedSchedule.uniform(4))
     assert len(promotions(caught)) == 1
-    assert len([w for w in caught if "from the simulator" in str(w.message)]) >= 1
 
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
         _run(problem, schedule=FixedSchedule.uniform(4))
     assert not promotions(caught)
 
-    class _DegradesLater:
-        def __init__(self):
-            self.calls = 0
+    # Under an error filter the warning raises where it is issued, at the
+    # first evaluation; and a failure is still an EKIError with its state.
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        with pytest.raises(UserWarning, match="promoted"):
+            _run(problem, forward=coarse, schedule=FixedSchedule.uniform(4))
 
-        def __call__(self, u):
-            self.calls += 1
-            v = jnp.asarray(u) @ jnp.asarray(problem.G).T
-            return v if self.calls == 1 else v.astype(jnp.float32)
+        def failing(u):
+            return problem.forward(u).at[1, 0].set(jnp.nan)
 
-    late = _DegradesLater()
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter("always")
-        _run(problem, forward=late, schedule=FixedSchedule.uniform(4))
-    assert late.calls == 4
-    assert len(promotions(caught)) == 1
+        with pytest.raises(EKIError) as caught_error:
+            _run(problem, forward=failing, schedule=FixedSchedule.uniform(4))
+        assert caught_error.value.state is not None
 
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")

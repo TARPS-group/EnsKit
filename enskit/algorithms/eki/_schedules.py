@@ -26,6 +26,13 @@ __all__ = [
 ]
 
 
+#: A remainder of the budget below this fraction of ``beta_target`` is taken
+#: with the step before it rather than left for a step of its own: it is the
+#: round-off of accumulating many floor-sized increments, and a step for it
+#: would cost an evaluation for nothing.
+_SNAP_RELATIVE = 1e-9
+
+
 class Schedule(Protocol):
     """How large the next increment is: one method and two attributes.
 
@@ -488,12 +495,17 @@ def _clamp(schedule, unclamped: Array, beta: Array) -> Array:
 
     The floor beats the criterion, so a step is always taken; the budget beats
     the floor, so the ladder cannot overshoot ``beta_target``. The budget term
-    is present only when there is a budget.
+    is present only when there is a budget. A step that would leave less than
+    ``_SNAP_RELATIVE * beta_target`` of the budget takes the rest of it, so
+    accumulated round-off never costs a step of its own.
     """
     delta = jnp.maximum(unclamped, schedule.min_increment)
     delta = jnp.minimum(delta, schedule.max_increment)
     if schedule.beta_target is not None:
-        delta = jnp.minimum(delta, schedule.beta_target - beta)
+        remaining = schedule.beta_target - beta
+        delta = jnp.minimum(delta, remaining)
+        snap = _SNAP_RELATIVE * schedule.beta_target
+        delta = jnp.where(remaining - delta <= snap, remaining, delta)
     return delta
 
 
