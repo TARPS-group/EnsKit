@@ -4,9 +4,9 @@ Four kinds of test, in the order the module's claims are made:
 
 1. **Contract conformance** — every model returns the documented shape at the
    documented input shape, in the run's dtype, is ``jit``-able and
-   ``vmap``-pable, is row-independent and deterministic, and passes
-   :func:`enskit.eki.testing.check_forward_model`. The checker gets its own
-   negative tests, since a checker with no failing case is worthless.
+   ``vmap``-pable, and is row-independent and deterministic. That every model
+   passes :func:`enskit.testing.check_simulator`, and the checker's own
+   negative tests, live in ``test_maps.py`` beside the simulator contract.
 2. **Exactness** — the linear problem's closed form against a dense reference
    written here, at three tempering levels; and a full run from an
    exact-moment ensemble reaching that closed form to floating point.
@@ -35,18 +35,11 @@ import pytest
 from conftest import prints_as
 
 import enskit  # noqa: F401  -- enables x64 before any array exists
-from enskit import toy
-from enskit.eki import (
-    AdaptiveESSSchedule,
-    EKIError,
-    EKIState,
-    FixedSchedule,
-    TransformUpdate,
-    run,
-)
-from enskit.eki.testing import check_forward_model
-from enskit.gauss import Gaussian
+from enskit import kalman, maps, toy
+from enskit.algorithms import eki
+from enskit.distribution import Ensemble, Gaussian
 from enskit.linalg import DensePSD, PSDDiagonal, PSDLowRank, UnsupportedOpError
+from enskit.testing import check_simulator
 
 EPS = float(np.finfo(np.float64).eps)
 
@@ -59,10 +52,10 @@ PROBLEMS = [
 IDS = [name for name, *_ in PROBLEMS]
 
 
-def _ensemble(n_members: int, u_dim: int, seed: int = 0):
-    """A pseudo-random ensemble, drawn outside the models under test."""
+def _ensemble(n_particles: int, parameter_dim: int, seed: int = 0):
+    """A pseudo-random ``(J, P)`` array of parameters, drawn outside the models."""
     rng = np.random.default_rng(seed)
-    return jnp.asarray(rng.normal(size=(n_members, u_dim)))
+    return jnp.asarray(rng.normal(size=(n_particles, parameter_dim)))
 
 
 def _identical(got, want) -> bool:
@@ -73,12 +66,12 @@ def _identical(got, want) -> bool:
 def _exact_moment_ensemble(J: int, mu: np.ndarray, F: np.ndarray) -> np.ndarray:
     """An ensemble whose empirical moments are exactly ``mu`` and ``F @ F.T``.
 
-    The QR-of-ones construction the joint Gaussian contract specifies: the
-    complete QR of the all-ones vector in R^J gives columns that are
-    orthonormal and orthogonal to it, and ``mu + sqrt(J - 1) E F.T`` then has
-    mean ``mu`` and empirical covariance ``F F.T`` under the package's J - 1
-    divisor. Only J >= k + 1 binds. Written out here rather than imported,
-    as the package's conformance rules require of a reference.
+    The QR-of-ones construction: the complete QR of the all-ones vector in
+    R^J gives columns that are orthonormal and orthogonal to it, and
+    ``mu + sqrt(J - 1) E F.T`` then has mean ``mu`` and empirical covariance
+    ``F F.T`` under the package's J - 1 divisor. Only J >= k + 1 binds.
+    Written out here rather than imported, as the package's conformance rules
+    require of a reference.
     """
     k = F.shape[1]
     assert J >= k + 1, "the construction needs J >= k + 1"
@@ -91,9 +84,9 @@ def _exact_moment_ensemble(J: int, mu: np.ndarray, F: np.ndarray) -> np.ndarray:
 # ===========================================================================
 
 
-@pytest.mark.parametrize("name, problem, u_dim, v_dim", PROBLEMS, ids=IDS)
+@pytest.mark.parametrize("name, problem, parameter_dim, data_dim", PROBLEMS, ids=IDS)
 def test_1_every_model_returns_the_documented_shape_and_dtype(
-    name, problem, u_dim, v_dim
+    name, problem, parameter_dim, data_dim
 ):
     """(J, P) in, (J, N) out, in the run's working dtype, at three sizes of J.
 
@@ -102,19 +95,19 @@ def test_1_every_model_returns_the_documented_shape_and_dtype(
     warning rather than rejected, so no other test would catch a float32
     model here.
     """
-    assert (problem.u_dim, problem.v_dim) == (u_dim, v_dim)
-    for n_members in (2, 5, 64):
-        predictions = problem.forward(_ensemble(n_members, u_dim))
-        assert predictions.shape == (n_members, v_dim)
+    assert (problem.parameter_dim, problem.data_dim) == (parameter_dim, data_dim)
+    for n_particles in (2, 5, 64):
+        predictions = problem.forward(_ensemble(n_particles, parameter_dim))
+        assert predictions.shape == (n_particles, data_dim)
         assert predictions.dtype == jnp.float64
-    assert jnp.shape(problem.y) == (v_dim,)
-    assert jnp.shape(problem.u_true) == (u_dim,)
-    assert problem.prior.dim == u_dim
-    assert problem.noise_cov.shape == (v_dim, v_dim)
+    assert jnp.shape(problem.y) == (data_dim,)
+    assert jnp.shape(problem.u_true) == (parameter_dim,)
+    assert problem.prior.dims == {"u": parameter_dim}
+    assert problem.noise_cov.shape == (data_dim, data_dim)
 
 
-@pytest.mark.parametrize("name, problem, u_dim, v_dim", PROBLEMS, ids=IDS)
-def test_1_no_problem_is_callable(name, problem, u_dim, v_dim):
+@pytest.mark.parametrize("name, problem, parameter_dim, data_dim", PROBLEMS, ids=IDS)
+def test_1_no_problem_is_callable(name, problem, parameter_dim, data_dim):
     """A problem is not a forward model, and must not be mistakable for one.
 
     ``run`` takes the callable, the observation and the noise covariance as
@@ -129,40 +122,40 @@ def test_1_no_problem_is_callable(name, problem, u_dim, v_dim):
     )
 
 
-@pytest.mark.parametrize("name, problem, u_dim, v_dim", PROBLEMS, ids=IDS)
-def test_2_every_model_is_jittable_and_vmappable(name, problem, u_dim, v_dim):
+@pytest.mark.parametrize("name, problem, parameter_dim, data_dim", PROBLEMS, ids=IDS)
+def test_2_every_model_is_jittable_and_vmappable(name, problem, parameter_dim, data_dim):
     """A convenience of the toy models, so it is tested as one.
 
     Not a property of forward models in general — the contract requires
     neither — but these are used across the suite and the documentation, so a
     change that broke tracing would be one to notice.
     """
-    ensemble = _ensemble(6, u_dim)
+    ensemble = _ensemble(6, parameter_dim)
     eager = problem.forward(ensemble)
     assert _identical(jax.jit(problem.forward)(ensemble), eager)
 
     stacked = jnp.stack([ensemble, ensemble + 0.25])
     mapped = jax.vmap(problem.forward)(stacked)
-    assert mapped.shape == (2, 6, v_dim)
+    assert mapped.shape == (2, 6, data_dim)
     assert _identical(mapped[0], eager)
     assert _identical(mapped[1], problem.forward(ensemble + 0.25))
 
 
-@pytest.mark.parametrize("name, problem, u_dim, v_dim", PROBLEMS, ids=IDS)
+@pytest.mark.parametrize("name, problem, parameter_dim, data_dim", PROBLEMS, ids=IDS)
 def test_3_every_model_is_row_independent_and_deterministic(
-    name, problem, u_dim, v_dim
+    name, problem, parameter_dim, data_dim
 ):
     """Row j of the return depends only on row j of the argument.
 
     The one requirement beyond the shapes that nothing inside a run detects.
-    Checked by permuting the members — for a row-independent model the
+    Checked by permuting the particles — for a row-independent model the
     predictions permute with them, bit-exactly, since the rows are the same
-    set of members either way — and by re-evaluating a subset of them, which
+    set of particles either way — and by re-evaluating a subset of them, which
     catches the symmetric couplings a permutation cannot. The subset
     comparison is to a tolerance: a differently shaped batch legitimately
     takes a different matmul kernel and rounds differently in the last bits.
     """
-    ensemble = _ensemble(7, u_dim)
+    ensemble = _ensemble(7, parameter_dim)
     predictions = problem.forward(ensemble)
     permutation = jnp.array([3, 1, 0, 6, 5, 4, 2])
     assert _identical(
@@ -178,153 +171,11 @@ def test_3_every_model_is_row_independent_and_deterministic(
     assert _identical(problem.forward(ensemble), predictions)
 
 
-@pytest.mark.parametrize("name, problem, u_dim, v_dim", PROBLEMS, ids=IDS)
-def test_4_every_model_passes_check_forward_model(name, problem, u_dim, v_dim):
-    """The harness a user runs their own model through, run on ours."""
-    check_forward_model(problem.forward, u_dim=u_dim, v_dim=v_dim)
-
-
-def test_4_check_forward_model_rejects_the_defects_it_claims_to_catch():
-    """A checker with no failing case is worthless, so each check gets one.
-
-    The two row-coupling cases are the valuable ones: that defect is the one
-    the contract calls undetectable, and it is undetectable *from inside a
-    run* rather than absolutely. They are separate cases because a symmetric
-    coupling survives a permutation of the members and only the subset
-    comparison catches it.
-    """
-    times = jnp.linspace(0.25, 1.0, 4)
-    decay = jax.vmap(lambda u: u[0] * jnp.exp(-u[1] * times))
-
-    def normalized(ensemble):
-        # Symmetric coupling: normalizes across the ensemble. Survives a
-        # permutation, so only the subset check sees it.
-        return decay(ensemble - jnp.mean(ensemble, axis=0))
-
-    def ordered(ensemble):
-        # Order-dependent coupling: a running total down the rows.
-        return decay(jnp.cumsum(ensemble, axis=0))
-
-    def per_member(ensemble):
-        # Written for one member, and handed the whole ensemble: returns one
-        # prediction vector. The other failure mode of the same mistake is a
-        # raise from inside JAX, which needs no check to be noticed.
-        member = ensemble[0]
-        return member[0] * jnp.exp(-member[1] * times)
-
-    def narrow(ensemble):
-        return decay(ensemble).astype(jnp.float32)
-
-    def integer(ensemble):
-        return jnp.zeros((ensemble.shape[0], times.size), dtype=jnp.int64)
-
-    def stochastic(ensemble):
-        key = jax.random.key(int(np.random.default_rng().integers(1 << 30)))
-        return decay(ensemble) + jax.random.normal(key, (ensemble.shape[0], 4))
-
-    for model, fragment in [
-        (ordered, "permuting the members changed more than the order"),
-        (normalized, "alongside different members"),
-        (per_member, "returned shape"),
-        (narrow, "float32"),
-        (integer, "not a real floating type"),
-        (stochastic, "not deterministic"),
-    ]:
-        with pytest.raises(AssertionError, match=fragment):
-            check_forward_model(model, u_dim=2, v_dim=4)
-
-    # The declaration is the escape hatch, and it suppresses exactly the two
-    # checks a stochastic model cannot satisfy -- and nothing else. Every
-    # other check is re-run under it, since asserting that for one of them
-    # would pass an implementation that returned early.
-    check_forward_model(stochastic, u_dim=2, v_dim=4, stochastic=True)
-    for model, fragment in [
-        (per_member, "returned shape"),
-        (narrow, "float32"),
-        (integer, "not a real floating type"),
-    ]:
-        with pytest.raises(AssertionError, match=fragment):
-            check_forward_model(model, u_dim=2, v_dim=4, stochastic=True)
-
-
-def test_4_check_forward_model_checks_the_second_ensemble_size_and_the_argument():
-    """Two claims of its own that no defect above exercises.
-
-    A model that answers at one ensemble size and not another passes every
-    other check, and the Notes' argument for having no mutation check — that
-    a `jax.Array` cannot be written into — depends on the argument being one.
-    """
-    times = jnp.linspace(0.25, 1.0, 4)
-    decay = jax.vmap(lambda u: u[0] * jnp.exp(-u[1] * times))
-
-    def fixed_size(ensemble):
-        # A wrapper that preallocated for one ensemble size, as a subprocess
-        # wrapper naturally does, and was then handed another.
-        predictions = np.full((6, 4), np.nan)
-        rows = min(ensemble.shape[0], 6)
-        predictions[:rows] = np.asarray(decay(ensemble))[:rows]
-        return predictions[: ensemble.shape[0]]
-
-    with pytest.raises(AssertionError, match="returned shape"):
-        check_forward_model(fixed_size, u_dim=2, v_dim=4)
-
-    seen = []
-
-    def recording(ensemble):
-        seen.append(ensemble)
-        return decay(ensemble)
-
-    check_forward_model(recording, u_dim=2, v_dim=4)
-    assert len(seen) == 5, "the docstring promises five calls"
-    assert {tuple(a.shape) for a in seen} == {(6, 2), (7, 2), (2, 2)}
-    for argument in seen:
-        assert isinstance(argument, jax.Array), (
-            "the Notes argue no mutation check is needed because the argument "
-            "is a jax.Array, which cannot be written into"
-        )
-        assert not np.asarray(argument).flags.writeable
-
-
-def test_4_check_forward_model_compares_where_the_failures_are():
-    """A model whose failing rows move between the full ensemble and a subset.
-
-    The non-finite pattern is compared, not only the finite values: a domain
-    that depends on the other members is a coupling like any other, and the
-    finite entries alone may agree.
-    """
-    times = jnp.linspace(0.25, 1.0, 4)
-
-    def moving_domain(ensemble):
-        # Fails whichever member has the smallest first parameter -- which
-        # depends on the company it is in.
-        predictions = jax.vmap(lambda u: u[0] * jnp.exp(-u[1] * times))(ensemble)
-        worst = jnp.argmin(ensemble[:, 0])
-        return predictions.at[worst].set(jnp.nan)
-
-    with pytest.raises(AssertionError, match="non-finite entries"):
-        check_forward_model(moving_domain, u_dim=2, v_dim=4)
-
-
-def test_4_check_forward_model_accepts_a_failing_model_and_a_numpy_one():
-    """Non-finite rows and non-JAX returns are legal, and must not be flagged.
-
-    The failing model is the case the nan-aware comparison exists for: two
-    permuted ``nan`` rows are not equal under the ordinary comparison, so a
-    naive checker would reject every model that can fail.
-    """
-    failing = toy.restricted_decay()
-    predictions = np.asarray(failing.forward(_ensemble(6, 2)))
-    assert not np.isfinite(predictions).all(), "no member failed, so this is vacuous"
-    assert np.isfinite(predictions).any(), "every member failed, so this is vacuous"
-    check_forward_model(failing.forward, u_dim=2, v_dim=12)
-
-    times = np.linspace(0.25, 1.0, 4)
-
-    def numpy_model(ensemble):
-        members = np.asarray(ensemble)  # a read-only view; only read
-        return [[float(u[0] * np.exp(-u[1] * t)) for t in times] for u in members]
-
-    check_forward_model(numpy_model, u_dim=2, v_dim=4)
+# The five `test_4_*` tests of `enskit.eki.testing.check_forward_model` -- every
+# toy model passing it, and the checker's own negative cases -- moved to
+# `tests/test_maps.py` with the checker, now `enskit.testing.check_simulator`.
+# The maps contract's "Ported regression tests" table maps each old name to
+# its new one.
 
 
 # ===========================================================================
@@ -339,14 +190,14 @@ def _dense_posterior(problem, beta: float) -> tuple[np.ndarray, np.ndarray]:
     comparison is between two independent paths. Valid only for an invertible
     prior covariance, which is what these tests build.
     """
-    C0 = np.asarray(problem.prior.cov.to_dense())
+    C0 = np.asarray(problem.prior.cov("u").to_dense())
     G = np.asarray(problem.G.to_dense())
     R = np.asarray(problem.noise_cov.to_dense())
     prior_precision = np.linalg.inv(C0)
     data_precision = G.T @ np.linalg.solve(R, G)
     cov = np.linalg.inv(prior_precision + beta * data_precision)
     mean = cov @ (
-        prior_precision @ np.asarray(problem.prior.mean)
+        prior_precision @ np.asarray(problem.prior.mean("u"))
         + beta * G.T @ np.linalg.solve(R, np.asarray(problem.y))
     )
     return mean, cov
@@ -361,15 +212,15 @@ def _general_linear_problem():
     term, changes nothing that the shipped fixture can see. This fixture
     restores both, so the exactness test below covers the whole formula.
     """
-    base = toy.linear_gaussian(u_dim=4, v_dim=8, seed=5)
+    base = toy.linear_gaussian(parameter_dim=4, data_dim=8, seed=5)
     rng = np.random.default_rng(11)
     factor = np.tril(rng.normal(size=(4, 4))) + 4.0 * np.eye(4)
     noise = rng.normal(size=(8, 8))
     return dataclasses.replace(
         base,
         prior=Gaussian(
-            jnp.asarray(rng.normal(size=4)),
-            DensePSD(jnp.asarray(factor @ factor.T)),
+            {"u": jnp.asarray(rng.normal(size=4))},
+            block_covs={"u": DensePSD(jnp.asarray(factor @ factor.T))},
         ),
         noise_cov=DensePSD(
             jnp.asarray(noise @ noise.T / 8.0 + np.eye(8))
@@ -382,8 +233,8 @@ def test_5_the_closed_form_posterior_covers_the_whole_conditioning_formula(beta)
     """The same check on a problem whose prior mean and noise are general.
 
     The tolerance is `1e3 * EPS * scale` as in the sibling test, and it is
-    not portable to arbitrary sizes: at `u_dim > v_dim` and level 2 the
-    *reference* loses accuracy, since it inverts the precision matrix. Widen
+    not portable to arbitrary sizes: at `parameter_dim > data_dim` and level 2
+    the *reference* loses accuracy, since it inverts the precision matrix. Widen
     the parametrization and this tolerance must be revisited.
     """
     problem = _general_linear_problem()
@@ -391,12 +242,14 @@ def test_5_the_closed_form_posterior_covers_the_whole_conditioning_formula(beta)
     mean_ref, cov_ref = _dense_posterior(problem, beta)
     scale = max(np.abs(mean_ref).max(), np.abs(cov_ref).max())
 
-    assert np.abs(np.asarray(problem.prior.mean)).min() > 0.1, "fixture is vacuous"
-    np.testing.assert_allclose(
-        posterior.mean, mean_ref, rtol=0, atol=1e3 * EPS * scale
+    assert np.abs(np.asarray(problem.prior.mean("u"))).min() > 0.1, (
+        "fixture is vacuous"
     )
     np.testing.assert_allclose(
-        posterior.cov.to_dense(), cov_ref, rtol=0, atol=1e3 * EPS * scale
+        posterior.mean("u"), mean_ref, rtol=0, atol=1e3 * EPS * scale
+    )
+    np.testing.assert_allclose(
+        posterior.cov("u").to_dense(), cov_ref, rtol=0, atol=1e3 * EPS * scale
     )
 
 
@@ -409,10 +262,15 @@ def test_5_the_prior_mean_and_the_residual_term_are_both_load_bearing():
     """
     problem = _general_linear_problem()
     zero_mean = dataclasses.replace(
-        problem, prior=Gaussian(jnp.zeros(problem.u_dim), problem.prior.cov)
+        problem,
+        prior=Gaussian(
+            {"u": jnp.zeros(problem.parameter_dim)},
+            block_covs={"u": problem.prior.block_cov("u")},
+        ),
     )
     difference = np.abs(
-        np.asarray(problem.posterior().mean) - np.asarray(zero_mean.posterior().mean)
+        np.asarray(problem.posterior().mean("u"))
+        - np.asarray(zero_mean.posterior().mean("u"))
     ).max()
     assert difference > 0.05, difference
 
@@ -421,8 +279,8 @@ def test_5_the_prior_mean_and_the_residual_term_are_both_load_bearing():
 def test_5_the_closed_form_posterior_matches_a_dense_reference(beta):
     """`posterior(beta)` is the posterior at noise R / beta, exactly.
 
-    The layer's own conditioning is already checked against a dense reference
-    by the joint Gaussian contract's obligation 14. What this pins is the toy
+    The distribution layer's own conditioning is already checked against a
+    dense reference in its own tests. What this pins is the toy
     model's composition: that it divides the *noise* by beta, and that it
     divides it at all. The mis-scaling this guards is the layer's signature
     silent bug; the next test measures how far off it would be.
@@ -432,27 +290,32 @@ def test_5_the_closed_form_posterior_matches_a_dense_reference(beta):
     mean_ref, cov_ref = _dense_posterior(problem, beta)
     scale = max(np.abs(mean_ref).max(), np.abs(cov_ref).max())
 
+    P = problem.parameter_dim
     assert isinstance(posterior, Gaussian)
-    assert isinstance(posterior.cov, PSDLowRank)
-    assert posterior.cov.F.shape == (problem.u_dim, problem.u_dim)
+    assert posterior.names == ("u",)
+    # The (P, k) factor the docstring promises, and no independent term: the
+    # prior's diagonal term is absorbed into the factor by the pushforward.
+    assert posterior.factor("u").shape == (P, P)
+    assert posterior.block_cov("u") is None
+    assert isinstance(posterior.cov("u"), PSDLowRank)
     np.testing.assert_allclose(
-        posterior.mean, mean_ref, rtol=0, atol=1e3 * EPS * scale
+        posterior.mean("u"), mean_ref, rtol=0, atol=1e3 * EPS * scale
     )
     np.testing.assert_allclose(
-        posterior.cov.to_dense(), cov_ref, rtol=0, atol=1e3 * EPS * scale
+        posterior.cov("u").to_dense(), cov_ref, rtol=0, atol=1e3 * EPS * scale
     )
 
 
 def test_5_beta_is_load_bearing_and_the_tolerance_would_catch_it():
     """The two betas must be far apart at the tolerance test 5 uses.
 
-    Without this, test 5 would pass an implementation that ignored ``level``
+    Without this, test 5 would pass an implementation that ignored ``beta``
     altogether, since its default agrees.
     """
     problem = toy.linear_gaussian()
     gap = np.abs(
-        np.asarray(problem.posterior(0.5).mean)
-        - np.asarray(problem.posterior(1.0).mean)
+        np.asarray(problem.posterior(0.5).mean("u"))
+        - np.asarray(problem.posterior(1.0).mean("u"))
     ).max()
     # Test 5 compares at roughly 1e3 * EPS * scale, about 2e-13 here, so a
     # gap of 0.01 is ten orders of magnitude above what it would accept.
@@ -476,30 +339,31 @@ def test_6_a_ladder_from_an_exact_moment_ensemble_reaches_the_closed_form(
     """
     problem = toy.linear_gaussian()
     J = 12
-    factor = np.asarray(problem.prior.cov.factor().to_dense())
-    members = jnp.asarray(
-        _exact_moment_ensemble(J, np.asarray(problem.prior.mean), factor)
+    factor = np.asarray(problem.prior.cov("u").factor().to_dense())
+    particles = jnp.asarray(
+        _exact_moment_ensemble(J, np.asarray(problem.prior.mean("u")), factor)
     )
-    state = EKIState(members, 0.0, 0, jax.random.key(0))
+    state = eki.EKIState(Ensemble(u=particles), key=jax.random.key(0))
 
-    result = run(
+    result = eki.run(
         state,
         problem.forward,
         problem.y,
         problem.noise_cov,
-        schedule=FixedSchedule(increments),
-        update=TransformUpdate(),
+        update_rule=kalman.SymmetricSquareRoot(),
+        schedule=eki.FixedSchedule(increments),
         max_steps=len(increments),
     )
 
     closed = problem.posterior()
-    ensemble = np.asarray(result.ensemble)
+    ensemble = np.asarray(result.ensemble["u"])
     anomalies = ensemble - ensemble.mean(axis=0)
-    closed_cov = np.asarray(closed.cov.to_dense())
-    scale = max(np.abs(np.asarray(closed.mean)).max(), np.abs(closed_cov).max())
+    closed_mean = np.asarray(closed.mean("u"))
+    closed_cov = np.asarray(closed.cov("u").to_dense())
+    scale = max(np.abs(closed_mean).max(), np.abs(closed_cov).max())
     np.testing.assert_allclose(
         ensemble.mean(axis=0),
-        np.asarray(closed.mean),
+        closed_mean,
         rtol=0,
         atol=1e3 * EPS * scale,
     )
@@ -518,7 +382,7 @@ def test_6_the_posterior_size_guard_raises_before_allocating():
     problem: a high-dimensional problem is invertible where its closed form
     cannot be written down.
     """
-    big = toy.linear_gaussian(u_dim=5000, v_dim=10)
+    big = toy.linear_gaussian(parameter_dim=5000, data_dim=10)
     with pytest.raises(ValueError, match=r"5000-by-5000"):
         big.posterior()
     assert big.forward(_ensemble(3, 5000)).shape == (3, 10)
@@ -542,9 +406,10 @@ def test_7_the_ladder_beats_a_single_unit_step_on_the_decay_problem(seed):
     Asserted over **every** observation seed the factory's docstring claims,
     not only the default: the claim is that the two answers differ reliably
     rather than coincidentally, and a single-seed test cannot distinguish
-    those. Measured over seeds 0 to 7: the rate gap is 0.104 to 0.228 and the
-    ladder is nearer the u_true by a factor of 2.70 to 41.1, so the thresholds
-    below carry margins of 1.3x, 1.35x and 1.4x on the worst seed.
+    those. Measured over seeds 0 to 7 with the symmetric square-root update:
+    the rate gap is 0.088 to 0.354 and the ladder is nearer u_true by a
+    factor of 2.70 to 26.8, so the thresholds below carry margins of 1.10x,
+    1.35x and 1.65x on the worst seed.
 
     An earlier version of this test asserted `ladder_error < one_step_error /
     3` and `< 0.05` at seed 0 alone, where they hold with room to spare; seeds
@@ -552,16 +417,23 @@ def test_7_the_ladder_beats_a_single_unit_step_on_the_decay_problem(seed):
     robustness was therefore false, and this is what makes it true.
     """
     problem = toy.exponential_decay(seed=seed)
-    state = EKIState.from_prior(jax.random.key(0), problem.prior, n_members=64)
+    state = eki.EKIState.from_prior(jax.random.key(0), problem.prior, n_particles=64)
     common = (problem.forward, problem.y, problem.noise_cov)
+    rule = kalman.SymmetricSquareRoot()
 
-    one_step = run(state, *common, schedule=FixedSchedule((1.0,)))
-    ladder = run(state, *common, schedule=AdaptiveESSSchedule())
+    one_step = eki.run(
+        state, *common, update_rule=rule, schedule=eki.FixedSchedule((1.0,))
+    )
+    ladder = eki.run(
+        state, *common, update_rule=rule, schedule=eki.AdaptiveESSSchedule()
+    )
 
     u_true = np.asarray(problem.u_true)
-    one_step_error = np.abs(np.asarray(one_step.mean) - u_true).max()
-    ladder_error = np.abs(np.asarray(ladder.mean) - u_true).max()
-    gap = np.abs(np.asarray(one_step.mean) - np.asarray(ladder.mean)).max()
+    one_step_mean = np.asarray(one_step.mean("u"))
+    ladder_mean = np.asarray(ladder.mean("u"))
+    one_step_error = np.abs(one_step_mean - u_true).max()
+    ladder_error = np.abs(ladder_mean - u_true).max()
+    gap = np.abs(one_step_mean - ladder_mean).max()
 
     assert ladder.n_completed_steps > 1
     assert gap > 0.08, gap
@@ -569,12 +441,12 @@ def test_7_the_ladder_beats_a_single_unit_step_on_the_decay_problem(seed):
     assert ladder_error < 0.08, ladder_error
 
 
-def test_8_the_restricted_model_fails_exactly_its_out_of_domain_members():
+def test_8_the_restricted_model_fails_exactly_its_out_of_domain_particles():
     """The failure is a deterministic function of the parameters, not a rate.
 
-    Which members fail is decided by the rate alone, and the whole row goes
+    Which particles fail is decided by the rate alone, and the whole row goes
     non-finite when it does — a partially finite row would be read as a valid
-    member with a huge misfit, which is the failure mode that stalls an
+    particle with a huge misfit, which is the failure mode that stalls an
     adaptive ladder instead of flagging itself.
     """
     problem = toy.restricted_decay()
@@ -585,7 +457,7 @@ def test_8_the_restricted_model_fails_exactly_its_out_of_domain_members():
 
     assert np.array_equal(finite_rows, expected)
     assert np.array_equal(np.isfinite(predictions).any(axis=1), expected), (
-        "a partially finite row would count as a valid member"
+        "a partially finite row would count as a valid particle"
     )
     assert 0 < (~finite_rows).sum() < 64, "the fixture must have both kinds"
 
@@ -605,32 +477,36 @@ def test_8_the_failure_fraction_is_monotone_in_the_rate_floor():
     for field in ("times", "y", "u_true"):
         assert _identical(getattr(plain, field), getattr(restricted, field))
     # "the same problem in every other respect" includes these two.
-    assert _identical(plain.prior.mean, restricted.prior.mean)
-    assert _identical(plain.prior.cov.diag(), restricted.prior.cov.diag())
+    assert _identical(plain.prior.mean("u"), restricted.prior.mean("u"))
+    assert _identical(plain.prior.cov("u").diag(), restricted.prior.cov("u").diag())
     assert _identical(plain.noise_cov.diag(), restricted.noise_cov.diag())
 
 
 def test_8_a_run_against_the_restricted_model_repairs_and_reports():
-    """Repair is the default, and a failed run is still a completed one.
+    """Raising is the default; with repair, a failed run is still a completed one.
 
     The numbers are pinned because the user guide prints them.
     """
     problem = toy.restricted_decay()
-    state = EKIState.from_prior(jax.random.key(0), problem.prior, n_members=64)
+    state = eki.EKIState.from_prior(jax.random.key(0), problem.prior, n_particles=64)
     common = (problem.forward, problem.y, problem.noise_cov)
+    options = dict(
+        update_rule=kalman.SymmetricSquareRoot(), schedule=eki.AdaptiveESSSchedule()
+    )
 
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        result = run(state, *common, schedule=AdaptiveESSSchedule())
+        result = eki.run(state, *common, on_failure="repair", **options)
 
-    assert result.min_n_valid == 55
-    assert np.array_equal(np.asarray(result.stacked.n_valid), [55, 64, 64, 64, 64])
-    assert [w for w in caught if "evaluations failed" in str(w.message)]
-    assert np.abs(np.asarray(result.mean) - np.asarray(problem.u_true)).max() < 0.05
+    assert result.min_n_valid == 51
+    assert np.array_equal(np.asarray(result.stacked.n_valid), [51, 63, 64, 64, 64])
+    assert [w for w in caught if "were not finite and were repaired" in str(w.message)]
+    mean = np.asarray(result.mean("u"))
+    assert np.abs(mean - np.asarray(problem.u_true)).max() < 0.05
 
-    prints_as(result.mean, [1.9801, 1.474])  # the page prints this too
-    with pytest.raises(EKIError, match="finite"):
-        run(state, *common, schedule=AdaptiveESSSchedule(), on_failure="raise")
+    prints_as(mean, [1.9796, 1.4739])  # the page prints this too
+    with pytest.raises(eki.EKIError, match="finite"):
+        eki.run(state, *common, **options)
 
 
 def test_9_the_high_dimensional_problem_is_confined_and_over_confident():
@@ -638,33 +514,42 @@ def test_9_the_high_dimensional_problem_is_confined_and_over_confident():
 
     Every iterate lies in the affine span of the initial ensemble, of
     dimension at most J - 1 — so at P = 2000 with J = 40 the run reports a
-    spread that the exact posterior contradicts by a factor of seventy, with
+    spread that the exact posterior contradicts by a factor of three, with
     nothing raised and no history field flagging it. Both halves are the
     lesson; the closed form is what makes the second half sayable.
+
+    The factor is a property of the problem rather than of this draw: over
+    initial-ensemble keys 0 to 19 it is between 3.1 and 3.9 (3.28 at key 0),
+    which the threshold below holds with a margin of 1.24x on the worst key.
+    It was once pinned at seventy, which was an artifact: the initial
+    ensemble's key aliased the key that drew `G`, so the particles were `G`'s
+    rows and spanned exactly the observed directions. The pinned spread
+    catches a return of that aliasing, which would move it to 0.014.
     """
-    problem = toy.linear_gaussian(u_dim=2000, v_dim=40)
-    state = EKIState.from_prior(jax.random.key(0), problem.prior, n_members=40)
-    result = run(
+    problem = toy.linear_gaussian(parameter_dim=2000, data_dim=40)
+    state = eki.EKIState.from_prior(jax.random.key(0), problem.prior, n_particles=40)
+    result = eki.run(
         state,
         problem.forward,
         problem.y,
         problem.noise_cov,
-        schedule=AdaptiveESSSchedule(),
+        update_rule=kalman.SymmetricSquareRoot(),
+        schedule=eki.AdaptiveESSSchedule(),
     )
 
-    initial = np.asarray(state.ensemble)
-    displacement = np.asarray(result.ensemble) - initial.mean(axis=0)
-    # The bound, not the realized value. The rank is 39 and the run takes 5
+    initial = np.asarray(state.ensemble["u"])
+    displacement = np.asarray(result.ensemble["u"]) - initial.mean(axis=0)
+    # The bound, not the realized value. The rank is 39 and the run takes 30
     # steps today, but pinning either makes an intentional schedule change
-    # look like a regression, and tutorial 5 hedges them for that reason.
-    assert np.linalg.matrix_rank(displacement) <= state.n_members - 1
-    assert result.status == "schedule_exhausted"
+    # look like a regression, and tutorial 7 hedges them for that reason.
+    assert np.linalg.matrix_rank(displacement) <= state.n_particles - 1
+    assert result.status == eki.SCHEDULE_EXHAUSTED
 
-    ensemble_sd = float(result.ensemble.std(axis=0, ddof=1).mean())
-    exact_sd = float((problem.posterior().cov.diag() ** 0.5).mean())
-    assert exact_sd / ensemble_sd > 20.0, (ensemble_sd, exact_sd)
+    ensemble_sd = float(result.ensemble["u"].std(axis=0, ddof=1).mean())
+    exact_sd = float((problem.posterior().cov("u").diag() ** 0.5).mean())
+    assert exact_sd / ensemble_sd > 2.5, (ensemble_sd, exact_sd)
     # The numbers the user guide prints, to the precision it prints them.
-    prints_as(ensemble_sd, 0.0140)
+    prints_as(ensemble_sd, 0.3022)
     prints_as(exact_sd, 0.9900)
 
 
@@ -686,7 +571,7 @@ def test_10_a_problem_is_reproducible_from_its_seed_and_varies_with_it():
 def test_10_the_factories_and_classes_validate_as_documented():
     problem = toy.linear_gaussian()
     with pytest.raises(ValueError, match="at least 1"):
-        toy.linear_gaussian(u_dim=0)
+        toy.linear_gaussian(parameter_dim=0)
     with pytest.raises(ValueError, match="must be positive"):
         toy.linear_gaussian(noise_std=0.0)
     with pytest.raises(ValueError, match="must be positive"):
@@ -701,11 +586,11 @@ def test_10_the_factories_and_classes_validate_as_documented():
     with pytest.raises(ValueError, match=r"LinearGaussian.y: expected an array"):
         dataclasses.replace(problem, y=jnp.zeros(3))
     with pytest.raises(ValueError, match="the prior has dimension"):
-        dataclasses.replace(problem, prior=toy.linear_gaussian(u_dim=5).prior)
+        dataclasses.replace(problem, prior=toy.linear_gaussian(parameter_dim=5).prior)
 
 
 def test_11_the_forward_model_pages_checker_block_runs():
-    """The `check_forward_model` block added to the forward-model guide.
+    """The `check_simulator` block of the forward-model guide.
 
     Its ``forward`` is that page's own opening example, so the call has to
     hold at the sizes the page states.
@@ -715,7 +600,7 @@ def test_11_the_forward_model_pages_checker_block_runs():
     def forward(ensemble):  # (J, 2) in
         return ensemble[:, 0:1] * jnp.exp(-ensemble[:, 1:2] * times)  # (J, 3) out
 
-    check_forward_model(forward, u_dim=2, v_dim=3)
+    check_simulator(forward, 2, 3)
 
 
 def test_11_the_toy_models_page_blocks_run():
@@ -725,33 +610,51 @@ def test_11_the_toy_models_page_blocks_run():
     Conformance obligation 26 of the EKI contract is the rule; the
     forward-model page's own example is the pattern.
     """
-    problem = toy.linear_gaussian(u_dim=4, v_dim=8)
-    state = EKIState.from_prior(jax.random.key(0), problem.prior, n_members=32)
-    result = run(
+    problem = toy.linear_gaussian(parameter_dim=4, data_dim=8)
+    state = eki.EKIState.from_prior(jax.random.key(0), problem.prior, n_particles=32)
+    result = eki.run(
         state,
         problem.forward,
         problem.y,
         problem.noise_cov,
-        schedule=AdaptiveESSSchedule(),
+        update_rule=kalman.SymmetricSquareRoot(),
+        schedule=eki.AdaptiveESSSchedule(),
     )
     exact = problem.posterior()
-    fitted = Gaussian.from_samples(result.ensemble)
+    fitted = result.ensemble.project()
 
-    prints_as(result.mean, [-1.3289, 1.362, 0.6229, 0.1361])
-    prints_as(exact.mean, [-1.3303, 1.3749, 0.6281, 0.1409])
+    prints_as(result.mean("u"), [-1.3258, 1.3698, 0.6372, 0.133])
+    prints_as(exact.mean("u"), [-1.3303, 1.3749, 0.6281, 0.1409])
     prints_as(problem.u_true, [-1.4009, 1.4321, 0.6248, 0.2005])
-    # The page says "within 0.013"; measured 0.01292, so the threshold is
+    # The page says "within 0.01"; measured 0.00909, so the threshold is
     # stated loosely enough that a change of a few percent does not fail it.
-    assert np.abs(np.asarray(result.mean) - np.asarray(exact.mean)).max() < 0.015
-    prints_as(fitted.cov.diag() ** 0.5, [0.0686, 0.1272, 0.1167, 0.0877])
-    prints_as(exact.cov.diag() ** 0.5, [0.0687, 0.1276, 0.1165, 0.0876])
+    assert np.abs(np.asarray(result.mean("u") - exact.mean("u"))).max() < 0.01
+    fitted_sd = fitted.cov("u").diag() ** 0.5
+    exact_sd = exact.cov("u").diag() ** 0.5
+    prints_as(fitted_sd, [0.0686, 0.1273, 0.1168, 0.0876])
+    prints_as(exact_sd, [0.0687, 0.1276, 0.1165, 0.0876])
+    # The page says "within 0.0004"; measured 0.00034.
+    assert np.abs(np.asarray(fitted_sd - exact_sd)).max() < 0.0004
+
+    # The three operations the page says `posterior()` is, as it writes them.
+    beta = 1.0
+    joint = problem.prior.pipe(
+        maps.pushforward, maps.Linear(problem.G), inputs="u", output="g"
+    )
+    by_hand = joint.add_noise(g=problem.noise_cov / beta).condition(g=problem.y)
+    assert _identical(by_hand.mean("u"), exact.mean("u"))
+    assert _identical(by_hand.cov("u").to_dense(), exact.cov("u").to_dense())
+
+    # The block that checks a model of your own; `forward` stands in for the
+    # page's `my_forward`, at sizes cheap enough for a test.
+    check_simulator(problem.forward, 4, 8)
 
     # The correlated-noise variant, whose R the page names.
     rng = np.random.default_rng(1)
     M = rng.normal(size=(8, 8))
     R = jnp.asarray(M @ M.T / 8 + 0.01 * np.eye(8))
     correlated = dataclasses.replace(problem, noise_cov=DensePSD(R))
-    prints_as(correlated.posterior().mean, [-1.4093, 0.8248, 0.4646, 0.0692])
+    prints_as(correlated.posterior().mean("u"), [-1.4093, 0.8248, 0.4646, 0.0692])
 
 
 def _dense_posterior_from_blocks(problem, beta: float):
@@ -762,10 +665,10 @@ def _dense_posterior_from_blocks(problem, beta: float):
     cannot express at all. This reference uses only the observation-side
     solve, so it holds at any prior rank.
     """
-    C0 = np.asarray(problem.prior.cov.to_dense())
+    C0 = np.asarray(problem.prior.cov("u").to_dense())
     G = np.asarray(problem.G.to_dense())
     R = np.asarray(problem.noise_cov.to_dense()) / beta
-    m0 = np.asarray(problem.prior.mean)
+    m0 = np.asarray(problem.prior.mean("u"))
     cross = C0 @ G.T
     solved = np.linalg.solve(
         G @ cross + R, np.column_stack([np.asarray(problem.y) - G @ m0, cross.T])
@@ -782,23 +685,29 @@ def test_5_a_singular_prior_covariance_works_and_narrows_the_factor(beta):
     ``(4, 4)``, and the answer matches the block form of the conditioning
     identity. Every problem `linear_gaussian` builds has a full-rank diagonal
     prior, so without this `k` and `P` are the same number everywhere and
-    `latent_dim = self.u_dim` would pass the whole suite.
+    `latent_dim = self.parameter_dim` would pass the whole suite.
     """
-    base = toy.linear_gaussian(u_dim=4, v_dim=6, seed=2)
+    base = toy.linear_gaussian(parameter_dim=4, data_dim=6, seed=2)
     factor = jnp.asarray(np.random.default_rng(4).normal(size=(4, 2)))
     problem = dataclasses.replace(
-        base, prior=Gaussian(jnp.asarray([0.5, -1.0, 0.25, 2.0]), PSDLowRank(factor))
+        base,
+        prior=Gaussian(
+            {"u": jnp.asarray([0.5, -1.0, 0.25, 2.0])},
+            block_covs={"u": PSDLowRank(factor)},
+        ),
     )
 
     posterior = problem.posterior(beta)
-    assert posterior.cov.F.shape == (4, 2), "the factor must narrow with the prior"
+    assert posterior.factor("u").shape == (4, 2), (
+        "the factor must narrow with the prior"
+    )
     mean_ref, cov_ref = _dense_posterior_from_blocks(problem, beta)
     scale = max(np.abs(mean_ref).max(), np.abs(cov_ref).max())
     np.testing.assert_allclose(
-        posterior.mean, mean_ref, rtol=0, atol=1e3 * EPS * scale
+        posterior.mean("u"), mean_ref, rtol=0, atol=1e3 * EPS * scale
     )
     np.testing.assert_allclose(
-        posterior.cov.to_dense(), cov_ref, rtol=0, atol=1e3 * EPS * scale
+        posterior.cov("u").to_dense(), cov_ref, rtol=0, atol=1e3 * EPS * scale
     )
 
 
@@ -808,8 +717,10 @@ def test_5_the_two_standard_deviations_reach_the_arrays_they_document():
     Nothing else in the suite calls either factory at a non-default scale, so
     hardcoding the defaults inside `linear_gaussian` passed every test.
     """
-    problem = toy.linear_gaussian(u_dim=3, v_dim=5, prior_std=4.0, noise_std=0.25)
-    np.testing.assert_allclose(problem.prior.cov.diag(), np.full(3, 16.0))
+    problem = toy.linear_gaussian(
+        parameter_dim=3, data_dim=5, prior_std=4.0, noise_std=0.25
+    )
+    np.testing.assert_allclose(problem.prior.cov("u").diag(), np.full(3, 16.0))
     np.testing.assert_allclose(problem.noise_cov.diag(), np.full(5, 0.0625))
     decay = toy.exponential_decay(noise_std=0.5)
     np.testing.assert_allclose(decay.noise_cov.diag(), np.full(12, 0.25))
@@ -817,7 +728,7 @@ def test_5_the_two_standard_deviations_reach_the_arrays_they_document():
 
 def test_5_the_prior_and_the_noise_must_support_what_the_posterior_needs():
     """The two documented `UnsupportedOpError` paths."""
-    problem = toy.linear_gaussian(u_dim=4, v_dim=6)
+    problem = toy.linear_gaussian(parameter_dim=4, data_dim=6)
     # PSDLowRank withholds `whiten`, which conditioning needs of the noise.
     low_rank = PSDLowRank(jnp.asarray(np.random.default_rng(0).normal(size=(6, 2))))
     with pytest.raises(UnsupportedOpError):
@@ -827,17 +738,17 @@ def test_5_the_prior_and_the_noise_must_support_what_the_posterior_needs():
 def test_6_the_decay_problems_answer_at_a_size_they_were_not_built_at():
     """`n_times` and `t_max` reach `times`, and the grid is half-open.
 
-    A constant `v_dim`, and a grid starting at 0 rather than at
+    A constant `data_dim`, and a grid starting at 0 rather than at
     `t_max / n_times`, both passed the suite: the second is a materially
     different problem, since at `t = 0` the prediction is the amplitude
     exactly and carries no information about the rate.
     """
     problem = toy.exponential_decay(n_times=5, t_max=10.0)
-    assert problem.v_dim == 5
+    assert problem.data_dim == 5
     np.testing.assert_allclose(problem.times, [2.0, 4.0, 6.0, 8.0, 10.0])
     assert problem.forward(_ensemble(3, 2)).shape == (3, 5)
     assert float(problem.times[0]) > 0.0, "t = 0 carries no rate information"
-    assert toy.restricted_decay(n_times=7).v_dim == 7
+    assert toy.restricted_decay(n_times=7).data_dim == 7
 
 
 def test_6_the_documented_true_parameters_are_what_the_factories_build():
@@ -858,11 +769,12 @@ def test_8_the_failure_fraction_matches_its_closed_form_under_the_prior():
     is 0, so the expected fraction is Phi(-1) = 0.1587.
     """
     problem = toy.restricted_decay()
-    members = problem.prior.sample(jax.random.key(7), 20_000)
-    predictions = np.asarray(problem.forward(members))
+    particles = problem.prior.sample(jax.random.key(7), 20_000)["u"]
+    predictions = np.asarray(problem.forward(particles))
     failed = (~np.isfinite(predictions).all(axis=1)).mean()
 
-    mean, sd = float(problem.prior.mean[1]), float(problem.prior.cov.diag()[1]) ** 0.5
+    mean = float(problem.prior.mean("u")[1])
+    sd = float(problem.prior.cov("u").diag()[1]) ** 0.5
     expected = 0.5 * math.erfc(-(problem.rate_floor - mean) / (sd * math.sqrt(2.0)))
     assert expected == pytest.approx(0.15866, abs=1e-5)
     # Three standard errors of a 20,000-sample binomial is about 0.008.
@@ -891,59 +803,16 @@ def test_8_the_domain_boundary_is_strict_in_both_places():
 # ===========================================================================
 
 
-def test_12_regression_the_checker_rejects_a_coupling_in_a_small_observable():
-    """A per-element tolerance, not one global scale set by the largest value.
-
-    With a single global scale, a model whose observables span orders of
-    magnitude could couple its small ones freely: a 50% coupling in an O(1)
-    component was invisible beside a component of size 1e8, while the same
-    coupling alone was caught with a margin of 6e5. That is the mixed-units
-    case every real forward model presents.
-    """
-
-    def mixed(ensemble):
-        big = 1e8 * ensemble[:, 0]
-        small = ensemble[:, 1] + 0.5 * jnp.mean(ensemble[:, 1])
-        return jnp.stack([big, small], axis=-1)
-
-    with pytest.raises(AssertionError, match="alongside different members"):
-        check_forward_model(mixed, u_dim=2, v_dim=2)
-
-
-def test_12_regression_the_checker_refuses_an_ensemble_too_small_to_check():
-    """At J < 3 both row-independence comparisons are vacuous, so it raises.
-
-    At J = 1 the out-of-bounds subset index is silently clamped by JAX, making
-    the comparison a tautology, and a definitively coupled model passed. At
-    J = 2 the subset is one member twice and a fair permutation is the
-    identity for most seeds.
-    """
-
-    def coupled(ensemble):
-        return ensemble - jnp.mean(ensemble, axis=0)
-
-    for n_members in (1, 2):
-        with pytest.raises(ValueError, match="n_members must be at least 3"):
-            check_forward_model(coupled, u_dim=2, v_dim=2, n_members=n_members)
-    with pytest.raises(AssertionError):
-        check_forward_model(coupled, u_dim=2, v_dim=2, n_members=3)
-
-
-@pytest.mark.parametrize("seed", range(12))
-def test_12_regression_the_permutation_is_never_the_identity(seed):
-    """A fair draw returns the identity often at small J, asserting nothing."""
-
-    def ordered(ensemble):
-        return jnp.cumsum(ensemble, axis=0)
-
-    with pytest.raises(AssertionError, match="permuting the members"):
-        check_forward_model(ordered, u_dim=2, v_dim=2, n_members=3, seed=seed)
+# The three `test_12_regression_*` tests of the checker -- a coupling in a
+# small observable, an ensemble too small to check, and a permutation that is
+# never the identity -- moved to `tests/test_maps.py` with the checker; the
+# maps contract's "Ported regression tests" table maps each to its new name.
 
 
 def test_12_regression_the_restricted_model_differentiates():
     """`jnp.where` evaluates both branches, so the discarded one must be safe.
 
-    Without clamping the rate inside the valid branch, a member below the
+    Without clamping the rate inside the valid branch, a particle below the
     floor computes `exp(-rate * t)` in the discarded branch, overflows to
     `inf`, and the derivative returns `nan` from `0 * inf`. The threshold is
     a rate of about -236 at the default `t_max` — but only about -29 in
@@ -967,11 +836,9 @@ def test_12_regression_the_size_guard_bounds_the_transform_too():
     dimensions through — 36,000 guarded elements while building a 9000-by-9000
     transform.
     """
-    problem = toy.linear_gaussian(u_dim=4, v_dim=3)
-    wide = Gaussian(
-        jnp.zeros(4),
-        PSDLowRank(jnp.asarray(np.random.default_rng(0).normal(size=(4, 9000)))),
-    )
+    problem = toy.linear_gaussian(parameter_dim=4, data_dim=3)
+    factor = jnp.asarray(np.random.default_rng(0).normal(size=(4, 9000)))
+    wide = Gaussian({"u": jnp.zeros(4)}, block_covs={"u": PSDLowRank(factor)})
     with pytest.raises(ValueError, match="9000-by-9000"):
         dataclasses.replace(problem, prior=wide).posterior()
 
@@ -979,9 +846,9 @@ def test_12_regression_the_size_guard_bounds_the_transform_too():
 def test_12_regression_every_problem_field_is_keyword_only():
     """`times` and `y` are both (N,) arrays, so a positional swap is silent.
 
-    The same hazard `enskit.gauss` makes its sample and factor fields
-    keyword-only for — and worse here, since `times` and `y` collide at every
-    N rather than only when P == N.
+    The same hazard for which `enskit.distribution.Gaussian` makes its factor
+    rows and independent terms keyword-only — and worse here, since `times`
+    and `y` collide at every N rather than only when two dimensions agree.
     """
     problem = toy.exponential_decay()
     with pytest.raises(TypeError, match="positional"):
@@ -998,9 +865,9 @@ def test_12_regression_every_problem_field_is_keyword_only():
         )
 
 
-@pytest.mark.parametrize("name, problem, u_dim, v_dim", PROBLEMS, ids=IDS)
+@pytest.mark.parametrize("name, problem, parameter_dim, data_dim", PROBLEMS, ids=IDS)
 def test_12_regression_a_problem_hashes_and_compares_without_raising(
-    name, problem, u_dim, v_dim
+    name, problem, parameter_dim, data_dim
 ):
     """Array fields make a synthesized `__eq__`/`__hash__` raise, not answer.
 
@@ -1065,21 +932,23 @@ def test_12_regression_the_factories_reject_infinite_scales():
     with pytest.raises(ValueError, match="positive and finite"):
         toy.exponential_decay(t_max=float("inf"))
     with pytest.raises(TypeError, match="must be an int"):
-        toy.linear_gaussian(u_dim=True)
+        toy.linear_gaussian(parameter_dim=True)
 
 
 def test_12_regression_no_layer_imports_the_toy_module():
     """The architectural rule `CLAUDE.md` calls permanent, in one line.
 
     The same holds for `enskit.testing`, which may import every layer.
-    `enskit.toy` depends on two layers, so an import in the other direction
+    `enskit.toy` depends on the layers, so an import in the other direction
     would make toy problems load-bearing for the library. Checked in a fresh
-    interpreter, since this one has already imported the module.
+    interpreter, since this one has already imported the module, and over
+    every layer: `enskit.linalg`, `enskit.distribution`, `enskit.maps`,
+    `enskit.kalman` and `enskit.algorithms` with its EKI driver.
     """
     program = (
-        "import sys; import enskit, enskit.linalg, enskit.distribution, enskit.maps, "
-        "enskit.kalman, enskit.gauss, enskit.eki, "
-        "enskit.eki.testing, enskit.linalg.testing; "
+        "import sys; import enskit, enskit.linalg, enskit.distribution, "
+        "enskit.maps, enskit.kalman, enskit.algorithms, enskit.algorithms.eki, "
+        "enskit.linalg.testing; "
         "print('enskit.toy' in sys.modules, 'enskit.testing' in sys.modules)"
     )
     result = subprocess.run(
@@ -1088,8 +957,8 @@ def test_12_regression_no_layer_imports_the_toy_module():
     assert result.stdout.strip() == "False False", result.stdout
 
 
-@pytest.mark.parametrize("name, problem, u_dim, v_dim", PROBLEMS, ids=IDS)
-def test_12_regression_a_problem_is_not_a_pytree(name, problem, u_dim, v_dim):
+@pytest.mark.parametrize("name, problem, parameter_dim, data_dim", PROBLEMS, ids=IDS)
+def test_12_regression_a_problem_is_not_a_pytree(name, problem, parameter_dim, data_dim):
     """Deliberately a plain frozen dataclass, so `jit` sees it as one leaf.
 
     Registering one would change what crosses a trace boundary, silently, and
@@ -1102,23 +971,24 @@ def test_12_regression_a_problem_is_not_a_pytree(name, problem, u_dim, v_dim):
     )
 
 
-@pytest.mark.parametrize("name, problem, u_dim, v_dim", PROBLEMS, ids=IDS)
+@pytest.mark.parametrize("name, problem, parameter_dim, data_dim", PROBLEMS, ids=IDS)
 def test_12_regression_forward_refuses_anything_but_one_ensemble(
-    name, problem, u_dim, v_dim
+    name, problem, parameter_dim, data_dim
 ):
     """A single parameter vector returned a plausible ``(N,)``, silently.
 
     The generalized-ufunc convention carried any leading rank through, so
-    ``problem.forward(problem.u_true)`` answered — and passing one member
+    ``problem.forward(problem.u_true)`` answered — and passing one particle
     instead of the ensemble is the mistake the forward-model guide calls the
     most common one. The two decay models raised an ``IndexError`` from
     inside JAX, naming neither the ensemble nor the model. All three now
     agree, and ``vmap`` over the method still works.
     """
-    with pytest.raises(ValueError, match=f"expected a .J, {u_dim}. ensemble"):
+    with pytest.raises(ValueError, match=f"expected a .J, {parameter_dim}. ensemble"):
         problem.forward(problem.u_true)
     with pytest.raises(ValueError, match="never with a further leading axis"):
-        problem.forward(jnp.zeros((2, 3, u_dim)))
+        problem.forward(jnp.zeros((2, 3, parameter_dim)))
     with pytest.raises(ValueError, match="expected a"):
-        problem.forward(jnp.zeros((3, u_dim + 1)))
-    assert jax.vmap(problem.forward)(jnp.zeros((2, 3, u_dim))).shape == (2, 3, v_dim)
+        problem.forward(jnp.zeros((3, parameter_dim + 1)))
+    mapped = jax.vmap(problem.forward)(jnp.zeros((2, 3, parameter_dim)))
+    assert mapped.shape == (2, 3, data_dim)

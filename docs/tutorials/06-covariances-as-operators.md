@@ -59,7 +59,7 @@ dimension is too large for a dense covariance to fit in memory.
 {doc}`../user-guide/quickstart` covers most of this material and was written as
 the package's entry point before this series existed. It is kept rather than
 absorbed, for two reasons: it is linked from the landing page, this series'
-index, {doc}`../user-guide/operators` and {doc}`../user-guide/conditioning`,
+index, {doc}`../user-guide/operators` and {doc}`../user-guide/distributions`,
 and it serves a reader who came for `enskit.linalg` alone — which is a real
 audience, since the operator layer is usable without the rest of the package.
 

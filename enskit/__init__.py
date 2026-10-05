@@ -6,12 +6,12 @@ forward evaluations. EnsKit provides the pieces that requires:
 
 - :mod:`enskit.linalg` — structured linear operators, so covariance structure is
   exploited rather than materialized as dense arrays.
-- :mod:`enskit.gauss` — joint Gaussian distributions and the conditioning
-  operations EKI is built from.
-- :mod:`enskit.eki` — the algorithms themselves: tempering schedules, ensemble
-  updates, inflation, and the driver loop.
-- :mod:`enskit.localize` — distance-based localization for high-dimensional
-  problems. *(planned)*
+- :mod:`enskit.distribution` — distributions over named blocks: ensembles,
+  Gaussians, and the conditional maps between them.
+- :mod:`enskit.maps` — pushing distributions through maps and simulators.
+- :mod:`enskit.kalman` — ensemble Kalman updates, inflation and relaxation.
+- :mod:`enskit.algorithms` — the algorithms themselves: the EKI driver, its
+  tempering schedules and stopping rules, and the policies drivers share.
 - :mod:`enskit.toy` — small calibration problems for this package's tests and
   documentation, not for production use.
 

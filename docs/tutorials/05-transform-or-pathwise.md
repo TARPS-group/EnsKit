@@ -43,12 +43,12 @@ how they produce the spread.
   and averaging over keys is available to it.
 - Both rules are two lines over `enskit.gauss`, and the reason the square-root
   reading is valid only for a centered ensemble is in
-  {doc}`../user-guide/conditioning` and {doc}`../joint-factor`. Link; do not
+  {doc}`../user-guide/distributions` and {doc}`../joint-factor`. Link; do not
   reproduce.
 
 ## Deliberately not covered
 
-- the derivation of either update → {doc}`../gaussian-contract`
+- the derivation of either update → {doc}`../distribution-contract`
 - why the square-root update lives on the sample container rather than the
   Gaussian → {doc}`../joint-factor`
 - writing an update rule of your own → {doc}`09-your-own-policy`

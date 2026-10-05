@@ -23,15 +23,16 @@ for the operator `AdditiveInflation` takes.
   $J$ bounds what a run can *represent*, not merely how accurately it
   estimates moments.
 - A demonstration rather than an assertion, and one that can be checked
-  against a closed form. `toy.linear_gaussian(u_dim=2000, v_dim=40)` with
-  $J = 40$ and `AdaptiveESSSchedule` to $\beta = 1$: the run reports
-  `schedule_exhausted` in a handful of steps, the answer occupies at most
-  $J - 1 = 39$ of 2000 directions — and does occupy 39 — and the ensemble's
-  average posterior standard deviation is **0.014** where
+  against a closed form. `toy.linear_gaussian(parameter_dim=2000,
+  data_dim=40)` with $J = 40$, `kalman.SymmetricSquareRoot()` and
+  `AdaptiveESSSchedule` to $\beta = 1$: the run reports `schedule_exhausted`
+  after about 30 steps, the answer occupies at most $J - 1 = 39$ of 2000
+  directions — and does occupy 39 — and the ensemble's average posterior
+  standard deviation is **0.302** where
   the exact posterior's — `problem.posterior()`, available because the model
   is linear — is **0.990**. Forty observations cannot constrain two thousand
   parameters; the run fits them with 39 degrees of freedom and collapses,
-  reporting a spread seventy times too small. Nothing raises, and no field of
+  reporting a spread about 3.3 times too small. Nothing raises, and no field of
   `HistoryRecord` flags it. **The failure is silent, and that is the lesson.**
   Comparing against the closed form is what makes it sayable rather than
   merely assertable, and it is worth showing that the same comparison is
@@ -53,13 +54,13 @@ for the operator `AdditiveInflation` takes.
 ## Deliberately not covered
 
 - degenerate ensembles as a numerical edge case — that is handled, and belongs
-  in {doc}`../user-guide/conditioning`
+  in {doc}`../user-guide/distributions`
 - implementing localization
 
 ## API exercised
 
 `MultiplicativeInflation`, `AdditiveInflation`, `HistoryRecord.spread`,
-`HistoryRecord.ess`, `EKIState.n_members`, `enskit.toy.linear_gaussian`,
+`HistoryRecord.ess`, `EKIState.n_particles`, `enskit.toy.linear_gaussian`,
 `enskit.toy.LinearGaussian.posterior`.
 
 ## Notes for the writer

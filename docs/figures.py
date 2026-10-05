@@ -78,17 +78,8 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 
 import enskit  # noqa: E402, F401  -- enables float64 before any array exists
-from enskit import toy  # noqa: E402
-from enskit.eki import (  # noqa: E402
-    AdaptiveESSSchedule,
-    DiscrepancyStop,
-    EKIState,
-    FixedSchedule,
-    PathwiseUpdate,
-    iterate,
-    misfits,
-    run,
-)
+from enskit import kalman, toy  # noqa: E402
+from enskit.algorithms import eki  # noqa: E402
 
 #: Where a build writes the figures, relative to this file.
 OUTPUT_DIR = Path(__file__).parent / "_generated" / "figures"
@@ -100,16 +91,18 @@ PROBLEM = toy.exponential_decay()
 #: the whole predictive spread; this names the entry the tests read off it.
 JOINT_INDEX = 3
 
-#: The update rule tutorial 1 runs with, and not the library default. On this
-#: problem the deterministic transform reproduces the target's covariance but
-#: leaves the ensemble strung along one direction, with the across-ridge
-#: variance carried by two or three members; the pathwise update draws a
-#: perturbation per member instead, which refills the cloud. The measurements
-#: are in ``HANDOFF.md``, and whether the package default should change is
-#: open. The page names the rule and defers the choice to
-#: :doc:`tutorials/05-transform-or-pathwise`. Tutorials 2 and 3 use the
-#: default.
-TUTORIAL_1_UPDATE = PathwiseUpdate()
+#: The update rule tutorial 1 runs with. On this problem the deterministic
+#: square-root update reproduces the target's covariance but leaves the
+#: ensemble strung along one direction, with the across-ridge variance carried
+#: by two or three particles; the Matheron update draws a perturbation per
+#: particle instead, which refills the cloud. The measurements are in
+#: ``HANDOFF.md``. The page names the rule and defers the choice to
+#: :doc:`tutorials/05-transform-or-pathwise`.
+TUTORIAL_1_UPDATE = kalman.Matheron()
+
+#: The update rule tutorials 2 and 3 run with: the deterministic square-root
+#: update. A run takes its update rule explicitly; there is no default.
+TUTORIAL_2_3_UPDATE = kalman.SymmetricSquareRoot()
 
 # Colors. Deliberately few, and the same meaning on every figure. The prior
 # and everything derived from it before conditioning is blue; the answer, once
@@ -142,7 +135,7 @@ def _style() -> None:
     Notes
     -----
     Two rules the earlier version of these figures broke. No grid, because a
-    grid competes with contour lines and with a scatter of members for the
+    grid competes with contour lines and with a scatter of particles for the
     same ink. And no legend inside the data area: labels are placed against
     the thing they name, or below the axes, so that a legend cannot cover the
     part of the plot the caption is talking about.
@@ -243,8 +236,8 @@ def _log_terms(grid):
     every level: the tempered log-density at ``beta`` is
     ``log_prior - beta * phi``, up to an additive constant.
     """
-    log_prior = PROBLEM.prior.log_density(grid)
-    phi = misfits(PROBLEM.y, PROBLEM.forward(grid), PROBLEM.noise_cov)
+    log_prior = PROBLEM.prior.log_density(u=grid)
+    phi = eki.misfits(PROBLEM.y, PROBLEM.forward(grid), PROBLEM.noise_cov)
     return np.asarray(log_prior), np.asarray(phi)
 
 
@@ -357,7 +350,7 @@ def _draw_contours(ax, beta, box, n=160, color=C_PRIOR_LIGHT, fill=True):
 def _cloud(ax, ensemble, color=C_ENSEMBLE, label=None, size=9.0, alpha=0.85):
     """Scatter an ensemble in the parameter plane, with a white halo.
 
-    The halo is what keeps 64 overlapping members legible as members rather
+    The halo is what keeps 64 overlapping particles legible as particles rather
     than as one blob.
     """
     e = np.asarray(ensemble)
@@ -404,12 +397,26 @@ def _mark_truth(ax, annotate=None):
         )
 
 
-def _prior_state(n_members, seed=0):
+def _prior_state(n_particles, seed=0):
     """An initial state drawn from the problem's prior."""
-    return EKIState.from_prior(jax.random.key(seed), PROBLEM.prior, n_members)
+    return eki.EKIState.from_prior(
+        jax.random.key(seed), PROBLEM.prior, n_particles=n_particles
+    )
 
 
-def _ladder(n_members, schedule, seed=0, update=None):
+def _run(state, update_rule=TUTORIAL_2_3_UPDATE, **kwargs):
+    """``eki.run`` on the tutorials' problem."""
+    return eki.run(
+        state,
+        PROBLEM.forward,
+        PROBLEM.y,
+        PROBLEM.noise_cov,
+        update_rule=update_rule,
+        **kwargs,
+    )
+
+
+def _ladder(n_particles, schedule, update_rule, seed=0):
     """Run a ladder, returning ``(levels, clouds)`` including the final one.
 
     Each cloud is paired with the level of the evaluation it came from, read
@@ -418,29 +425,21 @@ def _ladder(n_members, schedule, seed=0, update=None):
     covers — the final record's ``beta`` is the level *entering* the last
     step.
     """
-    state = _prior_state(n_members, seed)
-    extra = {} if update is None else {"update": update}
+    state = _prior_state(n_particles, seed)
     levels, clouds = [], []
-    for _, _, evaluation in iterate(
+    for _, _, evaluation in eki.iterate(
         state,
         PROBLEM.forward,
         PROBLEM.y,
         PROBLEM.noise_cov,
+        update_rule=update_rule,
         schedule=schedule,
-        **extra,
     ):
         levels.append(float(evaluation.beta))
-        clouds.append(np.asarray(evaluation.ensemble))
-    result = run(
-        state,
-        PROBLEM.forward,
-        PROBLEM.y,
-        PROBLEM.noise_cov,
-        schedule=schedule,
-        **extra,
-    )
+        clouds.append(np.asarray(evaluation.ensemble["u"]))
+    result = _run(state, update_rule, schedule=schedule)
     levels.append(float(result.beta))
-    clouds.append(np.asarray(result.ensemble))
+    clouds.append(np.asarray(result.ensemble["u"]))
     return levels, clouds
 
 
@@ -479,7 +478,7 @@ def _draw_data(ax, label="observations"):
 
 
 def _draw_curves(ax, predictions, color, alpha=0.3):
-    """One line per member, in prediction space. Returns the clipped count."""
+    """One line per particle, in prediction space. Returns the clipped count."""
     times = np.asarray(PROBLEM.times)
     predictions = np.asarray(predictions)
     for row in predictions:
@@ -653,16 +652,16 @@ def prior_predictive():
 
     Two panels with the forward model as an arrow between them: the prior over
     the two parameters with an ensemble drawn from it, and the predictions
-    those members produce, against the observation.
+    those particles produce, against the observation.
     """
     _style()
-    n_members = 64
-    state = _prior_state(n_members)
-    ensemble = np.asarray(state.ensemble)
-    predictions = np.asarray(PROBLEM.forward(state.ensemble))
+    n_particles = 64
+    state = _prior_state(n_particles)
+    ensemble = np.asarray(state.ensemble["u"])
+    predictions = np.asarray(PROBLEM.forward(state.ensemble["u"]))
 
-    prior_mean = np.asarray(PROBLEM.prior.mean)
-    prior_sd = np.sqrt(np.asarray(PROBLEM.prior.cov.diag()))
+    prior_mean = np.asarray(PROBLEM.prior.mean("u"))
+    prior_sd = np.sqrt(np.asarray(PROBLEM.prior.cov("u").diag()))
     fig, clipped = _two_space_figure(
         ensemble=ensemble,
         predictions=predictions,
@@ -683,7 +682,7 @@ def prior_predictive():
     )
 
     return fig, {
-        "n_members": n_members,
+        "n_particles": n_particles,
         "prior_curves_leaving_panel": clipped,
         "prior_negative_rates": int((ensemble[:, 1] <= 0.0).sum()),
         "prior_predictive_sd": predictions.std(axis=0, ddof=1),
@@ -698,24 +697,21 @@ def one_step():
     The direct counterpart of :func:`prior_predictive`: the same layout, the
     same axes in prediction space, with the ensemble the step produced in
     place of the prior's. The contours are the *true* posterior, so how well
-    the members track it is the thing the figure shows.
+    the particles track it is the thing the figure shows.
     """
     _style()
-    n_members = 64
-    state = _prior_state(n_members)
-    updated = run(
+    n_particles = 64
+    state = _prior_state(n_particles)
+    updated = _run(
         state,
-        PROBLEM.forward,
-        PROBLEM.y,
-        PROBLEM.noise_cov,
-        schedule=FixedSchedule.constant(1.0, n_steps=1),
-        update=TUTORIAL_1_UPDATE,
+        TUTORIAL_1_UPDATE,
+        schedule=eki.FixedSchedule.constant(1.0, n_steps=1),
     )
-    ensemble = np.asarray(updated.ensemble)
-    predictions = np.asarray(PROBLEM.forward(updated.ensemble))
+    ensemble = np.asarray(updated.ensemble["u"])
+    predictions = np.asarray(PROBLEM.forward(updated.ensemble["u"]))
 
     # The panel is sized to hold the ensemble, not the posterior. Sizing it to
-    # the posterior would put most of the members outside it: after one step
+    # the posterior would put most of the particles outside it: after one step
     # the ensemble is about twenty times wider in the rate than the target.
     posterior_mean, posterior_sd = _tempered_moments(1.0)
     fig, clipped = _two_space_figure(
@@ -737,8 +733,8 @@ def one_step():
     )
 
     return fig, {
-        "n_members": n_members,
-        "one_step_mean": np.asarray(updated.mean),
+        "n_particles": n_particles,
+        "one_step_mean": np.asarray(updated.mean("u")),
         "one_step_sd": _sd(ensemble),
         "one_step_predictive_sd": predictions.std(axis=0, ddof=1),
         "one_step_curves_leaving_panel": clipped,
@@ -821,14 +817,14 @@ def bridge_tracked():
     """The bridge again, with the ensemble the run actually produced on it.
 
     One panel per level of the default adaptive ladder, exact contours in the
-    reference gray with that level's members over them. The question the
+    reference gray with that level's particles over them. The question the
     figure answers is how well the ensemble tracks the distribution it is
     meant to represent, so the panels are scaled to hold both.
     """
     _style()
-    n_members = 64
+    n_particles = 64
     levels, clouds = _ladder(
-        n_members, AdaptiveESSSchedule(), update=TUTORIAL_1_UPDATE
+        n_particles, eki.AdaptiveESSSchedule(), TUTORIAL_1_UPDATE
     )
     moments = [_tempered_moments(beta) for beta in levels]
 
@@ -902,13 +898,13 @@ def bridge_tracked():
     fig.supxlabel("amplitude $a$", fontsize=9.0)
     fig.supylabel(r"decay rate $\lambda$", fontsize=9.0)
     return fig, {
-        "n_members": n_members,
+        "n_particles": n_particles,
         "levels": np.asarray(levels),
         "cloud_sd": np.asarray([c.std(axis=0, ddof=1) for c in clouds]),
         "exact_sd": np.asarray([sd for _, sd in moments]),
         "cloud_mean": np.asarray([c.mean(axis=0) for c in clouds]),
         "exact_mean": np.asarray([mean for mean, _ in moments]),
-        "members_outside_panel": np.asarray(outside),
+        "particles_outside_panel": np.asarray(outside),
     }
 
 
@@ -919,18 +915,11 @@ def answer():
     that the whole ladder can be compared against the single step directly.
     """
     _style()
-    n_members = 64
-    state = _prior_state(n_members)
-    result = run(
-        state,
-        PROBLEM.forward,
-        PROBLEM.y,
-        PROBLEM.noise_cov,
-        schedule=AdaptiveESSSchedule(),
-        update=TUTORIAL_1_UPDATE,
-    )
-    ensemble = np.asarray(result.ensemble)
-    predictions = np.asarray(PROBLEM.forward(result.ensemble))
+    n_particles = 64
+    state = _prior_state(n_particles)
+    result = _run(state, TUTORIAL_1_UPDATE, schedule=eki.AdaptiveESSSchedule())
+    ensemble = np.asarray(result.ensemble["u"])
+    predictions = np.asarray(PROBLEM.forward(result.ensemble["u"]))
 
     posterior_mean, posterior_sd = _tempered_moments(1.0)
     fig, clipped = _two_space_figure(
@@ -952,10 +941,10 @@ def answer():
     )
 
     return fig, {
-        "n_members": n_members,
+        "n_particles": n_particles,
         "status": result.status,
         "n_evaluations": result.n_evaluations,
-        "mean": np.asarray(result.mean),
+        "mean": np.asarray(result.mean("u")),
         "sd": _sd(ensemble),
         "predictive_sd": predictions.std(axis=0, ddof=1),
         "curves_leaving_panel": clipped,
@@ -972,16 +961,14 @@ def answer():
 def trajectories():
     """Misfit, effective sample size and spread, for two ladders."""
     _style()
-    n_members = 64
-    state = _prior_state(n_members)
+    n_particles = 64
+    state = _prior_state(n_particles)
     runs = {}
     for label, schedule in (
-        ("adaptive", AdaptiveESSSchedule()),
-        ("three equal steps", FixedSchedule.uniform(3)),
+        ("adaptive", eki.AdaptiveESSSchedule()),
+        ("three equal steps", eki.FixedSchedule.uniform(3)),
     ):
-        runs[label] = run(
-            state, PROBLEM.forward, PROBLEM.y, PROBLEM.noise_cov, schedule=schedule
-        )
+        runs[label] = _run(state, schedule=schedule)
 
     fig, axes = plt.subplots(1, 3, figsize=(7.4, 2.7))
     styles = {
@@ -1012,8 +999,8 @@ def trajectories():
     # The two reference levels are labeled where they are drawn: one legend
     # covering both would have to give them the same entry, and they mean
     # different things in different panels.
-    _reference_line(axes[0], PROBLEM.v_dim / 2, "$N/2$")
-    _reference_line(axes[1], n_members / 2, "$J/2$")
+    _reference_line(axes[0], PROBLEM.data_dim / 2, "$N/2$")
+    _reference_line(axes[1], n_particles / 2, "$J/2$")
 
     fig.tight_layout()
     _figure_legend(
@@ -1027,8 +1014,8 @@ def trajectories():
         y=-0.08,
     )
     return fig, {
-        "n_members": n_members,
-        "noise_floor": PROBLEM.v_dim / 2,
+        "n_particles": n_particles,
+        "noise_floor": PROBLEM.data_dim / 2,
         **{
             f"{label.replace(' ', '_')}_{field}": np.asarray(
                 getattr(result.stacked, field)
@@ -1037,7 +1024,7 @@ def trajectories():
             for field in ("beta", "ess", "misfit_mean", "spread")
         },
         **{
-            f"{label.replace(' ', '_')}_sd": _sd(result.ensemble)
+            f"{label.replace(' ', '_')}_sd": _sd(result.ensemble["u"])
             for label, result in runs.items()
         },
     }
@@ -1051,30 +1038,15 @@ def trajectories():
 def two_forms():
     """The two destinations: a posterior ensemble, and a collapsing fit."""
     _style()
-    n_members = 64
-    state = _prior_state(n_members)
-    sampled = run(
+    n_particles = 64
+    state = _prior_state(n_particles)
+    sampled = _run(state, schedule=eki.AdaptiveESSSchedule())
+    stopped = _run(
         state,
-        PROBLEM.forward,
-        PROBLEM.y,
-        PROBLEM.noise_cov,
-        schedule=AdaptiveESSSchedule(),
+        schedule=eki.FixedSchedule.constant(1.0, n_steps=200),
+        stop=eki.DiscrepancyStop(tau=1.0),
     )
-    stopped = run(
-        state,
-        PROBLEM.forward,
-        PROBLEM.y,
-        PROBLEM.noise_cov,
-        schedule=FixedSchedule.constant(1.0, n_steps=200),
-        stop=DiscrepancyStop(tau=1.0),
-    )
-    unstopped = run(
-        state,
-        PROBLEM.forward,
-        PROBLEM.y,
-        PROBLEM.noise_cov,
-        schedule=FixedSchedule.constant(1.0, n_steps=30),
-    )
+    unstopped = _run(state, schedule=eki.FixedSchedule.constant(1.0, n_steps=30))
 
     fig, axes = plt.subplots(1, 2, figsize=(7.0, 3.1))
 
@@ -1084,9 +1056,9 @@ def two_forms():
     # The target density is drawn in the reference gray rather than in either
     # form's own color: it is what both are being measured against.
     _draw_contours(ax, 1.0, box, color=C_TARGET)
-    _cloud(ax, sampled.ensemble, C_ENSEMBLE)
-    _cloud(ax, stopped.ensemble, C_ALT)
-    _cloud(ax, unstopped.ensemble, C_COLLAPSED, size=5.0)
+    _cloud(ax, sampled.ensemble["u"], C_ENSEMBLE)
+    _cloud(ax, stopped.ensemble["u"], C_ALT)
+    _cloud(ax, unstopped.ensemble["u"], C_COLLAPSED, size=5.0)
     _mark_truth(ax)
     ax.set_xlabel("amplitude $a$")
     ax.set_ylabel(r"decay rate $\lambda$")
@@ -1116,7 +1088,7 @@ def two_forms():
         label="optimization form",
     )
     ax.axhline(
-        float(np.mean(_sd(sampled.ensemble))),
+        float(np.mean(_sd(sampled.ensemble["u"]))),
         color=C_ENSEMBLE,
         lw=1.2,
         ls="--",
@@ -1137,16 +1109,16 @@ def two_forms():
 
     fig.tight_layout()
     return fig, {
-        "n_members": n_members,
-        "sampled_mean": np.asarray(sampled.mean),
-        "sampled_sd": _sd(sampled.ensemble),
+        "n_particles": n_particles,
+        "sampled_mean": np.asarray(sampled.mean("u")),
+        "sampled_sd": _sd(sampled.ensemble["u"]),
         "stopped_status": stopped.status,
         "stopped_beta": float(stopped.beta),
         "stopped_evaluations": stopped.n_evaluations,
-        "stopped_mean": np.asarray(stopped.mean),
-        "stopped_sd": _sd(stopped.ensemble),
+        "stopped_mean": np.asarray(stopped.mean("u")),
+        "stopped_sd": _sd(stopped.ensemble["u"]),
         "unstopped_beta": float(unstopped.beta),
-        "unstopped_sd": _sd(unstopped.ensemble),
+        "unstopped_sd": _sd(unstopped.ensemble["u"]),
         "unstopped_misfit": np.asarray(unstopped.stacked.misfit_mean),
         "reference_mean": post_mean,
         "reference_sd": post_sd,

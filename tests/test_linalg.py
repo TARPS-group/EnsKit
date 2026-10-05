@@ -382,9 +382,10 @@ def test_psd_low_rank_factor_finiteness_is_a_debug_check():
     """A non-finite factor makes every operation nan with no exception, the
     same hazard DensePSD guards its own factor against.
 
-    It matters most for the factors enskit.gauss returns from conditioning,
-    where a non-finite one means the conditioning itself failed — so the check
-    turns a nan posterior into an exception at the point it was produced.
+    It matters most for the factors the distribution layer returns from
+    conditioning, where a non-finite one means the conditioning itself
+    failed — so the check turns a nan posterior into an exception at the
+    point it was produced.
     """
     nan_factor = jnp.full((4, 2), jnp.nan)
 
@@ -1296,16 +1297,19 @@ def test_dense_fallback_validates_max_n():
 
 
 def test_dense_fallback_reaches_operations_called_through_other_layers():
-    """The capability gates the gauss layer applies before an operation see
-    the fallback too, so a covariance with no cheap whitener works inside it."""
-    from enskit.gauss import Gaussian
+    """The capability gates the distribution layer applies before an operation
+    see the fallback too, so a covariance with no cheap whitener works inside it.
+
+    Ported from the retired ``enskit.gauss`` layer's ``Gaussian``.
+    """
+    from enskit.distribution import Gaussian
 
     op = _wide_low_rank()
-    gaussian = Gaussian(jnp.zeros(4), op)
+    gaussian = Gaussian({"x": jnp.zeros(4)}, block_covs={"x": op})
     x = jnp.asarray(RNG.normal(size=(4,)))
     with pytest.raises(UnsupportedOpError):
-        gaussian.log_density(x)
+        gaussian.log_density(x=x)
     with dense_fallback(max_n=16), pytest.warns(UserWarning):
-        got = gaussian.log_density(x)
-    want = Gaussian(jnp.zeros(4), densify(op)).log_density(x)
+        got = gaussian.log_density(x=x)
+    want = Gaussian({"x": jnp.zeros(4)}, block_covs={"x": densify(op)}).log_density(x=x)
     np.testing.assert_allclose(got, want, rtol=1e-12)

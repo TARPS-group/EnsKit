@@ -81,8 +81,8 @@ the tempered distribution can be drawn. It has no closed form, but in two
 dimensions the unnormalized density on a grid is all a contour plot needs:
 
 ```python
-log_prior = problem.prior.log_density(grid)                          # (n*n,)
-phi = misfits(problem.y, problem.forward(grid), problem.noise_cov)   # (n*n,)
+log_prior = problem.prior.log_density(u=grid)                           # (n*n,)
+phi = eki.misfits(problem.y, problem.forward(grid), problem.noise_cov)  # (n*n,)
 log_pi = log_prior - beta * phi          # the tempered density, up to a constant
 ```
 

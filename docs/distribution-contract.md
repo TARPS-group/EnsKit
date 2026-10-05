@@ -23,9 +23,8 @@ contract was, and PR 4 of the redesign plan implemented it in
 `enskit.distribution`. Where implementing it showed the page to be wrong or
 incomplete, the page was corrected in the same pull request; each change is
 listed in {ref}`dist-implementation-changes`. The page absorbs the joint Gaussian
-contract ({doc}`gaussian-contract`), which keeps governing `enskit.gauss`
-until that module is deleted in PR 7. Where the two pages disagree, this one
-describes the new layer and the old one describes the old module.
+contract that governed the retired `enskit.gauss`, which PR 7 deleted with
+that module; its regression tests are ported in {ref}`dist-conformance`.
 
 Where this page departs from the design's stubs (`docs/redesign/stubs/`),
 it says so in {ref}`dist-departures`, and this page wins.

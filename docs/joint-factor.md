@@ -1,16 +1,30 @@
 # The joint factor
 
-`enskit.gauss` represents a joint Gaussian by a single factor of its
+:::{admonition} Status: written for the retired `enskit.gauss`
+:class: note
+
+This page derives the factor representation for the two-block joint
+Gaussian of `enskit.gauss`, the layer PR 7 retired. The mathematics carries
+over unchanged to {class}`~enskit.distribution.Gaussian`, whose shared factor
+is this page's joint factor cut into any number of named blocks; the
+correspondence is `GaussianJoint` to a two-block `Gaussian`,
+`EmpiricalJoint` to an `Ensemble` and its projection, the pathwise map to
+{class}`~enskit.distribution.MatheronMap`, and `transform_update` to
+{class}`~enskit.distribution.SquareRootMap`. {doc}`distribution-contract`
+states the rules normatively; the class names below are the old ones.
+:::
+
+`enskit.gauss` represented a joint Gaussian by a single factor of its
 covariance, cut into two row blocks. This page derives what follows from that
 choice: how conditioning becomes one matrix multiplication, why a set of
 samples and a factor of width $J$ are the same object, and where each
 operation therefore belongs.
 
-{doc}`gaussian-contract` states the resulting rules normatively and is what an
-implementation must satisfy; this page is the reasoning behind them, and
-{doc}`design` records the layer-level decisions above it. Every measurement
-quoted below was taken in float64 against a dense reference; they are
-collected in [Measurements](#measurements).
+{doc}`distribution-contract` states the resulting rules normatively and is
+what an implementation must satisfy; this page is the reasoning behind them,
+and {doc}`design` records the layer-level decisions above it. Every
+measurement quoted below was taken in float64 against a dense reference; they
+are collected in [Measurements](#measurements).
 
 ## Notation
 
@@ -433,7 +447,7 @@ $\varepsilon = 2.22\times10^{-16}$.
 | block recovery of $F_u$, wide factor ($k > N$) | ill-posed; recovered $F_u$ off by $1.4\times10^{9}$ |
 | block recovery of $F_u$, Gram route at $\kappa(F_v) = 1.4\times10^{8}$ | $\kappa(F_v^\top F_v) = 2\times10^{16}$; $F_u$ to $1.8\times10^{-8}$, against $4.7\times10^{-8}$ for an SVD pseudo-inverse |
 
-All but the last two are exercised by `tests/test_gauss.py` — most as
-conformance obligations of {doc}`gaussian-contract`, the sample-set row as a
-targeted regression test. The two block-recovery rows describe the rejected
+All but the last two were exercised by the retired `tests/test_gauss.py`,
+whose tests are ported to `tests/test_distribution.py` ({doc}`distribution-contract`,
+*Conformance*); the sample-set row is a targeted regression test there. The two block-recovery rows describe the rejected
 design, so they are recorded here rather than tested.

@@ -56,8 +56,8 @@ the posterior covariance is $(F_uT)(F_uT)^\top$ for
 $T = (I + SS^\top)^{-1/2}$ from the same decomposition. A set of $J$ samples
 is the case $F = A^\top/\sqrt{J-1}$ for the anomaly matrix $A$.
 {doc}`joint-factor` derives all of this and explains why the representation is
-a factor rather than three covariance blocks; {doc}`gaussian-contract` states
-the rules normatively.
+a factor rather than three covariance blocks; {doc}`distribution-contract`
+states the rules normatively.
 
 This is the form EnsKit implements, in preference to the algebraically
 equivalent Woodbury identity applied to the normal equations. Four reasons:
@@ -79,7 +79,7 @@ equivalent Woodbury identity applied to the normal equations. Four reasons:
   multiplication of the factor by it. The identity completion matters: the
   naive $U(I+\Sigma^2)^{-1/2}U^\top$ omits the identity on the orthogonal
   complement and is wrong whenever the thin SVD's rank is below $k$ — see
-  the {doc}`gaussian-contract` for the normative form.
+  the {doc}`distribution-contract` for the normative form.
 - **The update stays in the factor's span**, $u_j \mapsto u_j + F_u w_j$ with
   $w_j \in \mathbb{R}^k$, so no matrix of parameter or observation dimension
   is ever formed.
@@ -93,8 +93,9 @@ its own $O(N^2k)$.
 
 ### The algorithm space
 
-A survey, not a dispatch plan: `enskit.gauss` routes everything through the
-whitened SVD and selects nothing at runtime ({doc}`gaussian-contract`).
+A survey, not a dispatch plan: `enskit.distribution` routes every
+conditioning through the whitened SVD and selects nothing at runtime
+({doc}`distribution-contract`).
 
 | regime | method | cost |
 | --- | --- | --- |
