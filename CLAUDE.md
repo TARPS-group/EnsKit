@@ -17,7 +17,7 @@ clarity and correctness over cleverness, and keep the public surface small.
 and the plan, a sequence of pull requests numbered 0 to 12; the full design
 document is `docs/redesign/design.html`, and `docs/redesign/stubs/` holds the
 docstrings each layer starts from. PR 1 renamed the package from `pyeki`;
-the GitHub repository is `TARPS-group/pyEKI` until it is renamed. PR 7
+the GitHub repository is now `TARPS-group/EnsKit`. PR 7
 deleted the old `gauss` and `eki` modules; every layer of the list below now
 exists, and each has its normative contract in `docs/`.
 

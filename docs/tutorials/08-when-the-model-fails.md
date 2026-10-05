@@ -21,29 +21,23 @@ required.
 - Why this is the normal case, not the exceptional one: parameter draws that
   leave a model's valid domain are routine early in a ladder, when the ensemble
   still has prior spread.
-- What the library does by default. `on_failure='repair'` replaces a
-  non-finite member's prediction with the valid center, and the run continues.
-  Show the actual per-step message and the summary `UserWarning`, so the reader
-  recognizes them:
-
-  ```
-  step 0: 63 of 64 particles' predictions were finite; the rest were repaired
-          to the valid center
-  UserWarning: eki.run: some particles' predictions were not finite and were
-  repaired; the worst step had 63 of 64 valid. Each such step conditioned on a
-  covariance damped by (n_valid - 1) / (J - 1). Inspect result.stacked.n_valid.
-  ```
-
+- What the library does by default: `on_failure="raise"` raises `EKIError`
+  at the first step with a non-finite prediction. `on_failure="repair"` replaces a non-finite particle's prediction
+  with the valid center, and the run continues. Show the actual messages,
+  captured from a run when writing, so the reader recognizes them; the
+  per-step one reads `step 0: 63 of 64 particles' predictions were finite;
+  the rest were repaired to the valid center`.
 - The cost of repair, stated honestly: the step conditions on a covariance
   damped by $(n_{\text{valid}} - 1)/(J - 1)$. Repair is a departure from the
-  ladder, and it is opt-in by being the default.
-- The `on_failure` alternatives, and when to prefer raising over repairing.
+  ladder, and it is opted into.
+- When to prefer raising over repairing.
 - `result.min_n_valid` and `result.stacked.n_valid` as the audit trail; a run
   with a persistently low `n_valid` is not a run to trust.
 - Making a wrapper that catches subprocess failures and returns `nan` rows,
   which is the adapter most real models need.
 - `EKIError`, and that it carries the state and the history — so a failed run is
-  still inspectable and still resumable.
+  still inspectable and still resumable. `enkf.EnKFError` does the same for a
+  filter, with `start_time=` to resume; the filter has no repair.
 - Checkpointing and resumption: `EKIState` is a pytree, and **`step` is
   cumulative across runs**, so chaining a fresh ladder onto a finished state
   returns unchanged with nothing raised. Use `EKIState.restart()`. This trap
@@ -53,15 +47,15 @@ required.
 
 ## Deliberately not covered
 
-- the validity mask deferral, i.e. that only `n_valid` is carried and not the
-  per-member boolean mask — a design note, not a user concern
+- dropping failed particles by reweighting and resampling, outside a driver →
+  {doc}`../user-guide/updates`
 - retry and caching strategies for expensive models, which are caller concerns
 
 ## API exercised
 
 `run(..., on_failure=...)`, `iterate`, `EKIError`, `EKIState.restart`,
 `EKIResult.min_n_valid`, `HistoryRecord.n_valid`,
-`enskit.eki.repair_failed_particles`.
+`eki.repair_failed_particles`.
 
 The wrapper obligation itself — catch your own exceptions, return a non-finite
 row — is specified in {doc}`../user-guide/writing-a-forward-model`, whose
@@ -70,7 +64,8 @@ should exercise it, not restate it.
 
 ## Notes for the writer
 
-The user guide's "Failed members", "Driving the loop yourself" and
+The user guide's "Failed particles", "The two phases, and driving the loop
+yourself" and
 "Checkpointing, resumption, and errors" sections are the reference versions.
 This page should be a narrative built on one flaky model, linking there for the
 full rules.

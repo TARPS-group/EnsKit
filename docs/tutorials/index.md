@@ -13,10 +13,9 @@ tutorial can be followed with nothing of your own to hand and the same problem
 can be carried from one page to the next. Those models are for learning and
 for tests, not for production.
 
-If you already know what you are looking for, the {doc}`../user-guide/quickstart`
-and the rest of the user guide are organized by question rather than by
-sequence, and the three contracts in the reference section specify behavior
-exactly.
+If you already know what you are looking for, the {doc}`../user-guide/index`
+is organized by level of abstraction rather than by sequence, and the
+contracts in the reference section specify behavior exactly.
 
 ```{toctree}
 :maxdepth: 1
@@ -49,10 +48,10 @@ exactly.
 :::{admonition} Being written
 :class: note
 
-{doc}`01-first-inversion` is written. Tutorials 2 and 3 are **unreviewed
-drafts** — their prose and numbers are complete and tested, but they have not
-been through a revision pass and they run the library's default update rule
-rather than the pathwise one tutorial 1 selects. Tutorials 4 to 9 are stubs:
-each states its scope, its prerequisites and the API it exercises, so the
-series can be written in order without re-deciding the structure.
+Tutorials 1 to 3 are written, and every number they state is checked by a
+test. Tutorials 4 to 9 are stubs: each states its scope, its prerequisites
+and the API it exercises, so the series can be written in order without
+re-deciding the structure. Until they are, the {doc}`../user-guide/index` and
+the {doc}`../examples/index` cover the same ground as reference and as worked
+problems.
 :::

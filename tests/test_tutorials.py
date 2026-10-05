@@ -26,11 +26,10 @@ The identity behind the ``center_misfit`` gap is *not* re-tested here — it is
 ``tests/test_eki.py::test_11_the_center_misfit_differs_from_the_mean_by_exactly_the_spread_term``.
 This file pins only the numbers tutorial 2 prints.
 
-Section 5 holds the assertions whose page claims no longer hold since PR 7
-changed the prior draw (``EKIState.from_prior`` now splits its key, and
-``Gaussian.sample`` splits it again). Each is a strict ``xfail`` naming the
-sentence it pins, so the claim is neither deleted nor silently passing, and
-the test fails once the page or the draw makes it true again.
+Section 5 pins the sentences PR 11 wrote in place of four claims that
+stopped holding when PR 7 changed the prior draw (``EKIState.from_prior`` now
+splits its key, and ``Gaussian.sample`` splits it again). Each test quotes
+the sentence it pins.
 """
 from __future__ import annotations
 
@@ -501,14 +500,54 @@ def test_2_tutorial_3s_comparison_table():
 
 
 def test_3_every_figure_builds(tmp_path):
-    """Every figure is written, and is a plausible PNG rather than an empty file."""
+    """Every figure is written in both themes, each a plausible PNG.
+
+    The dark variant must differ from the light one, and the build must leave
+    the module in the light theme, which is the one a figure function called
+    directly, as the tests below call them, is drawn in.
+    """
     plotted = figures.build(tmp_path)
     assert set(plotted) == set(figures.FIGURES)
     for name in figures.FIGURES:
-        path = tmp_path / f"{name}.png"
-        assert path.exists(), name
-        assert path.stat().st_size > 20_000, (name, path.stat().st_size)
-        assert path.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
+        light, dark = tmp_path / f"{name}.png", tmp_path / f"{name}-dark.png"
+        for path in (light, dark):
+            assert path.exists(), path.name
+            assert path.stat().st_size > 20_000, (path.name, path.stat().st_size)
+            assert path.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
+        assert light.read_bytes() != dark.read_bytes(), name
+    light = figures.THEMES["light"]
+    assert {k: getattr(figures, k) for k in light} == light
+
+
+def test_3_the_two_themes_name_the_same_colors_and_differ_in_each():
+    light, dark = figures.THEMES["light"], figures.THEMES["dark"]
+    assert set(light) == set(dark)
+    assert all(light[k] != dark[k] for k in light)
+
+
+def test_3_a_generated_figure_is_paired_with_its_dark_variant():
+    """A page names the light figure; the extension adds the dark one after it."""
+    from docutils import nodes
+    from docutils.frontend import get_default_settings
+    from docutils.parsers.rst import Parser
+    from docutils.utils import new_document
+
+    document = new_document("page", get_default_settings(Parser))
+    figure = nodes.figure()
+    figure += nodes.image(uri="../_generated/figures/01-answer.png", alt="the answer")
+    figure += nodes.image(uri="../_static/logo.png")
+    figure += nodes.image(uri="../_generated/figures/sketch.svg")
+    document += figure
+    figures.add_dark_variants(document)
+    images = list(document.findall(nodes.image))
+    assert [i["uri"] for i in images] == [
+        "../_generated/figures/01-answer.png",
+        "../_generated/figures/01-answer-dark.png",
+        "../_static/logo.png",
+        "../_generated/figures/sketch.svg",
+    ]
+    assert [i["classes"] for i in images] == [["only-light"], ["only-dark"], [], []]
+    assert images[1]["alt"] == "the answer"
 
 
 def test_3_every_figure_a_page_references_is_generated():
@@ -719,40 +758,11 @@ def test_4_the_two_forms_figure_plots_what_tutorial_3_says():
 # ===========================================================================
 
 
-@pytest.mark.parametrize(
-    "n_particles",
-    [
-        pytest.param(
-            64,
-            marks=pytest.mark.xfail(
-                strict=True,
-                reason=(
-                    "since PR 7's prior draw the ratio at 64 particles is "
-                    "[1.55, 19.51], below the band; at 2048 it is [2.05, 22.45], "
-                    "inside it, so the page's claim holds but the band does not"
-                ),
-            ),
-        ),
-        2048,
-    ],
-)
-def test_5_the_one_step_error_is_the_gaussian_fit_not_the_ensemble_size(
-    n_particles,
-):
-    """Tutorial 1: "the discrepancy does not go away with a larger ensemble".
-
-    The page attributes the one-step failure to the Gaussian approximation
-    rather than to sampling error, which is a claim about what happens as the
-    ensemble grows. Thirty-two times as many particles leaves the overspread
-    in the decay rate essentially unchanged, so the attribution holds.
-
-    Stated as a band rather than a pinned value: the point is that the ratio
-    stays large, not that it takes a particular value at a particular size.
-    """
+def _one_step_overspread(n_particles):
+    """The one-step ensemble's spread over the exact posterior's, per parameter."""
     problem = toy.exponential_decay()
-    state = _state(n_particles)
     result = run(
-        state,
+        _state(n_particles),
         problem.forward,
         problem.y,
         problem.noise_cov,
@@ -760,9 +770,25 @@ def test_5_the_one_step_error_is_the_gaussian_fit_not_the_ensemble_size(
         schedule=FixedSchedule.constant(1.0, n_steps=1),
     )
     _, posterior_sd = figures._tempered_moments(1.0)
-    ratio = _sd(result.ensemble) / posterior_sd
-    assert 20.0 < ratio[1] < 26.0, (n_particles, ratio)
-    assert 1.9 < ratio[0] < 2.5, (n_particles, ratio)
+    return _sd(result.ensemble) / posterior_sd
+
+
+def test_5_the_one_step_error_is_the_gaussian_fit_not_the_ensemble_size():
+    """Tutorial 1: "the discrepancy does not go away with a larger ensemble".
+
+    The page attributes the one-step failure to the Gaussian approximation
+    rather than to sampling error, which is a claim about what happens as the
+    ensemble grows. Thirty-two times as many particles leaves the overspread
+    in the decay rate large (19.5 times the exact spread at 64 particles,
+    22.5 at 2048), so the attribution holds.
+
+    The claim is about the trend, so the two sizes are compared directly:
+    thirty-two times the particles must not shrink the overspread in either
+    parameter, and the rate's must stay large at both.
+    """
+    small, large = _one_step_overspread(64), _one_step_overspread(2048)
+    assert (large >= small).all(), (small, large)
+    assert small[1] > 15.0 and large[1] > 15.0, (small, large)
 
 
 def test_5_an_evaluation_and_its_record_carry_the_same_level():
@@ -902,44 +928,28 @@ def test_7_regression_a_toy_problem_is_not_passed_to_run():
 # ===========================================================================
 #
 # PR 7 moved the tutorials onto the new layers, and the prior draw changed
-# with it, so every number on the pages moved. The numbers are re-pinned
-# above; the claims below are qualitative readings of them that the new draw
-# no longer supports. Each is kept as a strict xfail that names its sentence,
-# for the prose rewrite (PR 11) to resolve: rewrite the sentence and delete
-# the test, or change the example until the claim holds again, at which point
-# the strict xfail fails and must be removed.
+# with it, so every number on the pages moved and four qualitative claims
+# stopped holding. PR 11 rewrote those sentences; the tests below pin the
+# sentences that replaced them, each quoting what it pins.
 
 
-def _tracked_bridge_ratio():
+def test_8_the_tracked_bridge_lags_at_the_curved_level_and_catches_up():
+    """Tutorial 1's reading of the tracked bridge, sentence by sentence.
+
+    "falls short of the exact one by 0.18 in the amplitude and 0.23 in the
+    rate" at the first level after the prior; "by beta = 1 the mean agrees
+    with the exact one to within 0.003"; "The spread stays within 30% of the
+    exact one at every level, too wide in the rate early on and too narrow
+    later."
+    """
     data = figures.bridge_tracked()[1]
-    return data["cloud_sd"] / data["exact_sd"]
-
-
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "tutorial 1, 'The ensemble tracks the distributions fairly well': at "
-        "beta = 0.0998 the rate's spread is 0.73 of the exact one"
-    ),
-)
-def test_8_the_tracked_bridge_tracks_every_other_level_within_ten_percent():
-    """Tutorial 1: the ensemble is at most 10% too narrow at any level but one."""
-    others = np.delete(_tracked_bridge_ratio(), 1, axis=0)
-    assert others.min() > 0.9, others
-
-
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "tutorial 1, 'the curvature present at the second distribution "
-        "presents a challenge': its rate ratio is 1.29, against 0.73 at "
-        "beta = 0.0998, so it is no longer the worst-tracked level"
-    ),
-)
-def test_8_the_tracked_bridge_second_level_is_the_exception():
-    """Tutorial 1: the second level is over-dispersed by more than 40%."""
-    ratio = _tracked_bridge_ratio()
-    assert ratio[1, 1] > 1.4, ratio
+    prints_as(data["levels"][1], 0.001, 3)
+    gap = data["exact_mean"] - data["cloud_mean"]
+    prints_as(gap[1], [0.18, 0.23], 2)
+    assert np.abs(gap[-1]).max() < 0.003, gap[-1]
+    ratio = data["cloud_sd"] / data["exact_sd"]
+    assert np.abs(ratio - 1.0).max() < 0.3, ratio
+    assert (ratio[1:4, 1] > 1.0).all() and (ratio[4:, 1] < 1.0).all(), ratio[:, 1]
 
 
 def _tutorial_3_optimization_rows():
@@ -960,28 +970,10 @@ def _tutorial_3_optimization_rows():
     return rows
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "tutorial 3, '`tau=2.0` ... on this problem, stops one step earlier' "
-        "and 'Stopping one step earlier, at `tau=2`': both rules now stop at "
-        "beta = 2, so the two table rows are identical"
-    ),
-)
-def test_8_tau_2_stops_one_step_before_tau_1():
-    """Tutorial 3: the discrepancy principle at ``tau=2`` stops one step earlier."""
+def test_8_tau_1_and_tau_2_stop_at_the_same_step():
+    """Tutorial 3: "none does: 257.32 is above both and 5.63 below both, so the
+    two rules stop at the same step", and the merged table row."""
     rows = _tutorial_3_optimization_rows()
-    assert rows[2.0][0] == rows[1.0][0] - 1.0, rows
-
-
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "tutorial 3, 'Its spread happens to land within 13% of the "
-        "target's': the `tau=1` row's spread is now [1.15, 2.94] of it"
-    ),
-)
-def test_8_tau_1_spread_lands_within_13_percent_of_the_target():
-    """Tutorial 3: the ``tau=1`` row's spread is within 13% of the target's."""
-    _, ratio = _tutorial_3_optimization_rows()[1.0]
-    assert np.abs(ratio - 1.0).max() < 0.13, ratio
+    assert rows[2.0][0] == rows[1.0][0] == 2.0, rows
+    assert np.array_equal(rows[2.0][1], rows[1.0][1]), rows
+    prints_as(rows[1.0][1], [1.15, 2.94], 2)

@@ -18,7 +18,7 @@ extensions = [
     "sphinx.ext.intersphinx",
     "sphinx.ext.viewcode",
     "sphinx.ext.mathjax",
-    "myst_parser",               # Markdown pages
+    "myst_nb",                   # Markdown pages and the example notebooks
     "sphinx_copybutton",
     "sphinx_design",             # cards and grids on the landing page
     "figures",                   # docs/figures.py: generates the tutorials' figures
@@ -26,12 +26,17 @@ extensions = [
 
 # -- content -----------------------------------------------------------------
 
-source_suffix = {".rst": "restructuredtext", ".md": "markdown"}
+source_suffix = {
+    ".rst": "restructuredtext",
+    ".md": "myst-nb",
+    ".ipynb": "myst-nb",
+}
 master_doc = "index"
 exclude_patterns = [
     "_build",
     "_generated",
     "**.ipynb_checkpoints",
+    "examples/src",
     # the redesign's working material; only redesign/index.md is a page
     "redesign/document",
     "redesign/notebooks",
@@ -41,6 +46,11 @@ exclude_patterns = [
 
 myst_enable_extensions = ["colon_fence", "deflist", "dollarmath", "amsmath"]
 myst_heading_anchors = 3
+
+# The example notebooks are rendered from their stored outputs, never executed
+# by the build: `docs/examples/build.py` writes them, and
+# `tests/test_examples.py` re-executes their sources (see docs/examples/index.md).
+nb_execution_mode = "off"
 
 autosummary_generate = True
 autodoc_member_order = "bysource"
@@ -83,13 +93,13 @@ html_theme_options = {
         "color-brand-primary": "#5fd0a0",
         "color-brand-content": "#5fd0a0",
     },
-    "source_repository": "https://github.com/TARPS-group/pyEKI/",
+    "source_repository": "https://github.com/TARPS-group/EnsKit/",
     "source_branch": "main",
     "source_directory": "docs/",
     "footer_icons": [
         {
             "name": "GitHub",
-            "url": "https://github.com/TARPS-group/pyEKI",
+            "url": "https://github.com/TARPS-group/EnsKit",
             "html": (
                 '<svg stroke="currentColor" fill="currentColor" viewBox="0 0 16 16">'
                 '<path fill-rule="evenodd" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 '

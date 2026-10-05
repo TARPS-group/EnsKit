@@ -25,9 +25,9 @@ for the operator `AdditiveInflation` takes.
 - A demonstration rather than an assertion, and one that can be checked
   against a closed form. `toy.linear_gaussian(parameter_dim=2000,
   data_dim=40)` with $J = 40$, `kalman.SymmetricSquareRoot()` and
-  `AdaptiveESSSchedule` to $\beta = 1$: the run reports `schedule_exhausted`
-  after about 30 steps, the answer occupies at most $J - 1 = 39$ of 2000
-  directions — and does occupy 39 — and the ensemble's average posterior
+  `AdaptiveESSSchedule` to $\beta = 1$: the run reports `schedule_exhausted`,
+  the answer occupies at most $J - 1 = 39$ of 2000 directions — and does
+  occupy 39 — and the ensemble's average posterior
   standard deviation is **0.302** where
   the exact posterior's — `problem.posterior()`, available because the model
   is linear — is **0.990**. Forty observations cannot constrain two thousand
@@ -35,8 +35,14 @@ for the operator `AdditiveInflation` takes.
   reporting a spread about 3.3 times too small. Nothing raises, and no field of
   `HistoryRecord` flags it. **The failure is silent, and that is the lesson.**
   Comparing against the closed form is what makes it sayable rather than
-  merely assertable, and it is worth showing that the same comparison is
-  unavailable for a model that is not linear.
+  merely assertable. Say explicitly that the same comparison is unavailable
+  for a model that is not linear: `exponential_decay` has no closed form.
+- **A figure, not only the averages** (#24): a histogram of the exact
+  posterior's per-coordinate variance, `problem.posterior().cov("u").diag()`,
+  against the ensemble's. It shows two populations — 39 directions the data
+  constrain, and 1961 where the ensemble has exactly zero spread and the
+  posterior has nearly the prior's — which is a stronger version of the
+  page's point than the two averages.
 - How the symptom appears in diagnostics: collapsing `spread`, and `ess`
   behavior that looks healthy while the answer is degenerate.
 - Mitigation 1, ensemble size. The honest first answer, bounded by the cost of
@@ -45,10 +51,12 @@ for the operator `AdditiveInflation` takes.
   that it **cannot leave the subspace** — so it treats collapse, not the bound.
 - Mitigation 3, `AdditiveInflation`. The only shipped mechanism that leaves the
   subspace, and what that costs in bias.
-- Mitigation 4, localization: the mechanism that actually lifts the bound, and
-  is **not yet implemented**. Explain domain localization in a paragraph, say
-  what it will look like as an `EnsembleUpdate`, and link the issue. Do not
-  imply it is available.
+- Mitigation 4, localization: the mechanism that actually lifts the bound.
+  `kalman.LocalizedUpdateRule` wraps either rule and goes in as
+  `update_rule=` unchanged; explain domain localization in a paragraph and
+  link {doc}`../user-guide/localization`, whose one-update version of this
+  problem's regime is the reference, and example 12 of the
+  {doc}`../examples/index`.
 - That inflation is a departure from the tempering ladder, and is opt-in.
 
 ## Deliberately not covered
@@ -59,16 +67,16 @@ for the operator `AdditiveInflation` takes.
 
 ## API exercised
 
-`MultiplicativeInflation`, `AdditiveInflation`, `HistoryRecord.spread`,
-`HistoryRecord.ess`, `EKIState.n_particles`, `enskit.toy.linear_gaussian`,
-`enskit.toy.LinearGaussian.posterior`.
+`algorithms.MultiplicativeInflation`, `algorithms.AdditiveInflation`,
+`kalman.LocalizedUpdateRule`, `HistoryRecord.spread`, `HistoryRecord.ess`,
+`EKIState.n_particles`, `toy.linear_gaussian`, `toy.LinearGaussian.posterior`.
 
 ## Notes for the writer
 
 The two standard deviations and the terminating status are pinned by
-`tests/test_toy.py`, which also asserts the rank *bound*. The step count and
-the realized rank are deliberately **not** pinned: a schedule change moves the
-step count legitimately, and a test that failed for it would read as a
-regression. Re-run them when writing this page rather than trusting the
-numbers above, and state them as measurements of one configuration rather than
-as properties.
+`tests/test_toy.py`, which also asserts the rank *bound*. The step count is
+deliberately **not** pinned, and is left out of the scope above (#24): a
+schedule change moves it legitimately, and a test that failed for it would
+read as a regression. State it, if at all, as a measurement of one
+configuration, pinned by the page's own test. The 0.302 is new since PR 7;
+the old figure of 0.014 was a key coincidence (`HANDOFF.md`).

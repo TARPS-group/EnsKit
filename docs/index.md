@@ -6,30 +6,35 @@ the ensemble Kalman filter built from them.
 :::{admonition} Pre-alpha
 :class: warning
 
-The operator, distribution, map and update layers, and Ensemble Kalman
-Inversion and the ensemble Kalman filter ({doc}`user-guide/filtering`) on top
-of them, are implemented and tested: you can run an inversion or a filter
-today. Domain localization, needed when the parameter or state dimension far
-exceeds the ensemble size, is an update rule ({doc}`user-guide/localization`)
-both drivers accept.
+Every layer is implemented and tested, and the interfaces may still change
+before the first release.
 :::
 
 ## What problem does this solve?
 
-You have a forward model $\mathcal{G}$ that maps parameters to predictions, and
-observations $y$ of those predictions corrupted by noise:
+You have a model you can run but not differentiate: a legacy simulator, a
+coupled code, or a binary invoked as a subprocess. You have noisy
+observations of what it predicts, and you want to estimate the quantities it
+depends on, with an honest account of how uncertain the estimate is. Two
+versions of the problem are common.
+
+**Calibration.** A forward model $\mathcal{G}$ maps parameters to
+predictions, and the data are those predictions corrupted by noise,
 
 $$y = \mathcal{G}(\theta) + \varepsilon, \qquad \varepsilon \sim \mathcal{N}(0, \Sigma).$$
 
-You want to estimate $\theta$ and quantify how uncertain that estimate is. The
-difficulty is that $\mathcal{G}$ is expensive, and often you cannot
-differentiate it: it may be a legacy simulator, a coupled code, or a binary
-invoked as a subprocess.
+Ensemble Kalman Inversion (EKI) moves an ensemble of parameter vectors toward
+the posterior distribution of $\theta$ using only forward evaluations, with no
+gradients, no adjoint, and no access to the model's internals.
 
-Ensemble Kalman Inversion (EKI) handles exactly this case. It moves an
-ensemble of parameter vectors toward the posterior using only forward
-evaluations, requiring no gradients, no adjoint, and no access to the model's
-internals.
+**Filtering.** A dynamical system advances a state, $x_t = M(x_{t-1})$, and
+is observed at each time, $y_t = H(x_t) + \varepsilon_t$. The ensemble Kalman
+filter (EnKF) tracks the distribution of the current state from the
+observations so far, with an ensemble far smaller than the state.
+
+Both are built from the same few operations, and EnsKit provides those
+operations as well as the two algorithms, so a method that is neither is
+assembled from the same pieces.
 
 ## What EnsKit provides
 
@@ -79,8 +84,9 @@ library.
 EnsKit does not implement production forward models, priors, or Gaussian
 process kernels. It ships five toy problems, in `enskit.toy`, for its own
 tests and this documentation.
-The forward model is any callable from parameters to predicted observations,
-and a prior covariance is any operator meeting the covariance interface.
+A forward model or a transition is any callable from a batch of inputs to a
+batch of outputs, and a prior covariance is any operator meeting the
+covariance interface.
 Building those belongs to the caller, which keeps EnsKit independent of the
 domain being calibrated. {doc}`user-guide/writing-a-forward-model` states
 everything a forward model must satisfy, and works through wrapping an
@@ -132,15 +138,16 @@ first one runs an inversion in twenty lines and assumes nothing.
 :::
 
 :::{grid-item-card} User guide
-Answers "when and why" for a specific choice, once you know the shape of the
-problem. Read out of order, as needed.
+Answers "when and why" for a specific choice, organized by level of
+abstraction, from running an algorithm down to operators. Read out of order,
+as needed.
 +++
-{doc}`user-guide/running-an-inversion`
+{doc}`user-guide/index`
 :::
 
 :::{grid-item-card} Examples
-Runnable notebooks working through a problem end to end, with plots and
-diagnostics.
+Fifteen worked examples, each a problem stated precisely and solved end to
+end, from one call of a driver to a custom update rule.
 +++
 {doc}`examples/index`
 :::
@@ -174,17 +181,7 @@ tutorials/index
 :caption: User guide
 :hidden:
 
-user-guide/quickstart
-user-guide/operators
-user-guide/distributions
-user-guide/maps
-user-guide/updates
-user-guide/localization
-user-guide/running-an-inversion
-user-guide/filtering
-user-guide/writing-a-forward-model
-user-guide/toy-models
-user-guide/writing-an-operator
+user-guide/index
 ```
 
 ```{toctree}

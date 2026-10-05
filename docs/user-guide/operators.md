@@ -212,7 +212,7 @@ leading-batch vector layout everything in EnsKit uses. Scalars for `*` and
 (operator-batches)=
 ## Batches of operators
 
-A batch of operators — one covariance per ensemble member, say — is built
+A batch of operators — one covariance per particle, say — is built
 with `jax.vmap` over the constructor, and used with `jax.vmap` over the
 operator argument:
 

@@ -2,7 +2,8 @@
 
 Ensemble Kalman methods estimate unknown quantities from noisy data using
 nothing but forward evaluations of a model. They maintain an ensemble — a
-collection of candidate parameter vectors — push the parameters through the
+collection of candidate parameter vectors, called *particles* — push the
+particles through the
 forward model, fit a Gaussian distribution to the resulting pairs of
 parameters and predictions, and condition that Gaussian on the data actually
 observed. The conditioning is a closed-form calculation on the fitted
@@ -32,8 +33,8 @@ see how this approximation can be quite poor when nonlinearity is present,
 motivating the typical iterative EKI algorithm, in which the ensemble update
 is repeated along a sequence of intermediate target distributions.
 
-For a bare working example with no explanation attached, see
-{doc}`../user-guide/quickstart` and the landing page's quick example. See
+For a bare working example with no explanation attached, see the landing
+page's quick example and {doc}`../user-guide/running-an-inversion`. See
 {doc}`03-sampling-or-optimizing` for an EKI tutorial for optimization.
 
 ## Setup
@@ -170,7 +171,7 @@ The toy problem already comes pre-built with these quantities, accessed at
 
 :::{important}
 **A forward model takes the entire ensemble and returns the entire set of
-predictions.** For an ensemble of $J$ members it receives one array of shape
+predictions.** For an ensemble of $J$ particles it receives one array of shape
 `(J, P)` and returns one array of shape `(J, N)`:
 
 $$\texttt{forward} : (J, P) \longmapsto (J, N).$$
@@ -181,7 +182,7 @@ EnsKit does not assume responsibility for batching a forward model so that it
 accepts ensembles as input. You may batch your model in whatever way you deem
 computationally efficient — natively vectorized, a simple loop, distributed
 over a computing cluster. EnsKit calls the batched forward model on the whole
-ensemble one time per EKI iteration.
+ensemble once per EKI step.
 :::
 
 For example, the exponential decay forward model could be written as follows:
@@ -203,10 +204,10 @@ A model already written for one parameter vector should be wrapped rather than
 rewritten. In JAX that is one line:
 
 ```python
-def one_member(member):        # (2,) in
-    return member[0] * jnp.exp(-member[1] * times)   # (12,) out
+def one_particle(u):           # (2,) in
+    return u[0] * jnp.exp(-u[1] * times)             # (12,) out
 
-forward = jax.vmap(one_member)                       # (J, 2) -> (J, 12)
+forward = jax.vmap(one_particle)                     # (J, 2) -> (J, 12)
 ```
 
 `jax.vmap` needs a model written in JAX. For anything else — a subprocess, a
@@ -218,7 +219,7 @@ parallel map over the rows. See
 
 Every EKI run starts with an ensemble drawn from the prior distribution.
 Below, we initialize this ensemble and evaluate the forward model at each
-ensemble member. In Bayesian terminology, this yields samples from the *prior
+particle. In Bayesian terminology, this yields samples from the *prior
 predictive distribution*: model predictions generated from parameter vectors
 sampled from the prior.
 
@@ -239,12 +240,12 @@ Those two shapes — `(64, 2)` in, `(64, 12)` out — are the convention above,
 with $J = 64$.
 
 ```{figure} ../_generated/figures/01-prior-predictive.png
-:alt: Left, contours of the prior over amplitude and decay rate with 64 members drawn from it. An arrow labeled G leads to the right panel, which shows the predicted decay curves those members produce, against the twelve observations.
+:alt: Left, contours of the prior over amplitude and decay rate with 64 particles drawn from it. An arrow labeled G leads to the right panel, which shows the predicted decay curves those particles produce, against the twelve observations.
 :width: 100%
 
 Left, the prior's one-, two- and three-standard-deviation contours in the
-$(a, \lambda)$ plane, with 64 members drawn from it. Right, the outputs
-resulting from feeding those members through the forward model, with the noisy
+$(a, \lambda)$ plane, with 64 particles drawn from it. Right, the outputs
+resulting from feeding those particles through the forward model, with the noisy
 observations overlaid. Note that some curves leave the panel, and some have a
 negative decay rate. Error bars are plotted around the observations to give a
 sense of observation noise magnitude; the noise in this problem is quite
@@ -294,20 +295,20 @@ one_step.mean("u")                            # [1.9875  1.5678]
 one_step.ensemble["u"].std(axis=0, ddof=1)    # [0.0567  0.6194]
 ```
 
-`PathwiseUpdate` is one of two ensemble update methods implemented in EnsKit,
-representing the standard "perturbed observation" ensemble Kalman update. The
-alternative transforms the ensemble deterministically instead; see
-{doc}`05-transform-or-pathwise` for details.
+`kalman.Matheron` is one of the two ensemble update rules EnsKit ships, the
+standard "perturbed observation" ensemble Kalman update. The alternative,
+`kalman.SymmetricSquareRoot`, transforms the ensemble deterministically
+instead; see {doc}`05-transform-or-pathwise` for details.
 
 ```{figure} ../_generated/figures/01-one-step.png
-:alt: Left, the true posterior's contours over amplitude and decay rate with the 64 members produced by one conditioning step. An arrow labeled G leads to the right panel, which shows those members' predicted decay curves with the observations overlaid.
+:alt: Left, the true posterior's contours over amplitude and decay rate with the 64 particles produced by one conditioning step. An arrow labeled G leads to the right panel, which shows those particles' predicted decay curves with the observations overlaid.
 :width: 100%
 
 The analogs of the above plots, but now showing posterior rather than prior
-quantities. Left: the ensemble members resulting from a single EKI step. The
-contours correspond to the true posterior — the distribution the samples seek
-to approximate. Right: the outputs resulting from feeding those ensemble
-members through the forward model, with the noisy observations overlaid.
+quantities. Left: the particles resulting from a single EKI step. The
+contours correspond to the true posterior — the distribution the particles
+seek to approximate. Right: the outputs resulting from feeding those particles
+through the forward model, with the noisy observations overlaid.
 ```
 
 The true posterior's contours are drawn here because this problem has only two
@@ -328,7 +329,7 @@ approximation via moment matching, then conditions that Gaussian on the
 observed data. The result is a Gaussian approximation to the posterior, with
 mean and covariance that should approximately match the sample mean and
 covariance of the ensemble above (they would match exactly if we had instead
-used `TransformUpdate`). Note also that the higher moments are not at all
+used `kalman.SymmetricSquareRoot`). Note also that the higher moments are not at all
 guaranteed to even approximately match; the EKI update rests on matching the
 first two moments.
 
@@ -347,7 +348,7 @@ conditioned.cov("u").diag() ** 0.5       # [0.0584  0.6448]
 
 ## Improving the approximation with multiple steps
 
-While a single EKI step nudged the ensemble members toward the region of high
+While a single EKI step nudged the particles toward the region of high
 posterior mass, its posterior approximation is quite poor. The discrepancy
 does not go away with a larger ensemble: it is the Gaussian approximation that
 is at fault, not the finite sample size.
@@ -435,11 +436,11 @@ result.beta              # 1.0
 ```
 
 This run required seven calls of the batched forward model, each on 64
-ensemble members, implying 448 parameter evaluations in total. See
+particles, implying 448 parameter evaluations in total. See
 {doc}`04-tempering-schedules` for details on the adaptive tempering levels.
 
 ```{figure} ../_generated/figures/01-bridge-tracked.png
-:alt: Eight panels, one per level of the adaptive ladder, each showing contours of the exact tempered distribution with that level's 64 ensemble members over them. The members follow the contours closely except at the second level, where the exact distribution is a curved ridge.
+:alt: Eight panels, one per level of the adaptive ladder, each showing contours of the exact tempered distribution with that level's 64 particles over them. At the first two levels after the prior, where the exact distribution is a curved ridge, the particles lag behind it; over the levels that follow they catch up with the contours.
 :width: 100%
 
 The contours of the (exact) bridging distributions, at the levels chosen by
@@ -448,13 +449,20 @@ overlaid. Panels are scaled independently, and each dashed rectangle marks the
 extent of the following panel.
 ```
 
-The ensemble tracks the distributions fairly well, and the final posterior
-approximation is far superior to the one-step result from before. EKI
-struggles the most during the first step. As we predicted above, the curvature
-present at the second distribution presents a challenge.
+The ensemble lags behind the bridge at first and then catches up. At
+$\beta = 0.001$, the first level after the prior and the one with the most
+curvature, the ensemble's mean falls short of the exact one by 0.18 in the
+amplitude and 0.23 in the rate: one step of the Gaussian approximation cannot
+follow the curve.
+The levels after that differ from one another mainly in concentration, as we
+predicted above, and each step closes part of the gap, so that by $\beta = 1$
+the mean agrees with the exact one to within 0.003. The spread stays within
+30% of the exact one at every level, too wide in the rate early on and too
+narrow later. The final approximation is far better than the one-step result
+from before.
 
 ```{figure} ../_generated/figures/01-answer.png
-:alt: Left, the true posterior's contours over amplitude and decay rate with the 64 members from the completed run. An arrow labeled G leads to the right panel, which shows their predicted decay curves with the observations overlaid.
+:alt: Left, the true posterior's contours over amplitude and decay rate with the 64 particles from the completed run. An arrow labeled G leads to the right panel, which shows their predicted decay curves with the observations overlaid.
 :width: 100%
 
 The final results. Left: the contours of the true posterior and the EKI
@@ -505,7 +513,7 @@ jnp.sqrt(jnp.diag(exact_cov))         # [0.0366  0.0317]
 The mean agrees to within 0.003 in both parameters, and the spreads come out
 about 5% too narrow in the amplitude and 9% too narrow in the rate.
 
-One thing to keep in mind is that the ensemble samples are not independent:
+One thing to keep in mind is that the particles are not independent samples:
 the EKI update couples them through the sample mean and covariance estimates.
 The degree of this coupling depends on the ensemble size.
 

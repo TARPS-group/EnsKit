@@ -33,8 +33,8 @@ dimension is too large for a dense covariance to fit in memory.
   noise operator is cheap to use.
 - `supports()` and `capabilities()`, and that `UnsupportedOpError` is raised
   rather than silently falling back to dense linear algebra.
-- Tempering a structured operator: `noise / dbeta` preserves structure and
-  capabilities, and the scalar may be traced.
+- Tempering a structured operator: `noise_cov / increment` preserves
+  structure and capabilities, and the scalar may be traced.
 - One worked change: take the tutorial's running problem, replace the diagonal
   noise with `block_diag` of an independent and a correlated block, and show
   that nothing else in the call changes.
@@ -44,11 +44,13 @@ dimension is too large for a dense covariance to fit in memory.
 - writing a new operator → {doc}`../user-guide/writing-an-operator`
 - the full cost table → {doc}`../user-guide/operators`
 - `vmap` over operators, and the operator/operand batch distinction
+- the Kronecker family → {doc}`../user-guide/operators`
 - the hierarchy's three levels as a design topic → {doc}`../linop-contract`
 
 ## API exercised
 
 `enskit.linalg`: `PSDDiagonal`, `DensePSD`, `Identity`, `PSDLowRank`,
+`LowRankUpdate`,
 `block_diag`, `whiten`, `factor`, `supports`, `capabilities`,
 `UnsupportedOpError`, scalar division.
 
@@ -58,9 +60,7 @@ dimension is too large for a dense covariance to fit in memory.
 **Settled: the quickstart stays, and this page stays short.**
 {doc}`../user-guide/quickstart` covers most of this material and was written as
 the package's entry point before this series existed. It is kept rather than
-absorbed, for two reasons: it is linked from the landing page, this series'
-index, {doc}`../user-guide/operators` and {doc}`../user-guide/distributions`,
-and it serves a reader who came for `enskit.linalg` alone — which is a real
+absorbed: it opens the user guide's operators level, and it serves a reader who came for `enskit.linalg` alone — which is a real
 audience, since the operator layer is usable without the rest of the package.
 
 So this page is not the operator layer's reference. It leads with the reader's

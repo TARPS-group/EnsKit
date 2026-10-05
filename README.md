@@ -3,20 +3,18 @@
 Building blocks for ensemble Kalman methods, and Ensemble Kalman Inversion and
 the ensemble Kalman filter built from them.
 
-**Status: pre-alpha.** The operator, distribution, map and update layers, and
-Ensemble Kalman Inversion and the ensemble Kalman filter on top of them, are
-implemented, tested and documented: you can run an inversion or a filter
-today, with domain localization (`enskit.kalman.LocalizedUpdateRule`) as the
-update rule where the state or parameter dimension far exceeds the ensemble
-size.
+**Status: pre-alpha.** Every layer is implemented, tested and documented, and
+the interfaces may still change before the first release.
 
 ## What it is
 
-Ensemble Kalman Inversion (EKI) estimates the parameters of an expensive,
-possibly non-differentiable forward model from noisy observations. It needs
-only forward evaluations: no gradients, no adjoint, no access to the model's
-internals. That makes it well suited to legacy simulators, coupled codes, and
-anything that runs as a subprocess.
+Ensemble Kalman methods estimate the inputs of a model you can run but not
+differentiate, from noisy observations of its outputs. Ensemble Kalman
+Inversion (EKI) calibrates the parameters of a forward model; the ensemble
+Kalman filter (EnKF) tracks the state of a dynamical system observed in time.
+Both need only evaluations of the model: no gradients, no adjoint, no access
+to its internals. That makes them well suited to legacy simulators, coupled
+codes, and anything that runs as a subprocess.
 
 EnsKit aims to be a small, robust, efficient toolkit for ensemble Kalman
 methods, in layers that build on each other:
@@ -42,8 +40,9 @@ methods, in layers that build on each other:
 EnsKit does not implement production forward models, priors, or Gaussian
 process kernels. It ships five toy problems, in `enskit.toy`, for its own
 tests and its documentation.
-The forward model is any callable mapping parameters to predicted observations,
-and a prior covariance is any operator satisfying the covariance interface.
+A forward model or a transition is any callable from a batch of inputs to a
+batch of outputs, and a prior covariance is any operator satisfying the
+covariance interface.
 Building those is the caller's job, which keeps EnsKit independent of the
 domain being calibrated. What a forward model must satisfy is stated in one
 place, the simulator contract, and the "Forward model requirements" page of
@@ -120,11 +119,11 @@ noise.whiten(jnp.ones(5))   # applied block by block
 
 ## Documentation
 
-<https://tarps-group.github.io/pyEKI/>
+<https://tarps-group.github.io/EnsKit/>
 
 Start with the tutorials, which build up from a first inversion; the user guide
-answers "when and why" for each choice; the contracts specify behavior
-normatively.
+answers "when and why" for each choice, by level of abstraction; the examples
+work fifteen problems end to end; the contracts specify behavior normatively.
 
 ## License
 

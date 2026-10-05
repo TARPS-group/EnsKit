@@ -1,4 +1,4 @@
-# Quickstart
+# Operator quickstart
 
 This page introduces the operator layer, which everything else in EnsKit is
 built on. It takes about ten minutes. For the distributions built on it, see
