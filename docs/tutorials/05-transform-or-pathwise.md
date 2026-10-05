@@ -88,6 +88,21 @@ anomalies whose off-ridge mass sits in a few particles.
 This is one problem at one size, which is exactly the caveat below. Do not
 promote it to a ranking of the two rules.
 
+**Refinement depends on the rule, and tutorial 4 left this to this page.**
+Measured while writing {doc}`04-tempering-schedules`, on the same problem at
+64 particles, uniform ladders of 1 to 400 steps. Under `SymmetricSquareRoot`
+a longer ladder was better from three steps on, on every key from 0 to 5
+(key 0: an error in the mean of 0.0034 at 6 steps, 0.0018 at 12, 0.0009 at
+24); only the step from 1 to 2 worsened the mean, on keys 4 and 5. Tutorial 4
+shows both. Under `Matheron` it is not: key 1 gives
+0.0014 at 6 steps, 0.0054 at 12, 0.0075 at 24 and 0.0089 at 48, and the
+spread wanders on either side of the target's rather than approaching it.
+Each step draws fresh perturbations, and a longer ladder accumulates more of
+them. This is where tutorial 3's "two ladders give two answers, and neither
+bounds the other" can be shown with refinement at every length; under the
+square-root rule on this problem it shows only at the shortest ladders. Re-measure, and replicate across keys, before
+writing.
+
 The temptation to resist is ranking the two rules. A run takes its rule
 explicitly, with no default; this page should leave a reader able to defend
 either choice on their own problem.

@@ -48,8 +48,8 @@ contracts in the reference section specify behavior exactly.
 :::{admonition} Being written
 :class: note
 
-Tutorials 1 to 3 are written, and every number they state is checked by a
-test. Tutorials 4 to 9 are stubs: each states its scope, its prerequisites
+Tutorials 1 to 4 are written, and every number they state is checked by a
+test. Tutorials 5 to 9 are stubs: each states its scope, its prerequisites
 and the API it exercises, so the series can be written in order without
 re-deciding the structure. Until they are, the {doc}`../user-guide/index` and
 the {doc}`../examples/index` cover the same ground as reference and as worked

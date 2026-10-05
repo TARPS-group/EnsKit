@@ -5,6 +5,25 @@ Every release of EnsKit, newest first. Until 1.0, a minor release (0.2, 0.3,
 **Changed** or **Removed**; a patch release fixes defects and does not change
 them.
 
+## 0.2.0 (unreleased)
+
+### Added
+
+- **Tutorial 4, "Tempering schedules"**: one step, equal steps, steps that
+  start small and grow, and the two adaptive schedules on the same problem,
+  each drawn against the exact tempered distribution at every level, with
+  the cost of refining a ladder and how to read a ladder from a finished
+  run's `ess`.
+
+### Changed
+
+- The documentation of `AdaptiveMisfitSchedule`, in its docstring and the
+  EKI contract, now says that it *tends* to take longer steps than
+  `AdaptiveESSSchedule`, by an amount that depends on the problem; it
+  previously said it always takes far longer ones, and on the tutorials'
+  problem the two choose nearly the same ladder. The schedule itself is
+  unchanged.
+
 ## 0.1.0
 
 The first release. EnsKit is the toolkit of ensemble Kalman building blocks

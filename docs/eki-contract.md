@@ -658,10 +658,12 @@ reaches the increment check and raises rather than taking the largest step.
 The inner `where` keeps $\theta/0$ from being formed, whose derivative is
 `nan`.
 
-At the increment this schedule chooses, the ESS is near its floor of 1: it
-takes far longer steps than `AdaptiveESSSchedule` at $f = 1/2$. The two
-control different things. Prefer the ESS schedule when the posterior ensemble
-is the deliverable, and this one when the fit is, or evaluations are scarce.
+This schedule tends to take longer steps than `AdaptiveESSSchedule` at
+$f = 1/2$, at increments where the ESS can fall near its floor of 1. How much
+longer depends on the problem, and on some the two choose nearly the same
+ladder. The two control different things. Prefer the ESS schedule when the
+posterior ensemble is the deliverable, and this one when the fit is, or
+evaluations are scarce.
 
 (eki-stopping)=
 ## Stopping rules

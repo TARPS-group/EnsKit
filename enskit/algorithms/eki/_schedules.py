@@ -360,10 +360,12 @@ class AdaptiveMisfitSchedule:
     valid regime is the larger. The mean bound applies when the misfits'
     coefficient of variation exceeds :math:`1/\sqrt\theta`, the common case.
 
-    This takes far longer steps than :class:`AdaptiveESSSchedule`: at the
-    increment it chooses, the tempering weights' effective sample size is near
-    its floor of 1. Prefer it when the fit, rather than the ensemble, is what
-    the run is for, or when evaluations of the forward model are scarce.
+    This tends to take longer steps than :class:`AdaptiveESSSchedule`, at
+    increments where the tempering weights' effective sample size can fall
+    close to its floor of 1. How much longer depends on the problem, and on
+    some the two choose nearly the same ladder. Prefer it when the fit, rather
+    than the ensemble, is what the run is for, or when evaluations of the
+    forward model are scarce.
 
     References
     ----------

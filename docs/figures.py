@@ -18,6 +18,11 @@ name                           page
 ``01-answer``                  :doc:`tutorials/01-first-inversion`
 ``02-trajectories``            :doc:`tutorials/02-reading-a-run`
 ``03-two-forms``               :doc:`tutorials/03-sampling-or-optimizing`
+``04-one-step``                :doc:`tutorials/04-tempering-schedules`
+``04-uniform``                 :doc:`tutorials/04-tempering-schedules`
+``04-geometric``               :doc:`tutorials/04-tempering-schedules`
+``04-adaptive``                :doc:`tutorials/04-tempering-schedules`
+``04-refinement``              :doc:`tutorials/04-tempering-schedules`
 ============================== ===========================================
 
 Each figure function takes no arguments, is deterministic, and returns the
@@ -103,9 +108,9 @@ JOINT_INDEX = 3
 #: :doc:`tutorials/05-transform-or-pathwise`.
 TUTORIAL_1_UPDATE = kalman.Matheron()
 
-#: The update rule tutorials 2 and 3 run with: the deterministic square-root
+#: The update rule tutorials 2 to 4 run with: the deterministic square-root
 #: update. A run takes its update rule explicitly; there is no default.
-TUTORIAL_2_3_UPDATE = kalman.SymmetricSquareRoot()
+TUTORIALS_2_TO_4_UPDATE = kalman.SymmetricSquareRoot()
 
 # Colors. Deliberately few, and the same meaning on every figure. The prior
 # and everything derived from it before conditioning is blue; the answer, once
@@ -456,7 +461,7 @@ def _prior_state(n_particles, seed=0):
     )
 
 
-def _run(state, update_rule=TUTORIAL_2_3_UPDATE, **kwargs):
+def _run(state, update_rule=TUTORIALS_2_TO_4_UPDATE, **kwargs):
     """``eki.run`` on the tutorials' problem."""
     return eki.run(
         state,
@@ -469,17 +474,17 @@ def _run(state, update_rule=TUTORIAL_2_3_UPDATE, **kwargs):
 
 
 def _ladder(n_particles, schedule, update_rule, seed=0):
-    """Run a ladder, returning ``(levels, clouds)`` including the final one.
+    """Run a ladder, returning ``(levels, clouds, records)``.
 
     Each cloud is paired with the level of the evaluation it came from, read
     off ``Evaluation.beta`` so the pairing cannot drift. The last pair is the
-    terminal ensemble at the level the run reached, which no evaluation
-    covers — the final record's ``beta`` is the level *entering* the last
-    step.
+    terminal ensemble, the state the generator yields last, at the level the
+    run reached, which no evaluation covers: the final record's ``beta`` is
+    the level *entering* the last step. ``records`` is the run's history.
     """
     state = _prior_state(n_particles, seed)
-    levels, clouds = [], []
-    for _, _, evaluation in eki.iterate(
+    levels, clouds, records = [], [], []
+    for current, record, evaluation in eki.iterate(  # noqa: B007 -- read after
         state,
         PROBLEM.forward,
         PROBLEM.y,
@@ -489,10 +494,10 @@ def _ladder(n_particles, schedule, update_rule, seed=0):
     ):
         levels.append(float(evaluation.beta))
         clouds.append(np.asarray(evaluation.ensemble["u"]))
-    result = _run(state, update_rule, schedule=schedule)
-    levels.append(float(result.beta))
-    clouds.append(np.asarray(result.ensemble["u"]))
-    return levels, clouds
+        records.append(record)
+    levels.append(float(current.beta))
+    clouds.append(np.asarray(current.ensemble["u"]))
+    return levels, clouds, records
 
 
 def _sd(ensemble):
@@ -875,25 +880,48 @@ def bridge_tracked():
     """
     _style()
     n_particles = 64
-    levels, clouds = _ladder(
+    levels, clouds, _ = _ladder(
         n_particles, eki.AdaptiveESSSchedule(), TUTORIAL_1_UPDATE
     )
-    moments = [_tempered_moments(beta) for beta in levels]
+    fig, moments, outside = _tracked_panels(
+        levels, clouds, n_cols=5, figsize=(7.4, 3.5)
+    )
+    return fig, {
+        "n_particles": n_particles,
+        "levels": np.asarray(levels),
+        "cloud_sd": np.asarray([c.std(axis=0, ddof=1) for c in clouds]),
+        "exact_sd": np.asarray([sd for _, sd in moments]),
+        "cloud_mean": np.asarray([c.mean(axis=0) for c in clouds]),
+        "exact_mean": np.asarray([mean for mean, _ in moments]),
+        "particles_outside_panel": np.asarray(outside),
+    }
 
-    # Each panel must hold the exact distribution *and* the cloud, which at
-    # the early levels is the wider of the two.
+
+def _tracked_panels(levels, clouds, *, n_cols, figsize):
+    """One panel per level: exact contours, with that level's particles over them.
+
+    Each panel is scaled to hold both the exact distribution and the cloud,
+    which at a level the ensemble tracks badly is the wider of the two, and
+    carries a dashed rectangle marking the extent of the panel after it. The
+    first spare cell carries the legend.
+
+    Returns
+    -------
+    tuple
+        ``(fig, moments, outside)``: the figure, the exact ``(mean, sd)`` at
+        each level, and the number of particles each panel leaves outside its
+        box.
+    """
+    moments = [_tempered_moments(beta) for beta in levels]
     boxes = [
         _square_box(mean, np.maximum(sd, cloud.std(axis=0, ddof=1)), 3.5)
         for (mean, sd), cloud in zip(moments, clouds, strict=True)
     ]
-    # Two rows, because seven panels in one are too small to read. The spare
-    # cell carries the legend, which is otherwise a sixth thing competing for
-    # the width.
-    n_cols = 5
+    # Several rows, because seven panels in one are too small to read. The
+    # spare cell carries the legend, which is otherwise one more thing
+    # competing for the width.
     n_rows = -(-(len(levels) + 1) // n_cols)  # +1, for the legend's own cell
-    fig, grid = plt.subplots(
-        n_rows, n_cols, figsize=(7.4, 3.5), layout="constrained"
-    )
+    fig, grid = plt.subplots(n_rows, n_cols, figsize=figsize, layout="constrained")
     fig.get_layout_engine().set(h_pad=0.09, hspace=0.02)
     axes = grid.ravel()
     outside = []
@@ -933,7 +961,7 @@ def bridge_tracked():
         )
 
     # The legend goes in the first spare cell and any others are blanked. A
-    # ladder long enough to need a third row would otherwise draw one legend
+    # ladder long enough to need another row would otherwise draw one legend
     # per leftover cell.
     for index, spare in enumerate(axes[len(levels) :]):
         spare.axis("off")
@@ -949,15 +977,7 @@ def bridge_tracked():
 
     fig.supxlabel("amplitude $a$", fontsize=9.0)
     fig.supylabel(r"decay rate $\lambda$", fontsize=9.0)
-    return fig, {
-        "n_particles": n_particles,
-        "levels": np.asarray(levels),
-        "cloud_sd": np.asarray([c.std(axis=0, ddof=1) for c in clouds]),
-        "exact_sd": np.asarray([sd for _, sd in moments]),
-        "cloud_mean": np.asarray([c.mean(axis=0) for c in clouds]),
-        "exact_mean": np.asarray([mean for mean, _ in moments]),
-        "particles_outside_panel": np.asarray(outside),
-    }
+    return fig, moments, outside
 
 
 def answer():
@@ -1178,6 +1198,191 @@ def two_forms():
 
 
 # ---------------------------------------------------------------------------
+# tutorial 4
+# ---------------------------------------------------------------------------
+
+#: The number of steps of every tutorial 4 ladder but the single step: what
+#: the adaptive ladder chooses on its own, so that the four compare at the
+#: same cost in forward evaluations.
+LADDER_STEPS = 6
+
+#: The growth factor of tutorial 4's geometric ladder, from one increment to
+#: the next.
+GEOMETRIC_RATIO = 3.0
+
+#: The uniform ladders of tutorial 4's refinement figure, by number of steps.
+REFINEMENT_STEPS = (1, 2, 3, 6, 12, 24, 48, 96)
+
+
+def geometric_increments(n_steps=LADDER_STEPS, ratio=GEOMETRIC_RATIO):
+    """Increments growing by ``ratio`` per step and summing to one.
+
+    Computed by the expression tutorial 4 prints, so the page's ladder and
+    the figures' are the same floats.
+    """
+    growth = ratio ** jnp.arange(n_steps)
+    return tuple(float(d) for d in growth / growth.sum())
+
+
+#: Tutorial 4's ladders, in the page's order.
+TUTORIAL_4_LADDERS = {
+    "one-step": lambda: eki.FixedSchedule.constant(1.0, n_steps=1),
+    "uniform": lambda: eki.FixedSchedule.uniform(LADDER_STEPS),
+    "geometric": lambda: eki.FixedSchedule(geometric_increments()),
+    "adaptive": lambda: eki.AdaptiveESSSchedule(),
+    "misfit": lambda: eki.AdaptiveMisfitSchedule(),
+}
+
+
+def ladder_one_step():
+    """A single unit step: the prior's particles, and where one update puts them."""
+    return _tutorial_4_ladder("one-step", figsize=(7.4, 2.25))
+
+
+def ladder_uniform():
+    """Six equal steps, tracked against the tempered distribution at each level."""
+    return _tutorial_4_ladder("uniform", figsize=(7.4, 4.1))
+
+
+def ladder_geometric():
+    """Six steps growing threefold, tracked against the tempered distribution."""
+    return _tutorial_4_ladder("geometric", figsize=(7.4, 4.1))
+
+
+def ladder_adaptive():
+    """The ESS-adaptive ladder, tracked against the tempered distribution."""
+    return _tutorial_4_ladder("adaptive", figsize=(7.4, 4.1))
+
+
+def refinement():
+    """The error at the posterior against the number of forward evaluations.
+
+    Uniform ladders of every length in ``REFINEMENT_STEPS`` as a line, and the
+    page's six-step ladders as points at their own cost, the two adaptive ones
+    nudged apart. Two panels: the error
+    in the mean, and the spread in excess of the target's in the decay rate,
+    which is the worse-matched parameter in every run drawn.
+    """
+    _style()
+    n_particles = 64
+    state = _prior_state(n_particles)
+    reference_mean, reference_sd = _tempered_moments(1.0)
+
+    def measure(schedule):
+        result = _run(state, TUTORIALS_2_TO_4_UPDATE, schedule=schedule)
+        ensemble = np.asarray(result.ensemble["u"])
+        error = float(np.abs(ensemble.mean(axis=0) - reference_mean).max())
+        return result.n_evaluations, error, _sd(ensemble) / reference_sd
+
+    uniform = [measure(eki.FixedSchedule.uniform(n)) for n in REFINEMENT_STEPS]
+    others = {
+        name: measure(TUTORIAL_4_LADDERS[name]())
+        for name in ("geometric", "adaptive", "misfit")
+    }
+    styles = {
+        "geometric": dict(color=C_ALT, marker="D", label="geometric, ratio 3"),
+        "adaptive": dict(color=C_ENSEMBLE, marker="o", label="adaptive (ESS)"),
+        "misfit": dict(
+            color=C_ENSEMBLE, marker="^", label="adaptive (misfit)", mfc=C_PAPER
+        ),
+    }
+
+    # The two adaptive points nearly coincide, so they are drawn a little to
+    # either side of their true cost; the caption says so. The data returned
+    # are the true costs.
+    nudge = {"geometric": 1.0, "adaptive": 0.93, "misfit": 1.07}
+
+    fig, axes = plt.subplots(1, 2, figsize=(7.0, 2.8))
+    panels = [
+        (lambda m: m[1], "Error in the mean"),
+        (lambda m: m[2][1] - 1.0, "Excess spread in the decay rate"),
+    ]
+    for ax, (value, title) in zip(axes, panels, strict=True):
+        ax.plot(
+            [m[0] for m in uniform],
+            [value(m) for m in uniform],
+            color=C_ALT,
+            marker="s",
+            markersize=3.4,
+            markeredgecolor=C_PAPER,
+            markeredgewidth=0.4,
+        )
+        for name, measured in others.items():
+            style = dict(styles[name])
+            style.pop("label")
+            ax.plot(
+                [measured[0] * nudge[name]],
+                [value(measured)],
+                linestyle="none",
+                markersize=5.5,
+                markeredgewidth=1.0,
+                markerfacecolor=style.pop("mfc", style["color"]),
+                markeredgecolor=style["color"],
+                zorder=4,
+                **style,
+            )
+        ax.set_xscale("log")
+        ax.set_yscale("log")
+        ax.set_xticks([1, 3, 6, 12, 24, 48, 96])
+        ax.set_xticklabels(["1", "3", "6", "12", "24", "48", "96"])
+        ax.minorticks_off()
+        ax.set_xlabel("forward evaluations")
+        ax.set_title(title)
+
+    fig.tight_layout()
+    _figure_legend(
+        fig,
+        [
+            _handle("marker+line", C_ALT, "uniform ladders", marker="s"),
+            *[
+                _handle(
+                    "marker",
+                    styles[name]["color"],
+                    styles[name]["label"],
+                    marker=styles[name]["marker"],
+                    mfc=styles[name].get("mfc", styles[name]["color"]),
+                    mec=styles[name]["color"],
+                    mew=1.0,
+                )
+                for name in others
+            ],
+        ],
+        ncol=4,
+        y=-0.10,
+    )
+    return fig, {
+        "n_particles": n_particles,
+        "uniform_steps": np.asarray(REFINEMENT_STEPS),
+        "uniform_evaluations": np.asarray([m[0] for m in uniform]),
+        "uniform_mean_error": np.asarray([m[1] for m in uniform]),
+        "uniform_sd_ratio": np.asarray([m[2] for m in uniform]),
+        **{f"{name}_evaluations": m[0] for name, m in others.items()},
+        **{f"{name}_mean_error": m[1] for name, m in others.items()},
+        **{f"{name}_sd_ratio": m[2] for name, m in others.items()},
+    }
+
+
+def _tutorial_4_ladder(name, *, figsize):
+    """One of tutorial 4's ladders, as tracked panels, with what the run recorded."""
+    _style()
+    n_particles = 64
+    levels, clouds, records = _ladder(
+        n_particles, TUTORIAL_4_LADDERS[name](), TUTORIALS_2_TO_4_UPDATE
+    )
+    fig, moments, outside = _tracked_panels(levels, clouds, n_cols=4, figsize=figsize)
+    return fig, {
+        "n_particles": n_particles,
+        "levels": np.asarray(levels),
+        "ess": np.asarray([float(record.ess) for record in records]),
+        "cloud_sd": np.asarray([c.std(axis=0, ddof=1) for c in clouds]),
+        "exact_sd": np.asarray([sd for _, sd in moments]),
+        "cloud_mean": np.asarray([c.mean(axis=0) for c in clouds]),
+        "exact_mean": np.asarray([mean for mean, _ in moments]),
+        "particles_outside_panel": np.asarray(outside),
+    }
+
+
+# ---------------------------------------------------------------------------
 # building
 # ---------------------------------------------------------------------------
 
@@ -1190,6 +1395,11 @@ FIGURES: dict[str, Callable[[], tuple[plt.Figure, dict]]] = {
     "01-answer": answer,
     "02-trajectories": trajectories,
     "03-two-forms": two_forms,
+    "04-one-step": ladder_one_step,
+    "04-uniform": ladder_uniform,
+    "04-geometric": ladder_geometric,
+    "04-adaptive": ladder_adaptive,
+    "04-refinement": refinement,
 }
 
 

@@ -412,6 +412,150 @@ def test_1_tutorial_3_blocks_run():
     prints_as(trap.ensemble["u"].std(axis=0, ddof=1), [0.1461, 0.1454])
 
 
+def test_1_tutorial_4_blocks_run():
+    """Every runnable block of "Tempering schedules", in order."""
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    problem = toy.exponential_decay()
+    state = eki.EKIState.from_prior(
+        jax.random.key(0), problem.prior, n_particles=64
+    )
+
+    def run_ladder(schedule):
+        return eki.run(
+            state,
+            problem.forward,
+            problem.y,
+            problem.noise_cov,
+            update_rule=kalman.SymmetricSquareRoot(),
+            schedule=schedule,
+        )
+
+    one = run_ladder(eki.FixedSchedule.constant(1.0, n_steps=1))
+    prints_as(one.mean("u"), [1.9883, 1.5709])
+    prints_as(one.ensemble["u"].std(axis=0, ddof=1), [0.0584, 0.6448])
+    prints_as(one.stacked.ess, [1.0])
+    # "`constant(1.0, n_steps=1)` is the tuple `(1.0,)`".
+    assert eki.FixedSchedule.constant(1.0, n_steps=1).increments == (1.0,)
+    # "Under the square-root rule the ensemble's mean and spread are exactly
+    # those of the conditioned Gaussian tutorial 1 computed by hand", to
+    # round-off, the bound tutorial 1's own test uses.
+    joint = state.ensemble.pipe(maps.pushforward, problem.forward, output="g")
+    conditioned = (
+        joint.project().add_noise(g=problem.noise_cov).condition(g=problem.y)
+    )
+    assert float(jnp.abs(conditioned.mean("u") - one.mean("u")).max()) < 1e-14
+    one_cov = np.cov(np.asarray(one.ensemble["u"]), rowvar=False, ddof=1)
+    assert np.abs(np.asarray(conditioned.cov("u").to_dense()) - one_cov).max() < 1e-15
+
+    uniform = run_ladder(eki.FixedSchedule.uniform(6))
+    prints_as(
+        uniform.stacked.beta, [0.0, 0.1667, 0.3333, 0.5, 0.6667, 0.8333]
+    )
+    prints_as(
+        uniform.stacked.ess, [1.0, 4.3995, 44.1291, 56.8427, 59.0309, 60.0377]
+    )
+    prints_as(uniform.ensemble["u"].std(axis=0, ddof=1), [0.0403, 0.0376])
+    # "the last three, at 56.8 to 60.0 of 64, reweight hardly at all": and
+    # the third, at 44.1, is no higher than the steps the page calls normal.
+    prints_as(uniform.stacked.ess[3:], [56.8, 59.0, 60.0], 1)
+    assert float(uniform.stacked.ess[2]) < 45.0
+
+    ratio = 3.0
+    growth = ratio ** jnp.arange(6)
+    increments = tuple(float(d) for d in growth / growth.sum())
+    prints_as(increments, [0.0027, 0.0082, 0.0247, 0.0742, 0.2225, 0.6676])
+    # The figures run the same floats the page prints.
+    assert increments == figures.geometric_increments()
+
+    geometric = run_ladder(eki.FixedSchedule(increments))
+    prints_as(
+        geometric.stacked.beta, [0.0, 0.0027, 0.011, 0.0357, 0.1099, 0.3324]
+    )
+    prints_as(
+        geometric.stacked.ess, [11.6003, 15.2073, 33.5608, 43.5112, 45.3461, 46.2407]
+    )
+    prints_as(geometric.ensemble["u"].std(axis=0, ddof=1), [0.0373, 0.0333])
+
+    adaptive = run_ladder(eki.AdaptiveESSSchedule())
+    assert adaptive.n_evaluations == 6
+    prints_as(
+        adaptive.stacked.beta, [0.0, 0.001, 0.0029, 0.0112, 0.0571, 0.3152]
+    )
+    prints_as(
+        adaptive.stacked.increment, [0.001, 0.0019, 0.0083, 0.0459, 0.2581, 0.6848]
+    )
+    prints_as(adaptive.stacked.ess, [24.5511, 32.0, 32.0, 32.0, 32.0, 44.567])
+    prints_as(adaptive.ensemble["u"].std(axis=0, ddof=1), [0.0374, 0.0338])
+    # "where the schedule wanted less than its minimum increment of 0.001 and
+    # had to take 0.001 anyway".
+    assert eki.AdaptiveESSSchedule().min_increment == 0.001
+    assert float(adaptive.stacked.increment[0]) == 0.001
+
+    misfit = run_ladder(eki.AdaptiveMisfitSchedule())
+    assert misfit.n_evaluations == 6
+    prints_as(misfit.stacked.beta, [0.0, 0.001, 0.002, 0.013, 0.0799, 0.3914])
+    prints_as(misfit.ensemble["u"].std(axis=0, ddof=1), [0.0375, 0.034])
+    # "its answer differs from that one only in the fourth decimal".
+    for name in ("mean", "sd"):
+        if name == "mean":
+            a, b = adaptive.mean("u"), misfit.mean("u")
+        else:
+            a, b = _sd(adaptive.ensemble), _sd(misfit.ensemble)
+        difference = np.abs(np.asarray(a) - np.asarray(b)).max()
+        assert 0.0 < difference < 5e-4, (name, difference)
+
+    levels, clouds = [], []
+    for current, record, evaluation in eki.iterate(  # noqa: B007 -- read after
+        state,
+        problem.forward,
+        problem.y,
+        problem.noise_cov,
+        update_rule=kalman.SymmetricSquareRoot(),
+        schedule=eki.FixedSchedule.uniform(6),
+    ):
+        levels.append(evaluation.beta)
+        clouds.append(evaluation.ensemble["u"])
+        # "`record.beta` is the same number, and `record.beta_next` is the
+        # level the step moved *to*."
+        assert jnp.array_equal(record.beta, evaluation.beta)
+        assert jnp.array_equal(record.beta_next, evaluation.beta + record.increment)
+    levels.append(current.beta)
+    clouds.append(current.ensemble["u"])
+    assert len(levels) == 7
+    # The pairing is the run's: the loop's last state is `run`'s answer.
+    assert jnp.array_equal(clouds[-1], uniform.ensemble["u"])
+    assert jnp.array_equal(levels[-1], uniform.beta)
+
+    n = 160
+    amp = jnp.linspace(1.70, 2.25, n)
+    rate = jnp.linspace(1.25, 1.70, n)
+    A, R = jnp.meshgrid(amp, rate, indexing="ij")
+    grid = jnp.stack([A.ravel(), R.ravel()], axis=-1)
+    assert grid.shape == (n * n, 2)
+
+    log_prior = problem.prior.log_density(u=grid)
+    phi = eki.misfits(problem.y, problem.forward(grid), problem.noise_cov)
+    assert log_prior.shape == phi.shape == (n * n,)
+    log_pi = log_prior - levels[-1] * phi
+    density = jnp.exp(log_pi - log_pi.max()).reshape(n, n)
+
+    plt.contour(amp, rate, density.T)
+    plt.scatter(clouds[-1][:, 0], clouds[-1][:, 1])
+    plt.close("all")
+    # The box holds the final level's mass and every particle of its cloud,
+    # so the snippet draws what the page says it draws.
+    mean, sd = figures._tempered_moments(1.0)
+    assert (mean - 4 * sd > np.asarray([1.70, 1.25])).all()
+    assert (mean + 4 * sd < np.asarray([2.25, 1.70])).all()
+    final = np.asarray(clouds[-1])
+    assert (final.min(axis=0) > [1.70, 1.25]).all()
+    assert (final.max(axis=0) < [2.25, 1.70]).all()
+
+
 def test_2_tutorial_3s_comparison_table():
     """The four rows of tutorial 3's table, and the sentences reading them.
 
@@ -492,6 +636,167 @@ def test_2_tutorial_3s_comparison_table():
     )
     trap_ratio = _sd(trap.ensemble) / reference_sd
     prints_as(trap_ratio, [3.99, 4.58], 2)
+
+
+def _tutorial_4_measure(schedule, problem=None, seed=0):
+    """``(n_evaluations, error in the mean, sd ratio)`` of a ladder at ``beta = 1``."""
+    problem = toy.exponential_decay() if problem is None else problem
+    reference_mean, reference_sd = figures._tempered_moments(1.0)
+    result = run(
+        _state() if seed == 0 else EKIState.from_prior(
+            jax.random.key(seed), problem.prior, n_particles=64
+        ),
+        problem.forward,
+        problem.y,
+        problem.noise_cov,
+        update_rule=SQUARE_ROOT,
+        schedule=schedule,
+    )
+    error = float(np.abs(np.asarray(result.mean("u")) - reference_mean).max())
+    return result.n_evaluations, error, _sd(result.ensemble) / reference_sd
+
+
+def test_2_tutorial_4s_table_and_the_sentences_reading_it():
+    """Tutorial 4's table of the four ladders, and the numbers its prose states."""
+    ladders = {name: make() for name, make in figures.TUTORIAL_4_LADDERS.items()}
+    measured = {name: _tutorial_4_measure(s) for name, s in ladders.items()}
+    calls = {name: m[0] for name, m in measured.items()}
+    error = {name: m[1] for name, m in measured.items()}
+    ratio = {name: m[2] for name, m in measured.items()}
+
+    assert calls == {
+        "one-step": 1, "uniform": 6, "geometric": 6, "adaptive": 6, "misfit": 6
+    }
+    prints_as(error["one-step"], 0.0989)
+    prints_as(error["uniform"], 0.0034)
+    prints_as(error["geometric"], 0.0017)
+    prints_as(error["adaptive"], 0.0025)
+    prints_as(error["misfit"], 0.0025)
+    prints_as(ratio["one-step"], [1.60, 20.31], 2)
+    prints_as(ratio["uniform"], [1.10, 1.19], 2)
+    prints_as(ratio["geometric"], [1.02, 1.05], 2)
+    prints_as(ratio["adaptive"], [1.02, 1.07], 2)
+    prints_as(ratio["misfit"], [1.03, 1.07], 2)
+
+    # The last column, the smallest `ess` of each run.
+    smallest = {
+        name: min(
+            float(r.ess) for r in figures._ladder(64, s, SQUARE_ROOT)[2]
+        )
+        for name, s in ladders.items()
+    }
+    prints_as(
+        [smallest[n] for n in ladders], [1.0, 1.0, 11.6, 24.6, 18.8], 1
+    )
+
+    # The one-step prose: "0.099 from the target's mean", "1.60 times the
+    # target's spread in the amplitude and 20.3 times in the decay rate".
+    prints_as(error["one-step"], 0.099, 3)
+    prints_as(ratio["one-step"][1], 20.3, 1)
+    # "the spread comes within 2% and 5% of the target's", and the adaptive
+    # one "2% and 7% wider".
+    prints_as(ratio["geometric"] - 1.0, [0.02, 0.05], 2)
+    prints_as(ratio["adaptive"] - 1.0, [0.02, 0.07], 2)
+    # "The error in the mean halves" from the uniform ladder to the geometric.
+    assert 1.8 < error["uniform"] / error["geometric"] < 2.2
+    # "On this problem the adaptive ladder is not better than the geometric
+    # one ... and here slightly better."
+    assert error["geometric"] < error["adaptive"]
+    assert (ratio["geometric"] <= ratio["adaptive"]).all()
+
+    # "This also settles the question tutorial 2 left open": its three equal
+    # steps, against the adaptive run.
+    three = _tutorial_4_measure(FixedSchedule.uniform(3))
+    prints_as(three[1], 0.0078)
+    prints_as(three[2], [1.22, 1.55], 2)
+
+
+def test_2_tutorial_4s_reading_of_the_uniform_and_adaptive_ladders():
+    """The numbers tutorial 4 reads off its figures, each from the plotted data."""
+    uniform = figures.ladder_uniform()[1]
+    exact_mean, exact_sd = uniform["exact_mean"], uniform["exact_sd"]
+    # "Between beta = 0 and beta = 1/6 its mean goes from [1, 1] to within
+    # 0.003 of the posterior's, and its standard deviations fall from 1 to
+    # [0.089, 0.077]."
+    prints_as(exact_mean[0], [1.0, 1.0])
+    assert np.abs(exact_mean[1] - exact_mean[-1]).max() < 0.003
+    prints_as(exact_sd[0], [1.0, 1.0])
+    prints_as(exact_sd[1], [0.089, 0.077], 3)
+    # "The other five steps ... narrow it by a further factor of 2.4 and
+    # barely move it."
+    prints_as(exact_sd[1] / exact_sd[-1], [2.4, 2.4], 1)
+    # "The ensemble at beta = 1/6 is 8.7 times too wide in the decay rate."
+    ratio = uniform["cloud_sd"] / exact_sd
+    prints_as(ratio[1, 1], 8.7, 1)
+    # "the later steps never fully recover from that": the rate stays over
+    # 10% wide to the end, while the geometric ladder ends within 5%.
+    assert ratio[-1, 1] > 1.1
+
+    adaptive = figures.ladder_adaptive()[1]
+    increments = np.diff(adaptive["levels"])
+    # "grow from 0.001 to 0.68, by a factor of almost 700".
+    prints_as(increments[0], 0.001, 3)
+    prints_as(increments[-1], 0.68, 2)
+    assert 650 < increments[-1] / increments[0] < 700
+    # "between beta = 0 and beta = 0.001 the target's mean moves by 0.56 in
+    # the amplitude, about 0.9 of its new standard deviation, while across the
+    # whole last step, from beta = 0.3152 to 1, it moves by 0.001, a fortieth
+    # of one."
+    mean, sd = adaptive["exact_mean"], adaptive["exact_sd"]
+    first = mean[1, 0] - mean[0, 0]
+    prints_as(first, 0.56, 2)
+    prints_as(first / sd[1, 0], 0.9, 1)
+    prints_as(adaptive["levels"][-2], 0.3152)
+    last = mean[-1, 0] - mean[-2, 0]
+    prints_as(last, 0.001, 3)
+    prints_as(sd[-1, 0] / last, 40.0, -1)
+    # "moves the target further": in both parameters, measured in its own sd.
+    shift_first = np.abs(mean[1] - mean[0]) / sd[1]
+    shift_last = np.abs(mean[-1] - mean[-2]) / sd[-1]
+    assert (shift_first > shift_last).all(), (shift_first, shift_last)
+
+    # "their median is 2900 ... and their mean is 5.9 x 10^5, dominated by two
+    # particles ... Entering the last step the mean is 8.1."
+    problem = toy.exponential_decay()
+    result = run(
+        _state(),
+        problem.forward,
+        problem.y,
+        problem.noise_cov,
+        update_rule=SQUARE_ROOT,
+        schedule=AdaptiveESSSchedule(),
+    )
+    misfit_mean = np.asarray(result.stacked.misfit_mean)
+    prints_as(misfit_mean[0] / 1e5, 5.9, 1)
+    prior_phi = np.asarray(
+        eki.misfits(
+            problem.y, problem.forward(_state().ensemble["u"]), problem.noise_cov
+        )
+    )
+    assert np.isclose(prior_phi.mean(), misfit_mean[0], rtol=1e-12, atol=0.0)
+    prints_as(np.median(prior_phi), 2900.0, -2)
+    two = np.sort(prior_phi)[-2:].sum() / prior_phi.sum()
+    assert two > 0.9, two
+    prints_as(misfit_mean[-1], 8.1, 1)
+
+    # "the six-step ladders here cost 6 x 64 = 384 particle evaluations each".
+    assert result.n_evaluations * 64 == 384
+
+
+def test_2_tutorial_4s_geometric_ratios():
+    """ "ratios of 2, 4 and 5 also beat the uniform ladder on this problem, in
+    both the mean and the spread. At a ratio of 8 the last increment is 0.875,
+    and the error in the mean is worse than the uniform ladder's." """
+    _, uniform_error, uniform_ratio = _tutorial_4_measure(FixedSchedule.uniform(6))
+    for ratio in (2.0, 3.0, 4.0, 5.0):
+        increments = figures.geometric_increments(ratio=ratio)
+        _, error, sd_ratio = _tutorial_4_measure(FixedSchedule(increments))
+        assert error < uniform_error, (ratio, error)
+        assert (sd_ratio < uniform_ratio).all(), (ratio, sd_ratio)
+    increments = figures.geometric_increments(ratio=8.0)
+    prints_as(increments[-1], 0.875, 3)
+    _, error, _ = _tutorial_4_measure(FixedSchedule(increments))
+    assert error > uniform_error, error
 
 
 # ===========================================================================
@@ -753,6 +1058,111 @@ def test_4_the_two_forms_figure_plots_what_tutorial_3_says():
     assert data["unstopped_sd"].max() < data["stopped_sd"].min()
 
 
+@pytest.mark.parametrize(
+    "name", ["04-one-step", "04-uniform", "04-geometric", "04-adaptive"]
+)
+def test_4_tutorial_4s_ladder_figures_plot_the_page_s_runs(name):
+    """Each tracked-ladder figure draws the run the page's block runs.
+
+    The levels and the `ess` are the page's printed ones, the first cloud is
+    the prior ensemble every ladder starts from, and the final cloud's spread
+    is the one the page's block prints. Every panel holds the cloud it is
+    about, with at most a handful of particles outside.
+    """
+    data = figures.FIGURES[name]()[1]
+    assert data["n_particles"] == 64
+    printed = {
+        "04-one-step": ([0.0, 1.0], [1.0]),
+        "04-uniform": (
+            [0.0, 0.1667, 0.3333, 0.5, 0.6667, 0.8333, 1.0],
+            [1.0, 4.3995, 44.1291, 56.8427, 59.0309, 60.0377],
+        ),
+        "04-geometric": (
+            [0.0, 0.0027, 0.011, 0.0357, 0.1099, 0.3324, 1.0],
+            [11.6003, 15.2073, 33.5608, 43.5112, 45.3461, 46.2407],
+        ),
+        "04-adaptive": (
+            [0.0, 0.001, 0.0029, 0.0112, 0.0571, 0.3152, 1.0],
+            [24.5511, 32.0, 32.0, 32.0, 32.0, 44.567],
+        ),
+    }[name]
+    prints_as(data["levels"], printed[0])
+    prints_as(data["ess"], printed[1])
+    assert np.array_equal(data["cloud_sd"][0], _sd(_state().ensemble))
+    final_sd = {
+        "04-one-step": [0.0584, 0.6448],
+        "04-uniform": [0.0403, 0.0376],
+        "04-geometric": [0.0373, 0.0333],
+        "04-adaptive": [0.0374, 0.0338],
+    }[name]
+    prints_as(data["cloud_sd"][-1], final_sd)
+    # Every cloud is paired with its own level: the first is the prior's.
+    prints_as(data["exact_mean"][0], [1.0, 1.0])
+    # The last is the target's. Six steps of 1/6 end at 1 only to round-off.
+    reference_sd = figures._tempered_moments(1.0)[1]
+    assert np.allclose(data["exact_sd"][-1], reference_sd, rtol=1e-12, atol=0.0)
+    assert data["particles_outside_panel"].max() <= 3, data[
+        "particles_outside_panel"
+    ]
+
+
+def test_4_tutorial_4s_geometric_ladder_tracks_where_the_uniform_one_lags():
+    """The contrast the uniform and geometric figures draw.
+
+    The page reads the uniform figure as an ensemble that is far too wide at
+    its first level and never fully recovers, and the geometric one as
+    following the contours at every level. In the rate, the geometric
+    ladder's worst level is within 65% of the exact spread, the uniform
+    ladder's is 8.7 times it.
+    """
+    uniform = figures.ladder_uniform()[1]
+    geometric = figures.ladder_geometric()[1]
+    uniform_ratio = uniform["cloud_sd"] / uniform["exact_sd"]
+    geometric_ratio = geometric["cloud_sd"] / geometric["exact_sd"]
+    assert uniform_ratio[:, 1].max() > 8.0
+    assert geometric_ratio.max() < 1.7
+    assert (geometric_ratio[-1] < uniform_ratio[-1]).all()
+
+
+def test_4_the_refinement_figure_plots_what_tutorial_4_says():
+    """Tutorial 4's refinement figure and the sentences reading it."""
+    data = figures.refinement()[1]
+    assert data["n_particles"] == 64
+    assert np.array_equal(data["uniform_evaluations"], data["uniform_steps"])
+    error = data["uniform_mean_error"]
+    rate = data["uniform_sd_ratio"][:, 1]
+    # "that bought a better answer at every length tried", in both panels.
+    assert np.all(np.diff(error) < 0.0), error
+    assert np.all(np.diff(rate) < 0.0), rate
+    # "from an error in the mean of 0.099 at one step to 0.0001 at 96".
+    prints_as(error[0], 0.099, 3)
+    prints_as(error[-1], 0.0001, 4)
+    # "the decay rate is the worse-matched of the two parameters in every run
+    # drawn".
+    assert (data["uniform_sd_ratio"][:, 1] > data["uniform_sd_ratio"][:, 0]).all()
+    for name in ("geometric", "adaptive", "misfit"):
+        assert data[f"{name}_evaluations"] == 6
+        assert data[f"{name}_sd_ratio"][1] > data[f"{name}_sd_ratio"][0]
+    # "The six-step geometric ladder matches a uniform ladder of twelve steps
+    # in the mean (0.0017 against 0.0018) and of 24 in the spread (both 5%
+    # wide in the decay rate)".
+    steps = list(data["uniform_steps"])
+    twelve, twenty_four = steps.index(12), steps.index(24)
+    prints_as(data["geometric_mean_error"], 0.0017)
+    prints_as(error[twelve], 0.0018)
+    prints_as(data["geometric_sd_ratio"][1] - 1.0, 0.05, 2)
+    prints_as(rate[twenty_four] - 1.0, 0.05, 2)
+    # And the matching is not loose: the geometric ladder is at least as good
+    # as uniform-12 in the mean, and better than uniform-12 in the spread.
+    assert data["geometric_mean_error"] < error[twelve]
+    assert data["geometric_sd_ratio"][1] < rate[twelve]
+    # The three six-step points sit below the uniform line at six.
+    six = steps.index(6)
+    for name in ("geometric", "adaptive", "misfit"):
+        assert data[f"{name}_mean_error"] < error[six], name
+        assert data[f"{name}_sd_ratio"][1] < rate[six], name
+
+
 # ===========================================================================
 # 3. the two claims the pages rest on
 # ===========================================================================
@@ -977,3 +1387,95 @@ def test_8_tau_1_and_tau_2_stop_at_the_same_step():
     assert rows[2.0][0] == rows[1.0][0] == 2.0, rows
     assert np.array_equal(rows[2.0][1], rows[1.0][1]), rows
     prints_as(rows[1.0][1], [1.15, 2.94], 2)
+
+
+# ===========================================================================
+# 6. tutorial 4's claims beyond one ensemble
+# ===========================================================================
+
+
+def test_9_the_ladder_ordering_across_six_initial_ensembles():
+    """Tutorial 4: "On six of them, drawn from keys 0 to 5, the geometric
+    ladder beat the uniform one in both columns every time. The adaptive
+    ladders choose their own length, so they did not always cost six
+    evaluations: the misfit schedule beat the uniform ladder every time, once
+    taking seven steps, and the ESS schedule on five of the six, losing on the
+    one key where it took five."
+    """
+    problem = toy.exponential_decay()
+    ladders = {
+        name: figures.TUTORIAL_4_LADDERS[name]()
+        for name in ("uniform", "geometric", "adaptive", "misfit")
+    }
+    beats, lengths = {}, {}
+    for seed in range(6):
+        measured = {
+            name: _tutorial_4_measure(s, problem, seed)
+            for name, s in ladders.items()
+        }
+        _, uniform_error, uniform_ratio = measured["uniform"]
+        # "a well-chosen fixed ladder is as good as an adaptive one, and here
+        # slightly better": on key 0, and, as `HANDOFF.md` records, on all six.
+        assert measured["geometric"][1] < measured["adaptive"][1], seed
+        assert (measured["geometric"][2] < measured["adaptive"][2]).all(), seed
+        for name in ("geometric", "adaptive", "misfit"):
+            calls, error, ratio = measured[name]
+            beats.setdefault(name, []).append(
+                bool(error < uniform_error and (ratio < uniform_ratio).all())
+            )
+            lengths.setdefault(name, []).append(calls)
+    assert all(beats["geometric"]), beats
+    assert lengths["geometric"] == [6] * 6
+    assert all(beats["misfit"]), beats
+    assert sorted(lengths["misfit"]) == [6, 6, 6, 6, 6, 7], lengths
+    assert sum(beats["adaptive"]) == 5, beats
+    losing = beats["adaptive"].index(False)
+    assert lengths["adaptive"][losing] == 5, lengths
+    assert sorted(lengths["adaptive"]) == [5, 6, 6, 6, 6, 6], lengths
+
+
+def test_9_refinement_across_six_initial_ensembles():
+    """Tutorial 4: "On keys 4 and 5, two equal steps ended further from the
+    target's mean than one step did (0.17 against 0.11 on key 4); from three
+    steps on, a longer uniform ladder was better on all six keys."
+
+    "Better" in both columns: the error in the mean and the spread in each
+    parameter.
+    """
+    problem = toy.exponential_decay()
+    worse_at_two = []
+    for seed in range(6):
+        measured = [
+            _tutorial_4_measure(FixedSchedule.uniform(n), problem, seed)
+            for n in figures.REFINEMENT_STEPS
+        ]
+        error = np.asarray([m[1] for m in measured])
+        ratio = np.asarray([m[2] for m in measured])
+        if error[1] > error[0]:
+            worse_at_two.append(seed)
+        if seed == 4:
+            prints_as([error[1], error[0]], [0.17, 0.11], 2)
+        assert np.all(np.diff(error[2:]) < 0.0), (seed, error)
+        assert np.all(np.diff(ratio[2:], axis=0) < 0.0), (seed, ratio)
+    assert worse_at_two == [4, 5]
+
+
+def test_9_the_misfit_schedule_takes_longer_steps_with_more_observations():
+    """Tutorial 4: "on the same model observed at 1000 times instead of 12,
+    the misfit schedule takes 4 steps where the ESS schedule takes 6"."""
+    problem = toy.exponential_decay(n_times=1000)
+    state = EKIState.from_prior(jax.random.key(0), problem.prior, n_particles=64)
+    calls = {}
+    for name, schedule in (
+        ("ess", AdaptiveESSSchedule()),
+        ("misfit", eki.AdaptiveMisfitSchedule()),
+    ):
+        calls[name] = run(
+            state,
+            problem.forward,
+            problem.y,
+            problem.noise_cov,
+            update_rule=SQUARE_ROOT,
+            schedule=schedule,
+        ).n_evaluations
+    assert calls == {"ess": 6, "misfit": 4}

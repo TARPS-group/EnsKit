@@ -10,13 +10,89 @@ additions, and 2026-10-04 after PR 3's distribution contract, PR 10's
 Kronecker operators, PR 4's `enskit.distribution`, the fix for #60, PR 5's
 `enskit.maps`, PR 6's `enskit.kalman`, PR 9's localization and PR 7's
 `enskit.algorithms.eki`, and 2026-10-05 after PR 8's `enskit.algorithms.enkf`,
-PR 11's documentation and PR 12's release.
+PR 11's documentation and PR 12's release, and 2026-10-05 after tutorial 4
+(#77).
 Read
 `CLAUDE.md` first for conventions, including the layer rules, which the
 redesign replaced; then the two sections below; then the rest of this file,
 which describes the code as it stands before the redesign lands. That
 description is historical: where it names `pyeki.<module>`, the module is now
 `enskit.<module>`.
+
+## 2026-10-05: tutorial 4, "Tempering schedules" (#77)
+
+The first of #77's six tutorials, one per PR. Tutorials 5 to 9 remain stubs;
+#77 stays open.
+
+**Decided with the maintainer: the page runs `kalman.SymmetricSquareRoot`**,
+as tutorials 2 and 3 do. Measured at 64 particles over keys 0 to 5, the
+choice is a trade: under the square-root rule the uniform, geometric and
+adaptive ladders separate the same way on every key, and from three steps on
+refining a uniform ladder improves the answer on every key (only the step
+from 1 to 2 worsens the mean, on keys 4 and 5); under `Matheron` refinement
+is non-monotone at every length (key 1: 0.0014 at 6 steps, 0.0075 at 24) and
+the middle ladders do not separate, their order changing with the key. So
+the stub's bullet "two ladders give two answers, and neither bounds the
+other" is shown only weakly, by the keys 4 and 5 sentence. The page says
+refinement helped from key 0 under this rule and is no guarantee; tutorial
+3's bullet that promised the demonstration is reworded; the Matheron
+measurements are in tutorial 5's stub, under *Notes for the writer*.
+
+**What the page shows**, every number pinned in `tests/test_tutorials.py`
+(`test_1_tutorial_4_blocks_run`, `test_2_tutorial_4s_*`, `test_4_tutorial_4s_*`,
+`test_4_the_refinement_figure_*`, and section 6, `test_9_*`): one step; six
+equal steps (first-step `ess` 1.0, the target having moved almost all the way
+by $\beta = 1/6$); six steps growing threefold (`FixedSchedule` of an
+explicit tuple, error in the mean halved); `AdaptiveESSSchedule` (same shape,
+chosen unaided; slightly *worse* than the geometric ladder on every key, said
+plainly); `AdaptiveMisfitSchedule` (the same ladder at $N = 12$; 4 steps to the
+ESS schedule's 6 at $N = 1000$). Then why early increments are tiny, a
+refinement figure (the geometric six-step ladder matches uniform-12 in the
+mean and uniform-24 in the spread), cost, the increment floor, and drawing a
+ladder with `eki.iterate`. Claims about other initial ensembles are tested
+over keys 0 to 5 in `test_9_the_ladder_ordering_across_six_initial_ensembles`.
+
+**Figures** (`docs/figures.py`): `04-one-step`, `04-uniform`,
+`04-geometric`, `04-adaptive`, `04-refinement`. The tracked-panel drawing of
+tutorial 1's `bridge_tracked` is now `_tracked_panels`, shared with the
+tutorial 4 ladders, and `_ladder` takes the final cloud from the state
+`iterate` yields last rather than from a second run, and returns the records
+too; tutorial 1's figure data are unchanged (its tests pass as they were).
+`TUTORIAL_2_3_UPDATE` is now `TUTORIALS_2_TO_4_UPDATE`. `geometric_increments`
+is the page's expression, so the page's ladder and the figures' are the same
+floats, which the blocks test asserts.
+
+**Also changed.** `AdaptiveMisfitSchedule`'s docstring and the EKI contract
+said it takes "far longer steps" than the ESS schedule with the ESS near 1;
+at $N = 12$ the two choose nearly the same ladder, so both now say it *tends*
+to, by a problem-dependent amount. The first draft said "when the
+observations are many", which the review refuted (`toy.linear_gaussian` at
+$P = 50$, $N = 10$: 11 steps for the ESS schedule, 7 for the misfit one).
+Behavior is unchanged.
+
+**The adversarial review's findings were fixed here**: three prose claims
+the measurements contradicted (what the first adaptive step changes; why the
+prior's mean misfit is large, which two particles dominate; refinement being
+monotone on every key), the misfit-schedule wording above, false notes in
+this file and tutorial 5's stub, several overstatements, the refinement
+figure's hidden ESS point and its color, and tests that did not pin the
+plotted clouds.
+
+**The version is `0.2.0.dev0`**, and the changelog has `## 0.2.0
+(unreleased)`, as *Releases* in `CLAUDE.md` asks of the first PR after a
+release. #81's third point (two PRs after a release both believing they are
+the first) applies: if another PR bumped the version first, keep one bump
+when merging.
+
+**For the next tutorial PRs** (5 to 9, #77):
+
+- Tutorial 5 inherits the refinement-under-`Matheron` point; its stub has the
+  numbers.
+- The pattern that worked here: measure every candidate over keys 0 to 5
+  before writing; state one key's numbers on the page, and test any sentence
+  about other keys over all six.
+- `figures._ladder(n, schedule, rule)` returns `(levels, clouds, records)`,
+  and `_tracked_panels(levels, clouds, n_cols=, figsize=)` draws any ladder.
 
 ## 2026-10-05: PR 12, release 0.1.0
 
