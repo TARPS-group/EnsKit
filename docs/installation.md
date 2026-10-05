@@ -1,42 +1,68 @@
 # Installation
 
-EnsKit uses [uv](https://docs.astral.sh/uv/) for environment and dependency
-management.
-
-## From a clone
-
-```bash
-git clone https://github.com/TARPS-group/EnsKit.git
-cd EnsKit
-uv sync
-```
-
-This creates a `.venv` and installs EnsKit in editable mode with its runtime
-dependencies, JAX and NumPy.
-
-To include the test, lint and documentation tooling:
-
-```bash
-uv sync --group dev
-```
+EnsKit needs Python 3.11 or later, and depends on JAX 0.10.1 or later and
+NumPy 2.0 or later. It is not on PyPI yet; each release is a tag of the
+repository, and installs from there.
 
 ## As a dependency
 
-Until EnsKit is published, depend on a local checkout:
+With [uv](https://docs.astral.sh/uv/):
+
+```bash
+uv add "enskit @ git+https://github.com/TARPS-group/EnsKit@v0.1.0"
+```
+
+which records the dependency in your `pyproject.toml` as
 
 ```toml
 [project]
 dependencies = ["enskit"]
 
 [tool.uv.sources]
-enskit = { path = "../EnsKit", editable = true }
+enskit = { git = "https://github.com/TARPS-group/EnsKit", rev = "v0.1.0" }
 ```
+
+Only uv reads `tool.uv.sources`. For a `pyproject.toml` that pip and other
+tools also read, write the dependency as a direct reference, which
+`uv add --raw` records:
+
+```toml
+[project]
+dependencies = ["enskit @ git+https://github.com/TARPS-group/EnsKit@v0.1.0"]
+```
+
+With pip:
+
+```bash
+pip install "enskit @ git+https://github.com/TARPS-group/EnsKit@v0.1.0"
+```
+
+Name the tag rather than a branch, so an install does not change under you.
+The {doc}`changelog` lists what each release changes; until 1.0, a minor
+release (0.2, 0.3, ...) may change the interfaces, and a patch release does
+not.
+
+## From a clone
+
+To work on EnsKit itself, use uv:
+
+```bash
+git clone https://github.com/TARPS-group/EnsKit.git
+cd EnsKit
+uv sync --group dev
+```
+
+This creates a `.venv`, installs EnsKit in editable mode with its runtime
+dependencies, and adds the test, lint and documentation tooling.
 
 ## Verifying the install
 
-```bash
-uv run pytest
+```python
+import enskit
+enskit.__version__     # '0.1.0'
 ```
+
+From a clone, `uv run pytest` runs the test suite.
 
 ## Float64
 

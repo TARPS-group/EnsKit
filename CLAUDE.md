@@ -13,8 +13,9 @@ It is a **library**, not a research repository. The deliverable is a
 well-documented, well-tested package that colleagues can depend on. Prefer
 clarity and correctness over cleverness, and keep the public surface small.
 
-**The redesign is in progress.** `docs/redesign/index.md` records the design
-and the plan, a sequence of pull requests numbered 0 to 12; the full design
+**The redesign is complete.** `docs/redesign/index.md` records the design
+and the plan, a sequence of pull requests numbered 0 to 12, all merged, the
+last of them the 0.1.0 release; the full design
 document is `docs/redesign/design.html`, and `docs/redesign/stubs/` holds the
 docstrings each layer starts from. PR 1 renamed the package from `pyeki`;
 the GitHub repository is now `TARPS-group/EnsKit`. PR 7
@@ -101,7 +102,7 @@ is preceded by one **evaluation** of the forward model. "Rung" and
 
 ## Pull requests and handoffs
 
-The redesign is built one pull request at a time, each in its own fresh
+EnsKit is built one pull request at a time, each in its own fresh
 session. Sessions do not carry state for each other: **the repository and its
 GitHub issues are the source of truth.** Anything a later session needs goes
 into one of these, never only into a chat or a prompt:
@@ -109,7 +110,7 @@ into one of these, never only into a chat or a prompt:
 | what | where |
 | --- | --- |
 | the design and the plan | `docs/redesign/index.md`; the normative contracts in `docs/` as they are written, which supersede the design where they differ |
-| a PR's scope, completion criteria and exceptions | its tracking issue in the "EnsKit 0.1" milestone |
+| a PR's scope, completion criteria and exceptions | its tracking issue, in the milestone of the next release ("EnsKit 0.2") |
 | project rules | this file |
 | current state, gotchas, notes for upcoming PRs | `HANDOFF.md` |
 | a design tension with concrete instances | a new GitHub issue, with the numbers and the options |
@@ -138,7 +139,9 @@ into one of these, never only into a chat or a prompt:
 1. Open it against `main` in the milestone, with `Closes #N`, the checks run,
    and any exceptions listed. The maintainer reviews and merges; never merge.
 2. In the same PR, update `HANDOFF.md`: the current state, and anything the
-   next PRs need that their issues do not already say.
+   next PRs need that their issues do not already say. A PR that changes
+   what a user sees adds a line to the newest, unreleased entry of
+   `CHANGELOG.md` (see *Releases*).
 3. Comment on the issue of any later PR that a finding affects.
 4. Hand off by offering the next PR, or PRs, whose dependencies are met as a
    suggested task (the desktop app's task chip, which the maintainer starts
@@ -146,11 +149,30 @@ into one of these, never only into a chat or a prompt:
    prompt says to start only after it merges. The prompt carries pointers
    only, because everything else is already in the repository:
 
-   > Implement PR N of the EnsKit plan, tracking issue #M. Follow "Pull
-   > requests and handoffs" in `CLAUDE.md`.
+   > Implement issue #M of EnsKit. Follow "Pull requests and handoffs" in
+   > `CLAUDE.md`.
 
    Without the desktop app, the maintainer pastes the same line into a new
    session.
+
+## Releases
+
+The version is written once, as `enskit.__version__` in
+`enskit/__init__.py`; the package metadata and the docs read it from there.
+`tests/test_release.py` checks the places that cannot.
+
+- **Between releases** `__version__` is the next release's `X.Y.Z.dev0`, and
+  the newest entry of `CHANGELOG.md` is headed `## X.Y.Z (unreleased)`. The
+  first PR after a release opens that entry and sets the version. Until 1.0,
+  a minor release may change the interfaces, and its entry lists every such
+  change; a patch release does not change them.
+- **A release PR** sets `__version__` to `X.Y.Z`, drops ` (unreleased)` from
+  the heading, points the install commands in `README.md` and
+  `docs/installation.md` at the tag `vX.Y.Z`, and runs `uv run pytest -m slow`.
+- **After it merges**, the maintainer tags the merge commit `vX.Y.Z` and
+  pushes the tag. `.github/workflows/release.yml` then checks the tag against
+  the version, tests the built wheel, and publishes the GitHub release with
+  the changelog entry and both distributions. EnsKit is not on PyPI yet.
 
 ## Package management
 
