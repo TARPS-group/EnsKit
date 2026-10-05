@@ -8,12 +8,89 @@ Gaussian and a sample container, 2026-10-03 when the EnsKit redesign was
 adopted, the same day after PR 1's renames, again after PR 2's linalg
 additions, and 2026-10-04 after PR 3's distribution contract, PR 10's
 Kronecker operators, PR 4's `enskit.distribution`, the fix for #60, PR 5's
-`enskit.maps` and PR 6's `enskit.kalman`. Read
+`enskit.maps`, PR 6's `enskit.kalman` and PR 9's localization. Read
 `CLAUDE.md` first for conventions, including the layer rules, which the
 redesign replaced; then the two sections below; then the rest of this file,
 which describes the code as it stands before the redesign lands. That
 description is historical: where it names `pyeki.<module>`, the module is now
 `enskit.<module>`.
+
+## 2026-10-04: PR 9, localization
+
+`enskit.kalman` gained `LocalizedUpdateRule`, `DomainLocalization` and
+`gaspari_cohn`, in the private module `_localization.py`, implementing the
+contract's new section *Localization*, which was written first. The user-guide
+page is `docs/user-guide/localization.md` (its code blocks run in
+`tests/test_localization.py`, which also covers the contract's obligations 20
+to 26); the API reference has a section. `check_update_rule` takes
+`diagonal_noise=True` for a rule that accepts only row-local noise.
+
+**How it works.** The neighborhoods (the $K$ nearest given coordinates, ties
+to the lower index) and the taper weights are computed once, when the
+`DomainLocalization` is constructed. The build whitens the aligned
+approximation's given factor rows once ($J$ vectors per given block), and for
+each located target coordinate builds one `IdentityPlusGram` of the
+$J \times K$ local whitened factor under `jax.vmap`, keeping the local gain row
+$S_p^\top A_p^{-1} f_p$ (and, around `SymmetricSquareRoot`, the local
+anomalies). A call whitens one vector per given block and only gathers and
+contracts. Targets named with `None` get the wrapped rule's global update,
+computed the same way with one global `IdentityPlusGram`; around `Matheron`
+every local and global update shares one draw, `normal(k_noise, (J, N))` with
+`Matheron`'s key split, so with no localization the result equals `Matheron`'s
+for the same key.
+
+**Decided here** (the contract's departures 10 to 14):
+
+- Every target block must be named in `target_coords`, `None` for global. An
+  omitted block raising beats a forgotten one going global silently.
+- The stochastic local residual is $\sqrt\rho\,W(y^* - g_j) - \varepsilon_j$,
+  so each local problem gets noise of its own variance $r/\rho$. The design
+  prototype scaled $\varepsilon$ by $\sqrt\rho$ as well, which under-disperses
+  each coordinate by $\kappa^\top\operatorname{diag}(1-\rho)\kappa$; a
+  regression test measures the variance and can tell the two apart.
+- Only row-local noise (`PSDDiagonal` or `Identity`, under any number of
+  `PSDScaled`), only aligned approximations, no target terms. The exclusions
+  section of the contract lists what was left out and why (correlated
+  blocks, a localized general path for hybrids, grouping coordinates that
+  share a location).
+- The taper's positive-definiteness hazard of issue #14 is covariance
+  localization's, not this one's: any taper with values in $[0, 1]$ gives a
+  valid update, and a boxcar is tested exact. A weight above 1 raises in
+  debug mode.
+
+**Things not to rediscover.** `gaspari_cohn`'s outer branch rounds to
+$-10^{-6}$ in float32 near $z = 2$, so it is clamped at zero; the square root
+of a weight is taken with a zero derivative at zero, or a derivative in the
+radius is `nan` wherever a weight is exactly zero. The wide-localization
+comparison with `Matheron` agrees to about $10^{-14}$, not $10^{-15}$: the two
+paths contract in different orders.
+
+**Opened by the adversarial review**: #68, a scalar scale promotes a float32
+operator to float64, so a float32 tempered run fails with every rule (the
+localized build now refuses it by name; `SymmetricSquareRoot`'s built update
+returns float64 silently, though `update` catches it), which PR 7 must settle
+before float32 runs work; and #69, localization's construction and build
+memory, $d_x N$ and $d_x J K$, unguarded. The review's trivial findings were
+fixed here and are the contract's *Changes made while implementing* 7 to 11.
+
+**Settled from the old open decisions.** The validity mask on `Evaluation`
+is not needed by localization: updates take unweighted, finite particles, so
+a failed particle is repaired or dropped before any rule sees it. Issue #11's
+accessor items concern the old `gauss` module; localization needed only the
+public `Gaussian.factor`, `block_cov(...).whiten` and `IdentityPlusGram`.
+
+**For later PRs.**
+
+- **PR 7 (EKI).** A localized rule goes in as `update_rule`; the tempered
+  noise `R * (1 / delta)` of a `PSDDiagonal` is row-local, and the bare
+  `given_coords` form exists for the driver's internal prediction block.
+  Issue #14's demonstration (a $P = 2000$, $J = 40$ linear inversion whose
+  global run stays in a 39-dimensional subspace) can become a driver test or
+  example once the driver exists; the user guide has the one-update version.
+- **PR 8 (EnKF).** Example 12 of the design (Lorenz-96, localized ETKF and
+  stochastic EnKF) should run against `LocalizedUpdateRule` unchanged; its
+  `problem.coords` and `problem.obs_coords` are what `toy.lorenz96` must
+  provide.
 
 ## 2026-10-04: PR 6, `enskit.kalman`
 
@@ -703,34 +780,13 @@ pyEKI. Nothing domain-specific should come back across.
 
 Follow the plan in `docs/redesign/index.md`, one pull request at a time, in
 a fresh session for each, as described in "Pull requests and handoffs" in
-`CLAUDE.md`. PRs 1 (#35), 2 (#36), 3 (#37), 4 (#38), 5 (#39), 6 (#40) and
-10 (#44) are done. PR 7 (#41, EKI) and PR 9 (#43, localization) both have
-their dependencies met and can run side by side.
+`CLAUDE.md`. PRs 1 (#35), 2 (#36), 3 (#37), 4 (#38), 5 (#39), 6 (#40), 9
+(#43) and 10 (#44) are done. PR 7 (#41, EKI) has its dependencies met; PR 8
+follows it, and PR 11 needs 8 and 9.
 #54's fix would change the regressions pinned in
 obligation 17, by design. The notes below, written before the redesign,
 still apply to the pull requests they name; their `pyeki` modules are now
 `enskit` modules.
-
-### Notes for PR 9, `LocalizedUpdateRule`
-
-Domain localization, not covariance localization — `docs/design.md` explains
-why the latter destroys the low-rank structure the conditioning kernel depends
-on. Watch the two hazards recorded there: exempting unlocated parameters from
-tapering, and fixed-size neighborhoods with masks so the local analyses
-vectorize.
-
-In the new design, localization is an update rule, `LocalizedUpdateRule`,
-wrapping `Matheron` or `SymmetricSquareRoot`, and no driver needs to know
-about it. Two things localization must bring
-itself, neither of which `pyeki.eki` supplies: observation **locations**,
-which appear nowhere in the layer and so live as static fields on the rule,
-and the neighborhood and taper definitions. One real limit, recorded in the
-EKI contract's *How the layers around this one connect*: extracting a
-principal submatrix of a *correlated* noise block is not an operator-layer
-operation, so localization composes cleanly for diagonal noise or for
-neighborhoods aligned to the noise operator's blocks, and not for arbitrary
-neighborhoods cutting across a correlated block. That is a constraint on
-neighborhood construction rather than a gap in the layer below.
 
 ### Notes for PR 11, documentation
 
@@ -752,14 +808,6 @@ resolution order rather than exact type lookup; an n-ary flattened sum rather
 than binary nesting; and a way for a rule to decline. A reasonable alternative
 is not to simplify on addition at all, and instead dispatch on structure inside
 `solve` and `logdet`.
-
-**The validity mask on `Evaluation`.** Only `n_valid` is carried, not the
-`(J,)` boolean mask, so an update that wanted to down-weight repaired members
-cannot see which they were. Deferred rather than declined: the update
-protocol's `**_` seam makes adding the field non-breaking, and the consumer
-that would use it — `pyeki.localize` — does not exist yet and so cannot say
-what shape it wants. Revisit when localization lands. The EKI contract's
-*Diagnostics* section records the argument.
 
 (Three decisions previously listed here were settled. Capability declaration
 and whitening versus triangularity went to the operator contract: `supports()`

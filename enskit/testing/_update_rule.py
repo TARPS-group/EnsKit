@@ -8,7 +8,7 @@ import numpy as np
 
 from ..distribution import Ensemble, Gaussian, exact_moment_ensemble
 from ..kalman import gaussian_approximation
-from ..linalg import DensePSD
+from ..linalg import DensePSD, PSDDiagonal
 
 __all__ = ["check_update_rule"]
 
@@ -19,7 +19,9 @@ _N_REPLICATES = 256
 _Z = 5.0
 
 
-def check_update_rule(rule, *, key=None, exact_covariance: bool = True) -> None:
+def check_update_rule(
+    rule, *, key=None, exact_covariance: bool = True, diagonal_noise: bool = False
+) -> None:
     r"""Check an :class:`~enskit.kalman.UpdateRule` against the update contract.
 
     Builds a linear-Gaussian fixture: a parameter block ``"u"`` of dimension
@@ -63,6 +65,12 @@ def check_update_rule(rule, *, key=None, exact_covariance: bool = True) -> None:
         Keyword-only. Whether the rule claims the exact conditional
         covariance on a linear-Gaussian problem. The deterministic EnKF, for
         instance, does not.
+    diagonal_noise : bool
+        Keyword-only. Whether the fixture's noise is the
+        :class:`~enskit.linalg.PSDDiagonal` of :math:`R`'s diagonal, for a
+        rule that accepts only row-local noise, such as
+        :class:`~enskit.kalman.LocalizedUpdateRule`. Everything else is
+        unchanged.
 
     Raises
     ------
@@ -70,14 +78,14 @@ def check_update_rule(rule, *, key=None, exact_covariance: bool = True) -> None:
         Naming the obligation that failed.
     """
     key = jax.random.key(20261004) if key is None else key
-    fix = _fixture(jnp.float64)
+    fix = _fixture(jnp.float64, diagonal_noise)
     keys = jax.random.split(key, 4 + _N_REPLICATES)
 
     # 1. structure
     upd = _build(rule, fix)
     out = _call(upd, fix["y"], keys[0], "1")
     _check_structure(out, fix, "1")
-    fix32 = _fixture(jnp.float32)
+    fix32 = _fixture(jnp.float32, diagonal_noise)
     out32 = _call(_build(rule, fix32), fix32["y"], keys[0], "1")
     _check_structure(out32, fix32, "1 (float32)")
 
@@ -202,7 +210,7 @@ def check_update_rule(rule, *, key=None, exact_covariance: bool = True) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _fixture(dtype) -> dict:
+def _fixture(dtype, diagonal_noise: bool = False) -> dict:
     """The linear-Gaussian fixture, its particles, approximation and answer."""
     rng = np.random.default_rng(1729)
     P, Dv, N, J = 3, 2, 4, 12
@@ -222,7 +230,7 @@ def _fixture(dtype) -> dict:
         factors={"u": arr(L0), "v": arr(B @ L0), "g": arr(H @ L0)},
     )
     particles = exact_moment_ensemble(jax.random.key(0), joint, J)
-    noise = DensePSD(arr(R))
+    noise = PSDDiagonal(arr(np.diag(R))) if diagonal_noise else DensePSD(arr(R))
     approximation = gaussian_approximation(particles, {"g": noise})
     exact = joint.add_noise(g=noise).condition(g=arr(y))
     mean = np.concatenate([np.asarray(exact.mean(n), np.float64) for n in ("u", "v")])

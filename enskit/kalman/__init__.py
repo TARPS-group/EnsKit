@@ -25,6 +25,10 @@ object                               is
                                      particles out
 :class:`SymmetricSquareRoot`         the deterministic rule (ETKF form)
 :class:`Matheron`                    the stochastic rule (Matheron's rule)
+:class:`LocalizedUpdateRule`         domain localization around either rule
+:class:`DomainLocalization`          locations, taper, radius and
+                                     neighborhood size
+:func:`gaspari_cohn`                 the compactly supported taper
 :func:`inflate_multiplicative`       scale the anomalies
 :func:`inflate_additive`             add centered Gaussian draws
 :func:`relax_to_prior_spread`        RTPS: relax the spread toward the prior's
@@ -61,6 +65,7 @@ from ._inflation import (
     relax_to_prior_perturbations,
     relax_to_prior_spread,
 )
+from ._localization import DomainLocalization, LocalizedUpdateRule, gaspari_cohn
 from ._rules import Matheron, SymmetricSquareRoot
 from ._update import ParticleUpdate, UpdateRule, gaussian_approximation, update
 
@@ -71,6 +76,9 @@ __all__ = [
     "ParticleUpdate",
     "SymmetricSquareRoot",
     "Matheron",
+    "LocalizedUpdateRule",
+    "DomainLocalization",
+    "gaspari_cohn",
     "inflate_multiplicative",
     "inflate_additive",
     "relax_to_prior_spread",
