@@ -80,6 +80,14 @@ float64 evidence); and the tests gained the cases it showed missing.
 - **Example 13's inflation of 1.02 is seed-sensitive** on the new toy truth:
   it lost the truth at two of seeds 0 to 3 (errors 2.8, 2.3); 1.05 tracked
   all four (0.31 to 0.39). The test and the user guide use 1.05.
+- **Lorenz-96 numbers are not portable.** The 1000-step spin-up turns a
+  $10^{-15}$ change in the start into an $O(10)$ change in $x_0$, so CI's
+  Linux filters a different trajectory from macOS at the same seed. The
+  first CI run failed on two pinned digits (the guide's error, 0.336 against
+  0.308; localized stochastic 0.54 against a bound of 0.5). Lorenz-96 tests
+  now check bands measured over seeds 0 to 5, and the guide says its numbers
+  are approximate. PR 11's stored Lorenz-96 notebook outputs will differ by
+  platform for the same reason.
 - **Float32 filters work** with both rules and every policy: the filter
   never scales the noise covariance, so #68 does not arise here.
 - `kalman.update`'s shipped rules already refuse an approximation that drops
@@ -1054,6 +1062,7 @@ layer; this is the index.
 | `cumsum` of normalized weights can end just below 1 | systematic resampling with a clip to `J - 1` then selects the last particle even at weight zero; scale positions by `cumsum[-1]` and bound by the last positive weight |
 | A numerically singular noise covariance that still whitens gives a *correct* conditional to about $10^{-9}$, not a wrong one | the conditional exists whenever $F_cF_c^\top + D_c$ is nonsingular; what fails silently is the thin-basis covariance at large $\sigma_{\max}$, which collapses to exactly $0$ (#54) |
 | A multi-line `:alt:` value breaks a MyST `{figure}` | the continuation lines are absorbed into the caption, and the build fails with "Figure caption must be a paragraph" pointing at the directive rather than at the option |
+| A chaotic toy's numbers are not portable | Lorenz-96's spin-up turns a $10^{-15}$ change into an $O(10)$ change in the state, so a digit pinned on macOS fails on CI's Linux; test claims in bands measured across seeds |
 | `jax.random.fold_in(k, i)` equals `jax.random.split(k, n)[i]` for every `n > i` (partitionable threefry, the default) | a key "derived" by folding in a small integer is one a caller's split of the same key also produces, so a toy's draw silently repeats a run's; fold in a large constant, then split |
 
 ## Working agreements

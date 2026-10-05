@@ -68,8 +68,15 @@ below the observation noise, although only half the sites are observed:
 def rmse(means, truth):
     return jnp.sqrt(jnp.mean((means - truth) ** 2, axis=1))
 
-error = rmse(result.means["x"], problem.truth)[50:].mean()   # 0.308
+error = rmse(result.means["x"], problem.truth)[50:].mean()   # about 0.3
 ```
+
+The numbers on this page for Lorenz-96 are approximate, and yours will
+differ. The system is chaotic, so a change in the last bit of the arithmetic,
+such as a different processor or linear algebra library, changes the
+trajectory the toy problem generates, and with it every error and evidence.
+The comparisons the page draws held at each of the problem's seeds 0 to 5;
+the digits do not carry over.
 
 The update rule is required and has no default. `kalman.Matheron()` draws
 perturbations and needs the key; `kalman.SymmetricSquareRoot()`, the ensemble
@@ -108,15 +115,18 @@ evidence = [float(r.total_log_evidence) for r in runs]
 errors = [float(rmse(r.means["x"], problem.truth)[50:].mean()) for r in runs]
 ```
 
+On one run (problem seed 0) the four gave:
+
 | `anomaly_scale` | 1.0 | 1.05 | 1.1 | 1.2 |
 | --------------- | --- | ---- | --- | --- |
 | total log evidence | −8769.5 | −8808.3 | −9016.5 | −9520.5 |
 | error | 0.290 | 0.316 | 0.406 | 0.614 |
 
 The evidence ranks the four the same way as the error, which needs the truth.
-With 40 particles and the deterministic update, this filter does best
-without inflation. For a smaller ensemble or another update rule, the same
-comparison chooses the factor.
+Which factor is best depends on the trajectory: at some of the problem's
+other seeds, no inflation lets the filter drift and 1.05 is best. The
+evidence found the best factor at every seed tried, which is the point of
+comparing it.
 
 ## Checking against the exact filter
 
@@ -179,9 +189,9 @@ def small(update_rule):
     )
     return rmse(run.means["x"], problem.truth)[50:].mean()
 
-error_global = small(kalman.SymmetricSquareRoot())                    # 3.613
+error_global = small(kalman.SymmetricSquareRoot())                    # about 4
 error_local = small(kalman.LocalizedUpdateRule(
-    kalman.SymmetricSquareRoot(), localization))                      # 0.356
+    kalman.SymmetricSquareRoot(), localization))                      # about 0.4
 ```
 
 The localized filter is the local ensemble transform Kalman filter (Hunt,
@@ -220,7 +230,7 @@ for y in short.observations:
                            update_rule=kalman.Matheron(),
                            inputs="x", key=k_analysis)
 
-forcing = ens.mean("forcing")[0]      # 8.025
+forcing = ens.mean("forcing")[0]      # close to 8
 ```
 
 `toy.lorenz96_step(x, forcing)` broadcasts the `(40, 1)` forcing block against

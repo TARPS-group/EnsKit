@@ -536,6 +536,12 @@ tests rely on.
 - `Lorenz96.initial` is centered on the truth before the first step, with
   standard deviation `initial_std`; the truth was spun up for 1000 steps from
   near $x = F$.
+- **A Lorenz-96 problem is not portable to the last digit, nor anything
+  computed from it.** The spin-up amplifies a rounding difference of
+  $10^{-15}$ in the starting point to a difference of about 10 in $x_0$, so
+  two platforms whose arithmetic differs in the last bit generate different
+  trajectories from the same seed. Tests of Lorenz-96 filters check claims
+  in bands that hold across seeds, never digits.
 - `LinearStateSpace.exact_filter()` returns the $T$ filtering distributions
   as `Gaussian`s over `"x"` and the `(T,)` log evidences, computed with the
   distribution and maps layers' exact operations; it agrees with the dense
@@ -629,8 +635,9 @@ raise: `FilterResult(n_times=300, blocks=('x',))`,
     `lorenz96_step`; the observations are the observed truth plus noise of
     the stated size; `exact_filter` matches the dense recursion; the classes
     validate their fields.
-18. **The user guide's page** runs, and its stated numbers are what its
-    blocks compute.
+18. **The user guide's page** runs, and its claims hold: exactly for the
+    linear problem, and for Lorenz-96 in bands that held at the problem's
+    seeds 0 to 5, since its digits are not portable ({ref}`enkf-toy`).
 
 (enkf-departures)=
 ## Departures from the design
