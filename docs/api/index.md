@@ -262,8 +262,10 @@ simulator, an update rule, a conditional map, and the policies of a run.
 ## enskit.algorithms
 
 The algorithms, and the inflation and relaxation policies every driver
-shares. See {doc}`../user-guide/running-an-inversion` for when to use each
-piece, and {doc}`../eki-contract` for the full behavioral contract.
+shares. See {doc}`../user-guide/running-an-inversion` and
+{doc}`../user-guide/filtering` for when to use each piece, and
+{doc}`../eki-contract` and {doc}`../enkf-contract` for the full behavioral
+contracts.
 
 ```{eval-rst}
 .. automodule:: enskit.algorithms
@@ -358,6 +360,32 @@ piece, and {doc}`../eki-contract` for the full behavioral contract.
 .. autoexception:: enskit.algorithms.eki.EKIError
 ```
 
+## enskit.algorithms.enkf
+
+```{eval-rst}
+.. automodule:: enskit.algorithms.enkf
+   :no-members:
+```
+
+### The filter, and its two halves
+
+```{eval-rst}
+.. autofunction:: enskit.algorithms.enkf.filter
+.. autofunction:: enskit.algorithms.enkf.forecast
+.. autofunction:: enskit.algorithms.enkf.analysis
+```
+
+### The result, the exception, and the prediction block
+
+```{eval-rst}
+.. autoclass:: enskit.algorithms.enkf.FilterResult
+   :members: n_times, total_log_evidence
+
+.. autoexception:: enskit.algorithms.enkf.EnKFError
+
+.. autodata:: enskit.algorithms.enkf.PREDICTION
+```
+
 ## enskit.toy
 
 Toy problems for tests and documentation — not for production use. See
@@ -380,6 +408,12 @@ not exemplify about the forward-model interface.
 
 .. autoclass:: enskit.toy.RestrictedDecay
    :members: parameter_dim, data_dim, forward
+
+.. autoclass:: enskit.toy.Lorenz96
+   :members: state_dim, data_dim, n_times, coords, transition
+
+.. autoclass:: enskit.toy.LinearStateSpace
+   :members: state_dim, data_dim, n_times, exact_filter
 ```
 
 ### Factories
@@ -388,4 +422,7 @@ not exemplify about the forward-model interface.
 .. autofunction:: enskit.toy.linear_gaussian
 .. autofunction:: enskit.toy.exponential_decay
 .. autofunction:: enskit.toy.restricted_decay
+.. autofunction:: enskit.toy.lorenz96
+.. autofunction:: enskit.toy.linear_state_space
+.. autofunction:: enskit.toy.lorenz96_step
 ```

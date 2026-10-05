@@ -1,14 +1,14 @@
 # EnsKit
 
-Building blocks for ensemble Kalman methods, and Ensemble Kalman Inversion
-built from them.
+Building blocks for ensemble Kalman methods, and Ensemble Kalman Inversion and
+the ensemble Kalman filter built from them.
 
 **Status: pre-alpha.** The operator, distribution, map and update layers, and
-Ensemble Kalman Inversion on top of them, are implemented, tested and
-documented: you can run an inversion today, with domain localization
-(`enskit.kalman.LocalizedUpdateRule`) as its update rule where the parameter
-dimension far exceeds the ensemble size. The ensemble Kalman filter is planned
-and not yet built.
+Ensemble Kalman Inversion and the ensemble Kalman filter on top of them, are
+implemented, tested and documented: you can run an inversion or a filter
+today, with domain localization (`enskit.kalman.LocalizedUpdateRule`) as the
+update rule where the state or parameter dimension far exceeds the ensemble
+size.
 
 ## What it is
 
@@ -33,11 +33,14 @@ methods, in layers that build on each other:
 - **`enskit.algorithms.eki`**: Ensemble Kalman Inversion itself: tempering
   schedules, stopping rules, failure handling and the driver loop, in both the
   approximate-sampling and the optimization form.
+- **`enskit.algorithms.enkf`**: the ensemble Kalman filter: the forecast, the
+  analysis with its log evidence, and the cycle over a sequence of
+  observations.
 
 ## What it is not
 
 EnsKit does not implement production forward models, priors, or Gaussian
-process kernels. It ships three toy problems, in `enskit.toy`, for its own
+process kernels. It ships five toy problems, in `enskit.toy`, for its own
 tests and its documentation.
 The forward model is any callable mapping parameters to predicted observations,
 and a prior covariance is any operator satisfying the covariance interface.

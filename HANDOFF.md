@@ -9,12 +9,110 @@ adopted, the same day after PR 1's renames, again after PR 2's linalg
 additions, and 2026-10-04 after PR 3's distribution contract, PR 10's
 Kronecker operators, PR 4's `enskit.distribution`, the fix for #60, PR 5's
 `enskit.maps`, PR 6's `enskit.kalman`, PR 9's localization and PR 7's
-`enskit.algorithms.eki`. Read
+`enskit.algorithms.eki`, and 2026-10-05 after PR 8's `enskit.algorithms.enkf`.
+Read
 `CLAUDE.md` first for conventions, including the layer rules, which the
 redesign replaced; then the two sections below; then the rest of this file,
 which describes the code as it stands before the redesign lands. That
 description is historical: where it names `pyeki.<module>`, the module is now
 `enskit.<module>`.
+
+## 2026-10-05: PR 8, `enskit.algorithms.enkf` and the state-space toys
+
+The ensemble Kalman filter is `enskit.algorithms.enkf` (private modules
+`_filter` and `_values`): `forecast`, `analysis` (returning the analysis
+ensemble and the one-step log evidence), `filter`, `FilterResult`,
+`EnKFError` and `PREDICTION`. Its normative page is `docs/enkf-contract.md`,
+written for this PR from the stub; its *Departures from the design* lists
+everything that moved. `enskit.toy` gained `lorenz96`, `lorenz96_step`,
+`Lorenz96`, `linear_state_space` and `LinearStateSpace` (with
+`exact_filter()`, the reference for the exactness obligation). The user-guide
+page is `docs/user-guide/filtering.md`, whose blocks
+`tests/test_enkf.py::test_18_*` runs and whose numbers it pins;
+`toy-models.md`, the landing page, the README and the API reference were
+updated. `tests/test_enkf.py` follows the contract's 18 obligations by number.
+
+**Decided here, with the maintainer** (each is in the contract):
+
+- **The key is keyword-only and optional** (`key=`) in all three functions,
+  per `CLAUDE.md`'s sometimes-random rule; the stub had it first and
+  positional. `filter` splits it four ways, `(next, forecast, inflate,
+  analysis)`, at every time; `forecast` splits it into `(transition, noise)`.
+- **#71 is settled by keeping it**: the relaxation's `prior` is the
+  background, the inflated forecast, in both drivers, and both contracts and
+  the user guide say the two compound. #71 can be closed when this merges.
+- **The toys are two classes** with the module's existing argument names
+  (`state_dim`, `data_dim`, `n_times`, `noise_std`), not one
+  `StateSpaceProblem` with `dim`/`obs_dim`/`n_steps`/`noise_sd`.
+- `EnKFError` carries `time`, `key` and `result` (a `FilterResult` of the
+  times before), so a caught error resumes bit for bit. There is no
+  `on_failure="repair"`.
+- `analysis` requires `inputs`; `filter` defaults it to `(state,)`.
+- **`filter` takes `start_time`** (from the adversarial review): without it a
+  resumed filter restarted `time` at 0, so a policy reading `time` diverged
+  from the uninterrupted run although the draws agreed. The resume recipe is
+  `filter(exc.result.ensemble, ys[exc.time:], key=exc.key,
+  start_time=exc.time, ...)`.
+
+**The adversarial review** found no wrong numbers for valid inputs. Its
+trivial findings were fixed here (contract departures 9 and 10): `filter`
+now checks `transition`/`observe` and transition noise without a key before
+the first transition call; a non-finite *prediction* is named as the
+observation model's, not blamed on the update rule; the log evidence is cast
+to the ensemble's dtype (float64 observations with float32 particles gave a
+float64 evidence); and the tests gained the cases it showed missing.
+
+**Things not to rediscover.**
+
+- **`fold_in(k, i)` is `split(k, n)[i]`** for every `n > i` under JAX's
+  partitionable threefry (the default in 0.10). So #73's suggested fix,
+  deriving toy keys with `fold_in`, does not work: a first version of
+  `lorenz96` keyed its observation noise exactly as
+  `initial.sample(key(0), ...)` keyed its draw. The new toys split from
+  `fold_in(key(seed), 0x746F79)` instead (`toy._TOY_STREAM`); the old three
+  are unchanged, so #73 stays open for them.
+- **A few operations compile once per length of `observations`** (the
+  finiteness check, row indexing, stacking the means), so "a 30-time filter
+  compiles nothing a 3-time one has not" is false by construction; the
+  compile test compares the 3→30 and 30→60 increments instead, and slices
+  outside the counted region (a no-op slice compiles nothing, and threw the
+  first version off by one).
+- **Example 13's inflation of 1.02 is seed-sensitive** on the new toy truth:
+  it lost the truth at two of seeds 0 to 3 (errors 2.8, 2.3); 1.05 tracked
+  all four (0.31 to 0.39). The test and the user guide use 1.05.
+- **Lorenz-96 numbers are not portable.** The 1000-step spin-up turns a
+  $10^{-15}$ change in the start into an $O(10)$ change in $x_0$, so CI's
+  Linux filters a different trajectory from macOS at the same seed. The
+  first CI run failed on two pinned digits (the guide's error, 0.336 against
+  0.308; localized stochastic 0.54 against a bound of 0.5). Lorenz-96 tests
+  now check bands measured over seeds 0 to 5, and the guide says its numbers
+  are approximate. PR 11's stored Lorenz-96 notebook outputs will differ by
+  platform for the same reason.
+- **Float32 filters work** with both rules and every policy: the filter
+  never scales the noise covariance, so #68 does not arise here.
+- `kalman.update`'s shipped rules already refuse an approximation that drops
+  a block, with a less direct message; `analysis` checks the approximation's
+  blocks first, inside the capturing wrapper it passes as
+  `approximation=`, which is also how the log evidence is read from the very
+  object the update conditioned.
+
+**Measured.** Lorenz-96 at the defaults ($d = 40$, $T = 300$, half observed),
+$J = 40$, inflation 1.05: time-averaged error 0.31 with `Matheron` (3 s),
+0.32 with `SymmetricSquareRoot` (1.5 s). At $J = 10$: global 3.61, localized
+ETKF 0.36, localized stochastic 0.40, hybrid 0.90 against plain 4.86. The
+linear exactness holds to $5\times10^{-16}$ in the means and
+$3\times10^{-15}$ in the log evidence.
+
+**For later PRs.**
+
+- **PR 11 (documentation).** The design's Examples 2, 7, 11, 12 and 13 run on
+  the new API with the renames above (`toy.lorenz96(state_dim=..., n_times=...,
+  noise_std=...)`, `toy.lorenz96_step`, `key=` keyword-only, `inputs="x"` on
+  `analysis`); their quoted numbers change with the new toy truth (see
+  *Measured*), and Example 13 should inflate by 1.05. Example 7's loop is
+  `LinearStateSpace.exact_filter()`.
+- `docs/user-guide/filtering.md` sits after `running-an-inversion` in the
+  toctree; the level-of-abstraction reorganization is PR 11's.
 
 ## 2026-10-04: PR 7, `enskit.algorithms.eki`; `gauss` and `eki` deleted
 
@@ -880,8 +978,8 @@ pyEKI. Nothing domain-specific should come back across.
 Follow the plan in `docs/redesign/index.md`, one pull request at a time, in
 a fresh session for each, as described in "Pull requests and handoffs" in
 `CLAUDE.md`. PRs 1 (#35), 2 (#36), 3 (#37), 4 (#38), 5 (#39), 6 (#40),
-7 (#41), 9 (#43) and 10 (#44) are done. PR 8 (#42, EnKF) has its
-dependencies met; PR 11 (#45) needs 8 and 9.
+7 (#41), 8 (#42), 9 (#43) and 10 (#44) are done. PR 11 (#45, documentation)
+has its dependencies met once PR 8 merges.
 #54's fix would change the regressions pinned in
 obligation 17, by design. The notes below, written before the redesign,
 still apply to the pull requests they name; their `pyeki` modules are now
@@ -964,6 +1062,8 @@ layer; this is the index.
 | `cumsum` of normalized weights can end just below 1 | systematic resampling with a clip to `J - 1` then selects the last particle even at weight zero; scale positions by `cumsum[-1]` and bound by the last positive weight |
 | A numerically singular noise covariance that still whitens gives a *correct* conditional to about $10^{-9}$, not a wrong one | the conditional exists whenever $F_cF_c^\top + D_c$ is nonsingular; what fails silently is the thin-basis covariance at large $\sigma_{\max}$, which collapses to exactly $0$ (#54) |
 | A multi-line `:alt:` value breaks a MyST `{figure}` | the continuation lines are absorbed into the caption, and the build fails with "Figure caption must be a paragraph" pointing at the directive rather than at the option |
+| A chaotic toy's numbers are not portable | Lorenz-96's spin-up turns a $10^{-15}$ change into an $O(10)$ change in the state, so a digit pinned on macOS fails on CI's Linux; test claims in bands measured across seeds |
+| `jax.random.fold_in(k, i)` equals `jax.random.split(k, n)[i]` for every `n > i` (partitionable threefry, the default) | a key "derived" by folding in a small integer is one a caller's split of the same key also produces, so a toy's draw silently repeats a run's; fold in a large constant, then split |
 
 ## Working agreements
 
