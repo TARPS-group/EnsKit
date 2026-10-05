@@ -1,22 +1,30 @@
-"""EnsKit — Ensemble Kalman Inversion for derivative-free Bayesian calibration.
+"""EnsKit — building blocks for ensemble Kalman methods.
 
-Ensemble Kalman Inversion (EKI) estimates the parameters of an expensive,
-possibly non-differentiable forward model from noisy observations, using only
-forward evaluations. EnsKit provides the pieces that requires:
+Ensemble Kalman methods estimate the inputs of a model that can be run but not
+differentiated, from noisy observations of its outputs, by moving an ensemble
+of particles with linear updates computed from the ensemble's own statistics.
+EnsKit provides the building blocks, and two algorithms built from them:
+Ensemble Kalman Inversion (EKI), which calibrates the parameters of a forward
+model, and the ensemble Kalman filter (EnKF), which tracks the state of a
+dynamical system observed sequentially in time.
 
 - :mod:`enskit.linalg` — structured linear operators, so covariance structure is
   exploited rather than materialized as dense arrays.
 - :mod:`enskit.distribution` — distributions over named blocks: ensembles,
   Gaussians, and the conditional maps between them.
 - :mod:`enskit.maps` — pushing distributions through maps and simulators.
-- :mod:`enskit.kalman` — ensemble Kalman updates, inflation and relaxation.
-- :mod:`enskit.algorithms` — the algorithms themselves: the EKI driver, its
-  tempering schedules and stopping rules, and the policies drivers share.
-- :mod:`enskit.toy` — small calibration problems for this package's tests and
+- :mod:`enskit.kalman` — ensemble Kalman updates, localization, inflation and
+  relaxation.
+- :mod:`enskit.algorithms` — the algorithms themselves:
+  :mod:`~enskit.algorithms.eki` and :mod:`~enskit.algorithms.enkf`, and the
+  inflation and relaxation policies they share.
+- :mod:`enskit.testing` — conformance checks for a simulator, update rule or
+  policy of your own.
+- :mod:`enskit.toy` — small problems for this package's tests and
   documentation, not for production use.
 
-The forward model is any callable mapping parameters to predicted observations,
-so EnsKit is independent of the model being calibrated.
+A forward model or a transition is any callable from a batch of inputs to a
+batch of outputs, so EnsKit is independent of the model it is applied to.
 
 Importing this package enables JAX float64. JAX defaults to float32, which is
 not accurate enough for the conditioning arithmetic: ensemble anomalies are

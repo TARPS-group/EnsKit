@@ -108,7 +108,7 @@ that fits them *perfectly* is fitting the errors, and there is a level of
 misfit below which you should not go: the level the noise alone accounts for.
 Stop when you reach it.
 
-In numbers: the misfit of a member that fits as well as the noise allows is
+In numbers: the misfit of a particle that fits as well as the noise allows is
 about $N/2$, which is 6 for this problem's twelve observations.
 `DiscrepancyStop(tau=1.0)` fires when the misfit of the ensemble's mean
 prediction — `center_misfit` — drops to that level. In this run:
@@ -120,7 +120,9 @@ fit.stacked.center_misfit    # [35993.2811  257.3198  5.6266]
 257.32 is above the threshold of 6, so the run continued; 5.63 is below it, so
 it stopped. `tau` is a tolerance on that threshold, which becomes
 $\tau^2 N / 2$: `tau=2.0` stops at 24 instead of 6, which is a more
-conservative choice and, on this problem, stops one step earlier.
+conservative choice, and stops a step sooner whenever a step's misfit lands
+between the two thresholds. In this run none does: 257.32 is above both and
+5.63 below both, so the two rules stop at the same step.
 
 ## Side by side
 
@@ -142,8 +144,7 @@ The target's mean is `[1.9769, 1.4719]` and its standard deviations are
 | run | reached | forward calls | error in the mean | spread, relative to the target |
 | --- | --- | --- | --- | --- |
 | sampling, adaptive ladder | $\beta = 1$ | 6 | 0.0025 | `[1.02, 1.07]` |
-| optimization, `tau=2` | $\beta = 2$ | 3 | 0.0397 | `[1.15, 2.94]` |
-| optimization, `tau=1` | $\beta = 2$ | 3 | 0.0397 | `[1.15, 2.94]` |
+| optimization, `tau=1` or `tau=2` | $\beta = 2$ | 3 | 0.0397 | `[1.15, 2.94]` |
 | optimization, 30 unit steps | $\beta = 30$ | 30 | 0.0006 | `[0.19, 0.19]` |
 
 ```{figure} ../_generated/figures/03-two-forms.png
@@ -159,18 +160,19 @@ sampling form's spread for comparison.
 
 Read the last two rows together. The optimization form run to $\beta = 30$
 finds the best-fitting parameters almost exactly — the smallest error in the
-mean of the four rows, four times smaller than the sampling form's — and
+mean of the three rows, four times smaller than the sampling form's — and
 reports a spread five times too small. That combination is the whole character of the
 optimization form: an excellent point estimate, and an uncertainty that is not
 one. Its terminal spread measures how far the ensemble has converged
 numerically, not how much the observations leave open.
 
-The `tau=1` row is where the honest warning goes. Its spread happens to land
-within 13% of the target's, which looks like it got the uncertainty right too.
-It did not. Stopping one step earlier, at `tau=2`, gives a spread nearly three
-times too large in the rate; stopping later gives one five times too small.
-The spread is set by *where the run happened to stop*, so its agreement here
-is an accident of this problem and this threshold, and nothing to rely on.
+The stopped run's spread is the warning. It is 15% too wide in the amplitude
+and nearly three times too wide in the rate; the same run continued gives one
+five times too small. Between the two, at some level no stopping rule knows
+to look for, the spread passes through the target's, and a run stopped there
+would appear to have got the uncertainty right too. The spread is set by
+*where the run happened to stop*, so it says nothing about how well the
+observations determine the parameters, in either direction.
 
 ## Which one you want
 
@@ -222,7 +224,8 @@ it is worth knowing precisely where the line is.
 A run reproduces the target distribution exactly only when all of the
 following hold: the forward model is affine, the prior is Gaussian, the initial
 ensemble's mean and covariance equal the prior's exactly, the update is
-`TransformUpdate`, there is no inflation, no member's evaluation failed, and
+`kalman.SymmetricSquareRoot`, there is no inflation, no particle's evaluation
+failed, and
 the increments sum to exactly 1. Every clause is load-bearing, and the last is
 easy to miss — `FixedSchedule.uniform(T)` sums to 1 only to round-off.
 {doc}`../eki-contract` states the list normatively.
@@ -234,8 +237,8 @@ no guarantee attached. Two consequences to carry:
   ladder makes each step's Gaussian fit more accurate, and also accumulates
   more sampling error and collapses the ensemble further. Refinement is not
   monotone improvement. {doc}`04-tempering-schedules` measures this.
-- **Members are not independent draws.** The update couples them. Uncertainty
-  lives in the ensemble's spread, not in any individual member.
+- **Particles are not independent draws.** The update couples them.
+  Uncertainty lives in the ensemble's spread, not in any individual particle.
 
 If you want to check the machinery rather than illustrate it, use a problem
 with an exact answer. `toy.linear_gaussian(parameter_dim=…, data_dim=…)` is affine with a

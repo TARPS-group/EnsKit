@@ -53,7 +53,7 @@ Then, having earned it:
   accurate but accumulates more sampling error and collapses the ensemble
   further, so refinement is not monotone improvement.
 - **Cost.** Every extra step is one more evaluation of the forward model, at
-  `n_members` member evaluations each. Neither adaptive schedule ever
+  `n_particles` particle evaluations each. Neither adaptive schedule ever
   evaluates the model to choose an increment, so adaptivity is free in the
   resource that matters.
 - **The increment floor.** At the shipped defaults the worst case is exactly
@@ -63,6 +63,8 @@ Then, having earned it:
 ## Deliberately not covered
 
 - the two update rules → {doc}`05-transform-or-pathwise`
+- the tempering ladder written as a hand loop → example 4 of the
+  {doc}`../examples/index`
 - inflation → {doc}`07-small-ensembles`
 - writing a schedule of your own → {doc}`09-your-own-policy`
 - the monotonicity argument for the ESS criterion, and the two-bound structure
@@ -71,7 +73,7 @@ Then, having earned it:
 ## API exercised
 
 `FixedSchedule` (`uniform`, `constant`, and an explicit increment tuple),
-`AdaptiveESSSchedule`, `AdaptiveMisfitSchedule`, `enskit.eki.iterate`,
+`AdaptiveESSSchedule`, `AdaptiveMisfitSchedule`, `eki.iterate`,
 `HistoryRecord.beta`, `HistoryRecord.increment`, `Evaluation.beta`.
 
 ## Notes for the writer
@@ -112,9 +114,10 @@ Four things that produce a plausible wrong picture:
   the late panels a dot. Drawing the previous panel's box into each panel
   keeps the shrinkage visible.
 
-Measured, so the page has something to be checked against — re-measure when
-writing rather than trusting these. These are the **default**
-`TransformUpdate`, at 256 members, where the adaptive ladder's levels are
+Measured before PR 7, so the page has something to be checked against —
+re-measure when writing rather than trusting these, since the prior draw has
+changed since. These are `kalman.SymmetricSquareRoot`, at 256 particles,
+where the adaptive ladder's levels were
 `0, 0.001, 0.003, 0.011, 0.055, 0.419, 1.0`; against a converged grid
 reference whose standard deviations are `[0.037, 0.032]`:
 
@@ -123,9 +126,10 @@ reference whose standard deviations are `[0.037, 0.032]`:
 | adaptive ladder | 0.004 | `[0.039, 0.041]` | `[1.07, 1.30]` |
 | one unit step | 0.035 | `[0.075, 0.737]` | `[2.04, 23.2]` |
 
-Note that {doc}`01-first-inversion` runs `PathwiseUpdate` rather than the
-default, so its level sequence and its numbers differ from the table above.
-Decide which rule this page uses before measuring anything, and say which.
+Note that {doc}`01-first-inversion` runs `kalman.Matheron`, and tutorials 2
+and 3 run `kalman.SymmetricSquareRoot`. A run takes its update rule
+explicitly; there is no default. Decide which rule this page uses before
+measuring anything, and say which.
 
 Stay true to what the problem shows. The one-step and adaptive ends of the
 sequence differ starkly on this problem; the ladders in between may not

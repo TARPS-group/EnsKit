@@ -6,8 +6,8 @@ management.
 ## From a clone
 
 ```bash
-git clone https://github.com/TARPS-group/pyEKI.git
-cd pyEKI
+git clone https://github.com/TARPS-group/EnsKit.git
+cd EnsKit
 uv sync
 ```
 
@@ -29,7 +29,7 @@ Until EnsKit is published, depend on a local checkout:
 dependencies = ["enskit"]
 
 [tool.uv.sources]
-enskit = { path = "../pyEKI", editable = true }
+enskit = { path = "../EnsKit", editable = true }
 ```
 
 ## Verifying the install

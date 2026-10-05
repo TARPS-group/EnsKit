@@ -9,13 +9,96 @@ adopted, the same day after PR 1's renames, again after PR 2's linalg
 additions, and 2026-10-04 after PR 3's distribution contract, PR 10's
 Kronecker operators, PR 4's `enskit.distribution`, the fix for #60, PR 5's
 `enskit.maps`, PR 6's `enskit.kalman`, PR 9's localization and PR 7's
-`enskit.algorithms.eki`, and 2026-10-05 after PR 8's `enskit.algorithms.enkf`.
+`enskit.algorithms.eki`, and 2026-10-05 after PR 8's `enskit.algorithms.enkf`
+and PR 11's documentation.
 Read
 `CLAUDE.md` first for conventions, including the layer rules, which the
 redesign replaced; then the two sections below; then the rest of this file,
 which describes the code as it stands before the redesign lands. That
 description is historical: where it names `pyeki.<module>`, the module is now
 `enskit.<module>`.
+
+## 2026-10-05: PR 11, the documentation
+
+**Notebook wiring, decided with the maintainer:** `myst-nb` replaces
+`myst_parser` in `docs/conf.py` (it parses every `.md` page with the same
+MyST parser, and the build was unchanged by the swap); `nbsphinx` is gone
+from the dev group, since it needs pandoc. `nb_execution_mode = "off"`: the
+docs build never executes a notebook.
+
+**The examples gallery** is `docs/examples/`. The fifteen design examples
+were copied from the frozen `docs/redesign/notebooks/src/` into
+`docs/examples/src/` (percent-format `.py`, the reviewed source) and ported.
+`docs/examples/build.py` executes a source in a fresh interpreter and writes
+`docs/examples/<name>.ipynb` with stored outputs; never edit a notebook by
+hand. `docs/examples/references.py` is the bibliography, copied from the
+redesign folder plus `kitagawa1996`. `tests/test_examples.py` checks fast that
+every stored notebook's cells are its source's (so a changed source fails
+until rebuilt), and, marked `slow`, executes every source (about 2 minutes);
+`pytest` deselects `slow` by default, and CI's new `examples` job runs
+`pytest -m slow`. Every number an example's text states is asserted in its
+final `# checks` cell; the Lorenz-96 ones (2, 11–14) state approximate values
+and assert bands measured over seeds 0–5, since their stored outputs differ by
+platform.
+
+**Porting the examples changed more than names.** Their Setup sections
+described the prototype's toys (ten times on [0.1, 2], noise 0.05,
+u† = (1.5, 1.2); a full prior covariance for `linear_gaussian`), so every
+setup was rewritten against the shipped toy and every number recomputed. A
+`Gaussian` is pushed through `maps.Linear(problem.G)`, never through
+`problem.forward`. Example 7 checks against `LinearStateSpace.exact_filter()`
+and a dense recursion; example 10's reference became grid quadrature (the
+prototype's prior importance sampler had an ESS of 277 and more error than
+the estimate it judged); example 13 inflates by 1.05; example 14 keeps 1.02
+(over seeds 0–5 its error is 0.27–0.31 at 1.02, 0.33–0.35 at 1.05).
+
+**The user guide is organized by level** (`docs/user-guide/index.md`):
+running an algorithm, one update, forecast and update separately,
+probabilistic operations, operators. One new page,
+`forecast-and-update.md`: the hand-written cycle, its Gaussian version (which
+is `exact_filter`), and the drivers' halves equal to it bit for bit. The
+quickstart is titled "Operator quickstart" and sits at the operators level.
+`tests/test_docs.py` runs every block of the fragment pages (`updates`,
+`distributions`, `operators`, `quickstart`, `writing-a-forward-model`,
+`writing-an-operator`) after a setup that builds what each fragment assumes,
+and checks that every user-guide page is either tested there or by its
+layer's test module.
+
+**Tutorials.** 1 to 3 revised: vocabulary (particles, steps), the new rule
+names, and the four claims that stopped holding in PR 7 rewritten from the
+measured numbers and pinned (`test_8_*` in `tests/test_tutorials.py`; the
+section-5 xfails are gone, and the one-step band test asserts the claim, a
+rate overspread above 15 at both 64 and 2048 particles). Stubs 4 to 9 are on
+the new API, still stubs; writing them is #77, which carries #24 (tutorial
+7's stub now drops the step count and plans the variance histogram). #26 (the
+ablation study) is deferred to its own PR as an example notebook with stored
+outputs, which this wiring now supports.
+
+**Dark figures (#27).** `docs/figures.py` draws every figure twice, from
+`THEMES["light"]` and `THEMES["dark"]` (`_use_theme` rebinds the module's
+color names, so a figure function must read colors at call time, never in a
+default argument). A transform registered by the extension,
+`add_dark_variants`, gives each generated image Furo's `only-light` class and
+inserts its `-dark.png` sibling, so a page names only the light figure.
+
+**Also here:** the repository is `TARPS-group/EnsKit`, so the URLs in
+`pyproject.toml`, `docs/conf.py`, the README and `docs/installation.md` say
+so, and the docs URL is `tarps-group.github.io/EnsKit/`. The package
+docstring, README and landing page describe both algorithms.
+
+**Found here:** #76, a composite operator's `shape` is exponential in its
+nesting depth (each uncompressed `condition` doubles the `Product.shape`
+calls; correct results, exploding time). Shipped paths compress, so they
+avoid it.
+
+**For later PRs.**
+
+- **PR 12 (release).** The docs deploy from `main` to GitHub Pages under the
+  renamed repository; check the Pages URL once after the first deploy.
+- **Changing an example** means editing its source, running
+  `uv run python docs/examples/build.py exNN`, and committing both. A change
+  to the package that moves an example's numbers fails the slow test, not the
+  default one; run `uv run pytest -m slow` before a release.
 
 ## 2026-10-05: PR 8, `enskit.algorithms.enkf` and the state-space toys
 
@@ -978,21 +1061,12 @@ pyEKI. Nothing domain-specific should come back across.
 Follow the plan in `docs/redesign/index.md`, one pull request at a time, in
 a fresh session for each, as described in "Pull requests and handoffs" in
 `CLAUDE.md`. PRs 1 (#35), 2 (#36), 3 (#37), 4 (#38), 5 (#39), 6 (#40),
-7 (#41), 8 (#42), 9 (#43) and 10 (#44) are done. PR 11 (#45, documentation)
-has its dependencies met once PR 8 merges.
+7 (#41), 8 (#42), 9 (#43), 10 (#44) and 11 (#45) are done. PR 12 (#46,
+release 0.1.0) is next.
 #54's fix would change the regressions pinned in
 obligation 17, by design. The notes below, written before the redesign,
 still apply to the pull requests they name; their `pyeki` modules are now
 `enskit` modules.
-
-### Notes for PR 11, documentation
-
-Notebook wiring needs deciding. `myst-nb` would *replace* `myst_parser`
-rather than join it, which changes how every existing page is parsed. The
-sub-decisions at the bottom of `docs/examples/index.md` still stand. The
-fifteen notebooks in `docs/redesign/notebooks/` are the gallery's content. The
-Lorenz-96 ones take about a minute each, so the plan stores their outputs and
-re-runs them in a test marked slow.
 
 ## Open decisions
 

@@ -6,8 +6,9 @@ two steps and spent the rest of the run agreeing with itself. Nothing in the
 result is named `converged`, because no single field can be.
 
 This page is about what to look at instead. It carries on with the problem and
-the initial ensemble of {doc}`01-first-inversion`, and with the library's
-default update rule rather than the pathwise one that page selects:
+the initial ensemble of {doc}`01-first-inversion`, with the deterministic
+square-root update rule, `kalman.SymmetricSquareRoot`, in place of the
+Matheron rule that page uses:
 
 ```python
 import enskit
@@ -30,7 +31,7 @@ result.status             # 'schedule_exhausted'
 result.budget_complete    # True  -- the ladder reached beta = 1
 result.stop_fired         # False -- no stopping rule ended it
 result.beta               # 1.0
-result.min_n_valid        # 64    -- every member's predictions were usable
+result.min_n_valid        # 64    -- every particle's predictions were usable
 result.n_evaluations      # 6     -- forward model calls
 result.n_completed_steps  # 6     -- times the ensemble moved
 ```
@@ -50,11 +51,11 @@ what this run reports.
 `n_evaluations` and `n_completed_steps` are equal here, and differ by one when
 a run ends on a stopping rule: reaching that decision cost an evaluation, and
 the update it would have driven was discarded. Your cost in model calls is
-always `n_evaluations`, and in member evaluations
+always `n_evaluations`, and in particle evaluations
 `n_evaluations * n_particles` — 384 here.
 
-`min_n_valid` is the worst step's count of members whose predictions were
-finite. Below `n_particles` means the forward model failed on some members, which
+`min_n_valid` is the worst step's count of particles whose predictions were
+finite. Below `n_particles` means the forward model failed on some particles, which
 is {doc}`08-when-the-model-fails`.
 
 ## The history
@@ -73,7 +74,7 @@ The eleven fields answer four different questions.
 | field | what it tells you |
 | --- | --- |
 | `step`, `beta`, `increment`, `beta_next` | **where on the ladder** this step was, and how far it went |
-| `misfit_mean`, `misfit_min`, `misfit_max`, `center_misfit` | **how well the members fit the observations** |
+| `misfit_mean`, `misfit_min`, `misfit_max`, `center_misfit` | **how well the particles fit the observations** |
 | `spread`, `ess` | **whether the ensemble can still describe its target** |
 | `n_valid` | **whether the forward model worked** |
 
@@ -90,21 +91,21 @@ shape to JAX, and `result.stacked` could not stack them.
 
 ## Three things worth plotting
 
-**The mean misfit**, `misfit_mean`. The misfit of one member is half the sum
+**The mean misfit**, `misfit_mean`. The misfit of one particle is half the sum
 of its squared prediction errors, each divided by that observation's error
 standard deviation. It measures fit in units of observation noise, so it has a
-reference value: if a member fits the data as well as the noise allows, each of
+reference value: if a particle fits the data as well as the noise allows, each of
 the $N$ observations contributes about $\tfrac12$, and the misfit is about
 $N/2$. Here $N = 12$, so the reference is 6.
 
 **The effective sample size**, `ess`. Going up the ladder reweights the
-members, and this is how many of the 64 members that reweighting effectively
+particles, and this is how many of the 64 particles that reweighting effectively
 leaves. It is at most `n_particles` and at least 1. A value of 1 means one
-member carries essentially all of the weight, and the other 63 are not
+particle carries essentially all of the weight, and the other 63 are not
 contributing.
 
 **The spread**, `spread`. The root-mean-square standard deviation of the
-members' parameters. It should decrease — the observations narrow the answer —
+particles' parameters. It should decrease — the observations narrow the answer —
 but *how fast* is the diagnostic.
 
 ```python
@@ -126,7 +127,7 @@ report `'schedule_exhausted'`.
 The adaptive run is the healthy one, and each panel says so differently.
 
 Its misfit falls from $5.9 \times 10^5$ to 8.12, which is just above the
-reference of 6 — the members fit the data about as well as the noise allows,
+reference of 6 — the particles fit the data about as well as the noise allows,
 and no better. Its effective sample size sits on 32, which is half of 64 and
 is the floor this schedule holds: each increment is chosen to keep it there.
 The last step is the exception, at 44.6, because by then only 0.6848 of budget
@@ -135,11 +136,11 @@ Its spread falls smoothly, by a factor between 1.5 and 2.3 per step.
 
 The three-step run reaches the same level, and each panel gives a reason not
 to trust it. Its effective sample size at the first step is **1.0**: at an
-increment of $1/3$, a single member out of 64 carries essentially the entire
-weight of the reweighting, and the step conditions on that member's opinion.
+increment of $1/3$, a single particle out of 64 carries essentially the entire
+weight of the reweighting, and the step conditions on that particle's opinion.
 Its spread then falls by a factor of 4.8 in one step, which is the same event
 seen from another angle. Its last recorded misfit is 17.6, three times the
-reference of 6, so the members it was still working with did not fit the data
+reference of 6, so the particles it was still working with did not fit the data
 well. The two runs end up with different answers — the three-step run's spread
 is 19% larger in the amplitude and 45% larger in the rate — and nothing in
 `status` distinguishes them.
@@ -147,7 +148,7 @@ is 19% larger in the amplitude and 45% larger in the rate — and nothing in
 Which of those answers is nearer the truth is not a question the diagnostics
 can settle, and {doc}`04-tempering-schedules` settles it by measuring both
 against the target distribution. What the diagnostics do say, on their own, is
-that a step which leaves one member carrying all the weight has not done the
+that a step which leaves one particle carrying all the weight has not done the
 calculation the method intends.
 
 :::{note}
@@ -174,7 +175,7 @@ For a run meant to reach the target distribution, five things:
    than that the fit is unusually good.
 4. **`ess` stays well above 1 after the first step** — and, for an adaptive
    schedule, at or above its floor. A step at 1 or 2 has conditioned on a
-   handful of members.
+   handful of particles.
 5. **`spread` decreases gradually.** A single step that cuts it by a factor of
    several is a step that was too long.
 
@@ -186,7 +187,7 @@ Two further things this checklist cannot see. It cannot tell you whether the
 answer is *right*: this problem is nonlinear, so even a run passing every
 check returns an approximation with no guarantee attached. And a spread can be
 healthy-looking and still much too small if the parameters far outnumber the
-members; that failure has no symptom in the history at all, and
+particles; that failure has no symptom in the history at all, and
 {doc}`07-small-ensembles` is about it.
 
 ## Look at the whole ensemble, not just the mean
@@ -199,13 +200,13 @@ history.misfit_mean[-1]   # 8.1181
 history.misfit_max[-1]    # 69.4678
 ```
 
-The worst member fits eight times worse than the average one. That is not a
-problem in itself — 64 members drawn from a wide prior will not all end up in
+The worst particle fits eight times worse than the average one. That is not a
+problem in itself — 64 particles drawn from a wide prior will not all end up in
 the same place — but it is the kind of thing to look at before averaging
 anything.
 
 `result.last_evaluation` holds the run's final forward evaluation: its
-members, their predictions, and each member's misfit. It answers *what is my
+particles, their predictions, and each particle's misfit. It answers *what is my
 final misfit* and *what does the answer predict* without evaluating the model
 again.
 
@@ -222,7 +223,7 @@ through the model.
 ## The center's misfit is not the average misfit
 
 `center_misfit` is the misfit of the ensemble's mean prediction. It is a
-different number from the average of the members' misfits, and the difference
+different number from the average of the particles' misfits, and the difference
 is large:
 
 ```python
@@ -230,13 +231,13 @@ evaluation.center_misfit      # 4.6114
 evaluation.misfits.mean()     # 8.1181
 ```
 
-Both are correct. A misfit is a squared quantity, so averaging the members'
+Both are correct. A misfit is a squared quantity, so averaging the particles'
 misfits includes their disagreement with each other, while the misfit of the
 average does not. The gap is exactly
 
 $$\frac{J-1}{2J}\operatorname{tr}\!\bigl(W \widehat C_{vv} W^{\top}\bigr),$$
 
-where $J$ is the number of members, $\widehat C_{vv}$ the ensemble's
+where $J$ is the number of particles, $\widehat C_{vv}$ the ensemble's
 prediction covariance and $W$ divides by the observation error — so the gap is
 the ensemble's own prediction spread, measured in units of observation noise.
 It is 3.5066 here, and accounts for the difference to the last digit. It
@@ -244,7 +245,7 @@ shrinks as the ensemble collapses, so the two numbers converge in the
 optimization form and stay apart in the sampling form.
 
 Use `center_misfit` when you want to know how well the answer's center fits,
-and `misfit_mean` when you want to know how well a typical member fits. They
+and `misfit_mean` when you want to know how well a typical particle fits. They
 are not interchangeable, and a reader who compares them expecting agreement
 will go looking for a bug.
 

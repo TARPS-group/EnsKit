@@ -32,9 +32,9 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/TARPS-group/pyEKI"
-Documentation = "https://tarps-group.github.io/pyEKI/"
-Repository = "https://github.com/TARPS-group/pyEKI"
+Homepage = "https://github.com/TARPS-group/EnsKit"
+Documentation = "https://tarps-group.github.io/EnsKit/"
+Repository = "https://github.com/TARPS-group/EnsKit"
 
 [dependency-groups]
 dev = [
@@ -49,9 +49,9 @@ dev = [
     "sphinx-design>=0.5",
     "matplotlib>=3.7",
     "jupyter>=1.0",
-    "nbsphinx>=0.9",
     "ipykernel>=6.0",
     "import-linter>=2.1",
+    "myst-nb>=1.1",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -62,7 +62,8 @@ target-version = "py311"
 line-length = 90
 # The redesign's working material is a record, not package code: API stubs
 # that reference undefined names, and a throwaway prototype.
-extend-exclude = ["docs/redesign"]
+# The gallery's notebooks are generated from docs/examples/src, which is linted.
+extend-exclude = ["docs/redesign", "docs/examples/*.ipynb"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "N"]
@@ -71,6 +72,11 @@ ignore = ["N803", "N806"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S101"]
+# An example imports `enskit` for its side effect, float64, and its cells
+# import where the prose introduces a name.
+"docs/examples/src/*" = ["F401", "E402"]
+# One full reference per line, as it is printed.
+"docs/examples/references.py" = ["E501"]
 
 [tool.mypy]
 python_version = "3.11"
@@ -78,7 +84,10 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-v --tb=short"
+# `slow` tests execute the example notebooks' sources; CI runs them in a job
+# of their own with `pytest -m slow`, which overrides the selection below.
+addopts = "-v --tb=short -m 'not slow'"
+markers = ["slow: executes every example source (several minutes)"]
 
 # The layer rules of CLAUDE.md, checked in CI with `uv run lint-imports`. A
 # layer may import only the layers listed below it; layers joined by `|` are

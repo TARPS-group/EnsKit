@@ -35,6 +35,17 @@ jobs:
       - name: Test
         run: uv run pytest --cov=enskit --cov-report=term-missing
 
+  examples:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync --group dev
+      - name: Execute every example and its checks
+        run: uv run pytest -m slow tests/test_examples.py
+
   docs:
     runs-on: ubuntu-latest
     steps:

@@ -21,7 +21,10 @@ name                           page
 ============================== ===========================================
 
 Each figure function takes no arguments, is deterministic, and returns the
-figure together with a dictionary of the numbers it plotted.
+figure together with a dictionary of the numbers it plotted. Every figure is
+drawn in two themes, light and dark (``THEMES``), and a page shows the one
+matching the reader's theme: :func:`add_dark_variants` pairs each figure with
+its dark variant when the page is read, so a page names only the light one.
 :func:`build` writes the figures; ``python docs/figures.py <dir>`` does the
 same from the command line, for looking at one while writing a page.
 
@@ -107,7 +110,9 @@ TUTORIAL_2_3_UPDATE = kalman.SymmetricSquareRoot()
 # Colors. Deliberately few, and the same meaning on every figure. The prior
 # and everything derived from it before conditioning is blue; the answer, once
 # the data has been used, is green; the observation is red; a competing ladder
-# is purple and a collapsed fit indigo.
+# is purple and a collapsed fit indigo. Each figure is drawn once per theme:
+# `_use_theme` rebinds these names from `THEMES`, so a figure function reads
+# them when it is called, never in a default argument.
 C_PRIOR = "#3d6f9e"
 C_PRIOR_LIGHT = "#9dbcd8"
 C_ENSEMBLE = "#12795a"
@@ -118,6 +123,42 @@ C_COLLAPSED = "#2f3d63"
 C_TARGET = "#8f979f"   # a reference density: neither prior nor answer
 C_TEXT = "#22282e"
 C_AXIS = "#c2c8ce"
+C_ARROW = "#7b848d"
+C_PAPER = "#ffffff"    # the background, and the halo around a marker
+
+#: The palette of each theme. ``light`` is the one above; ``dark`` keeps each
+#: color's meaning and hue, lightened to read against Furo's dark background,
+#: and swaps the text, axis and paper colors.
+THEMES = {
+    "light": {
+        "C_PRIOR": C_PRIOR,
+        "C_PRIOR_LIGHT": C_PRIOR_LIGHT,
+        "C_ENSEMBLE": C_ENSEMBLE,
+        "C_ALT": C_ALT,
+        "C_DATA": C_DATA,
+        "C_TRUTH": C_TRUTH,
+        "C_COLLAPSED": C_COLLAPSED,
+        "C_TARGET": C_TARGET,
+        "C_TEXT": C_TEXT,
+        "C_AXIS": C_AXIS,
+        "C_ARROW": C_ARROW,
+        "C_PAPER": C_PAPER,
+    },
+    "dark": {
+        "C_PRIOR": "#74a7da",
+        "C_PRIOR_LIGHT": "#4f7aa3",
+        "C_ENSEMBLE": "#4cc79a",
+        "C_ALT": "#c08fdb",
+        "C_DATA": "#f0766a",
+        "C_TRUTH": "#eceef0",
+        "C_COLLAPSED": "#97a8de",
+        "C_TARGET": "#9ba3ab",
+        "C_TEXT": "#d9dde1",
+        "C_AXIS": "#4d555c",
+        "C_ARROW": "#8b949c",
+        "C_PAPER": "#131416",
+    },
+}
 
 #: Contour levels for a density scaled to a maximum of one. For a Gaussian
 #: these are the one-, two- and three-standard-deviation ellipses.
@@ -127,6 +168,11 @@ LEVELS = (float(np.exp(-4.5)), float(np.exp(-2.0)), float(np.exp(-0.5)))
 # ---------------------------------------------------------------------------
 # shared machinery
 # ---------------------------------------------------------------------------
+
+
+def _use_theme(name: str) -> None:
+    """Rebind the module's color names to the palette of theme ``name``."""
+    globals().update(THEMES[name])
 
 
 def _style() -> None:
@@ -146,6 +192,9 @@ def _style() -> None:
             "savefig.dpi": 200,
             "savefig.bbox": "tight",
             "savefig.pad_inches": 0.03,
+            "figure.facecolor": C_PAPER,
+            "savefig.facecolor": C_PAPER,
+            "axes.facecolor": C_PAPER,
             "font.size": 9.0,
             "text.color": C_TEXT,
             "axes.titlesize": 9.5,
@@ -182,14 +231,15 @@ def _style() -> None:
 def _tint(color, n=3):
     """A pale-to-``color`` colormap, for filling contours without shouting.
 
-    The palest stop is a visible tint rather than white: a ``contourf`` whose
-    first band is white leaves the outermost contour with no fill inside it,
-    which reads as though the density stopped there.
+    The palest stop is a visible tint rather than the paper color: a
+    ``contourf`` whose first band is the paper color leaves the outermost
+    contour with no fill inside it, which reads as though the density stopped
+    there.
     """
     from matplotlib.colors import LinearSegmentedColormap, to_rgb
 
-    rgb = np.asarray(to_rgb(color))
-    stops = [tuple(rgb + (1.0 - rgb) * fade) for fade in (0.86, 0.55, 0.22)]
+    rgb, paper = np.asarray(to_rgb(color)), np.asarray(to_rgb(C_PAPER))
+    stops = [tuple(rgb + (paper - rgb) * fade) for fade in (0.86, 0.55, 0.22)]
     return LinearSegmentedColormap.from_list("tint", stops, N=n)
 
 
@@ -321,13 +371,14 @@ def _square_box(mean, sd, half_widths=3.5):
     )
 
 
-def _draw_contours(ax, beta, box, n=160, color=C_PRIOR_LIGHT, fill=True):
+def _draw_contours(ax, beta, box, n=160, color=None, fill=True):
     """Contours of the tempered density at ``beta``, on the axes' own box.
 
     Filled, faintly, with thin lines over the fill. The fill is what makes a
     density read as a density rather than as three unexplained rings, and the
     lines are still what a reader measures the ensemble against.
     """
+    color = C_PRIOR_LIGHT if color is None else color
     amp, rate, density = _tempered_contours(beta, box, n)
     if fill:
         ax.contourf(
@@ -347,12 +398,13 @@ def _draw_contours(ax, beta, box, n=160, color=C_PRIOR_LIGHT, fill=True):
     ax.set_ylim(box[2], box[3])
 
 
-def _cloud(ax, ensemble, color=C_ENSEMBLE, label=None, size=9.0, alpha=0.85):
-    """Scatter an ensemble in the parameter plane, with a white halo.
+def _cloud(ax, ensemble, color=None, label=None, size=9.0, alpha=0.85):
+    """Scatter an ensemble in the parameter plane, with a halo of the paper color.
 
     The halo is what keeps 64 overlapping particles legible as particles rather
     than as one blob.
     """
+    color = C_ENSEMBLE if color is None else color
     e = np.asarray(ensemble)
     ax.scatter(
         e[:, 0],
@@ -361,7 +413,7 @@ def _cloud(ax, ensemble, color=C_ENSEMBLE, label=None, size=9.0, alpha=0.85):
         c=color,
         alpha=alpha,
         linewidths=0.35,
-        edgecolors="white",
+        edgecolors=C_PAPER,
         label=label,
         zorder=3,
     )
@@ -381,7 +433,7 @@ def _mark_truth(ax, annotate=None):
         s=42,
         c=C_TRUTH,
         linewidths=0.6,
-        edgecolors="white",
+        edgecolors=C_PAPER,
         zorder=6,
         label=None if annotate else "true parameters",
     )
@@ -466,7 +518,7 @@ def _draw_data(ax, label="observations"):
         yerr=noise_sd,
         fmt="o",
         ms=3.4,
-        mfc="white",
+        mfc=C_PAPER,
         mew=1.1,
         color=C_DATA,
         ecolor=C_DATA,
@@ -517,7 +569,7 @@ def _arrow_between(fig, left, right, label):
             (center + half, y),
             transform=fig.transFigure,
             arrowstyle="simple,head_width=5.5,head_length=7,tail_width=1.4",
-            facecolor="#7b848d",
+            facecolor=C_ARROW,
             edgecolor="none",
             mutation_scale=1.0,
         )
@@ -565,7 +617,7 @@ def _handle(kind, color, label, **kwargs):
             lw=1.4,
             marker=kwargs.pop("marker", "o"),
             markerfacecolor=color,
-            markeredgecolor="white",
+            markeredgecolor=C_PAPER,
             markeredgewidth=0.4,
             markersize=4.0,
             label=label,
@@ -579,7 +631,7 @@ def _handle(kind, color, label, **kwargs):
             color=color,
             lw=1.1,
             marker="o",
-            markerfacecolor="white",
+            markerfacecolor=C_PAPER,
             markeredgecolor=color,
             markeredgewidth=1.1,
             markersize=5.0,
@@ -592,7 +644,7 @@ def _handle(kind, color, label, **kwargs):
         marker=marker,
         linestyle="none",
         markerfacecolor=kwargs.pop("mfc", color),
-        markeredgecolor=kwargs.pop("mec", "white"),
+        markeredgecolor=kwargs.pop("mec", C_PAPER),
         markeredgewidth=kwargs.pop("mew", 0.6),
         markersize=kwargs.pop("ms", 5.0),
         label=label,
@@ -672,7 +724,7 @@ def prior_predictive():
         density_color=C_PRIOR_LIGHT,
         legend=[
             _handle("patch", C_PRIOR_LIGHT, "prior density"),
-            _handle("marker", C_PRIOR, "ensemble members"),
+            _handle("marker", C_PRIOR, "particles"),
             _handle("marker", C_TRUTH, "true $u$", marker="X", ms=6.0),
             _handle("line", C_PRIOR, "predictions", alpha=0.55),
             _handle("observation", C_DATA, "observation $y$"),
@@ -724,7 +776,7 @@ def one_step():
         density_color=C_TARGET,
         legend=[
             _handle("patch", C_TARGET, "true posterior density"),
-            _handle("marker", C_ENSEMBLE, "ensemble members"),
+            _handle("marker", C_ENSEMBLE, "particles"),
             _handle("marker", C_TRUTH, "true $u$", marker="X", ms=6.0),
             _handle("line", C_ENSEMBLE, "predictions", alpha=0.55),
             _handle("observation", C_DATA, "observation $y$"),
@@ -889,7 +941,7 @@ def bridge_tracked():
             spare.legend(
                 handles=[
                     _handle("patch", C_TARGET, "exact distribution"),
-                    _handle("marker", C_ENSEMBLE, "ensemble members"),
+                    _handle("marker", C_ENSEMBLE, "particles"),
                 ],
                 loc="center",
                 handlelength=1.5,
@@ -932,7 +984,7 @@ def answer():
         density_color=C_TARGET,
         legend=[
             _handle("patch", C_TARGET, "true posterior density"),
-            _handle("marker", C_ENSEMBLE, "ensemble members"),
+            _handle("marker", C_ENSEMBLE, "particles"),
             _handle("marker", C_TRUTH, "true $u$", marker="X", ms=6.0),
             _handle("line", C_ENSEMBLE, "predictions", alpha=0.55),
             _handle("observation", C_DATA, "observation $y$"),
@@ -987,7 +1039,7 @@ def trajectories():
                 np.asarray(history.step),
                 np.asarray(getattr(history, field)),
                 markersize=3.4,
-                markeredgecolor="white",
+                markeredgecolor=C_PAPER,
                 markeredgewidth=0.4,
                 **styles[label],
             )
@@ -1083,7 +1135,7 @@ def two_forms():
         color=C_ALT,
         marker="s",
         markersize=3.0,
-        markeredgecolor="white",
+        markeredgecolor=C_PAPER,
         markeredgewidth=0.4,
         label="optimization form",
     )
@@ -1144,6 +1196,10 @@ FIGURES: dict[str, Callable[[], tuple[plt.Figure, dict]]] = {
 def build(output_dir=OUTPUT_DIR, *, only=None) -> dict[str, dict]:
     """Write the figures as PNG files, and return what each one plotted.
 
+    Each figure is written twice, as ``<name>.png`` in the light theme and
+    ``<name>-dark.png`` in the dark one, and the returned data are the light
+    figure's. The two draw the same numbers; only the palette differs.
+
     Parameters
     ----------
     output_dir
@@ -1167,9 +1223,11 @@ def build(output_dir=OUTPUT_DIR, *, only=None) -> dict[str, dict]:
 
     plotted = {}
     for name in names:
-        figure, data = FIGURES[name]()
-        figure.savefig(output_dir / f"{name}.png")
-        plt.close(figure)
+        for theme, suffix in (("dark", "-dark"), ("light", "")):
+            _use_theme(theme)
+            figure, data = FIGURES[name]()
+            figure.savefig(output_dir / f"{name}{suffix}.png")
+            plt.close(figure)
         plotted[name] = data
     return plotted
 
@@ -1184,14 +1242,45 @@ def _newest_source_time() -> float:
 def is_current(output_dir=OUTPUT_DIR) -> bool:
     """Whether every figure exists and postdates every source file."""
     output_dir = Path(output_dir)
-    paths = [output_dir / f"{name}.png" for name in FIGURES]
+    paths = [
+        output_dir / f"{name}{suffix}.png" for name in FIGURES for suffix in ("", "-dark")
+    ]
     if not all(path.exists() for path in paths):
         return False
     return min(path.stat().st_mtime for path in paths) > _newest_source_time()
 
 
+def add_dark_variants(document) -> None:
+    """Pair every generated figure in ``document`` with its dark variant.
+
+    Each image whose path is under ``_generated/figures/`` gets Furo's
+    ``only-light`` class, and a copy pointing at ``<name>-dark.png``, with the
+    ``only-dark`` class, is inserted after it. A page writes one ``figure``
+    directive per figure, and the theme the reader chose decides which image
+    is shown.
+    """
+    from docutils import nodes
+
+    for image in list(document.findall(nodes.image)):
+        uri = image["uri"]
+        if "_generated/figures/" not in uri or uri.endswith("-dark.png"):
+            continue
+        dark = image.deepcopy()
+        dark["uri"] = uri.removesuffix(".png") + "-dark.png"
+        image["classes"].append("only-light")
+        dark["classes"].append("only-dark")
+        image.parent.insert(image.parent.index(image) + 1, dark)
+
+
 def setup(app):
-    """Register the build-time hook. Called by Sphinx; see the module notes."""
+    """Register the build-time hooks. Called by Sphinx; see the module notes."""
+    from sphinx.transforms import SphinxTransform
+
+    class DarkVariants(SphinxTransform):
+        default_priority = 500
+
+        def apply(self, **kwargs):
+            add_dark_variants(self.document)
 
     def generate(_app):
         force = os.environ.get("ENSKIT_DOCS_FIGURES") == "force"
@@ -1200,6 +1289,7 @@ def setup(app):
         build()
 
     app.connect("builder-inited", generate)
+    app.add_transform(DarkVariants)
     return {"version": enskit.__version__, "parallel_read_safe": True}
 
 

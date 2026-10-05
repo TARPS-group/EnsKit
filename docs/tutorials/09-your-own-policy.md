@@ -16,20 +16,27 @@ Tutorials 1 to 8.
 
 ## What this page covers
 
-- Where the extension seams are, and why they are where they are: `enskit.linalg`
-  is extended by writing an operator, `enskit.gauss` is closed, and `enskit.eki`
-  is extended by writing a policy. One paragraph.
-- The three protocols — `Schedule`, `EnsembleUpdate`, `Inflation` — plus
-  `StoppingRule`, and what the driver calls on each and when.
+- Where the extension seams are, and why they are where they are:
+  `enskit.linalg` is extended by writing an operator, `enskit.kalman` by
+  writing an update rule, and `enskit.algorithms` by writing a policy. One
+  paragraph.
+- The protocols — `kalman.UpdateRule`, `eki.Schedule`, `eki.StoppingRule`,
+  `algorithms.Inflation` and `algorithms.Relaxation` — and what the driver
+  calls on each and when. An update rule is a factory: `build(particles,
+  approximation, given)` returns the update, which receives the given values
+  when called.
 - The two phases of a step, `evaluate` and `assimilate`, and `advance` as their
   composition. A policy author needs this to know what is available when.
 - A worked schedule: something small and genuinely useful, for example a
   schedule that caps the increment by a target misfit reduction. Write it,
   then run it.
-- **Validate it**: `check_schedule`, `check_update`, `check_stopping_rule`,
-  `check_inflation` from `enskit.eki.testing`, and `synthetic_evaluation` for
-  constructing inputs without a forward model. Make clear this is the step that
-  catches the errors that produce wrong numbers rather than exceptions.
+- A worked update rule as well: example 14 of the {doc}`../examples/index`
+  writes the deterministic EnKF of Sakov & Oke (2008) as a rule.
+- **Validate it**: `check_schedule`, `check_update_rule`,
+  `check_stopping_rule`, `check_inflation` and `check_relaxation` from
+  `enskit.testing`, each of which builds its own inputs when none are given.
+  Make clear this is the step that catches the errors that produce wrong
+  numbers rather than exceptions.
 - The `**_` seam in the protocol signatures, and that it is what makes future
   fields non-breaking — so a policy should accept it.
 - The JAX rules a policy author will otherwise learn the hard way:
@@ -56,10 +63,11 @@ Tutorials 1 to 8.
 
 ## API exercised
 
-`enskit.eki`: `Schedule`, `EnsembleUpdate`, `Inflation`, `StoppingRule`,
-`evaluate`, `assimilate`, `advance`, `misfits`, `effective_sample_size`.
-`enskit.eki.testing`: `check_schedule`, `check_update`, `check_stopping_rule`,
-`check_inflation`, `synthetic_evaluation`.
+`enskit.algorithms.eki`: `Schedule`, `StoppingRule`, `evaluate`,
+`assimilate`, `advance`, `misfits`, `effective_sample_size`.
+`enskit.algorithms`: `Inflation`, `Relaxation`. `enskit.kalman`:
+`UpdateRule`. `enskit.testing`: `check_schedule`, `check_update_rule`,
+`check_stopping_rule`, `check_inflation`, `check_relaxation`.
 
 ## Notes for the writer
 

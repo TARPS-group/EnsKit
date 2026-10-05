@@ -1,78 +1,98 @@
 # Examples
 
-Runnable notebooks that work a problem end to end — model, prior, inversion,
-diagnostics and plots — rather than teaching one idea at a time. The
-{doc}`../tutorials/index` teach; these demonstrate.
+Fifteen worked examples, each a problem stated precisely and solved end to
+end. Each says when its method is the right tool, writes out the mathematics
+beside the code, cites the papers the method comes from, and ends with
+checks of what it claims. The {doc}`../tutorials/index` teach one idea at a
+time; the {doc}`../user-guide/index` answers when and why; these
+demonstrate.
 
-Every notebook here runs against the problems in
-{doc}`../user-guide/toy-models`, so it can be executed from a clean checkout
-with no data and no domain code.
+Every example runs on the problems of {doc}`../user-guide/toy-models`, so it
+runs from a clean checkout with no data and no code of your own. They are
+grouped by the level of the API they work at, as the user guide is.
 
-:::{admonition} Being written
-:class: note
+## Running an algorithm
 
-The notebooks below are planned, not yet written, and the build wiring for
-executing them is not yet in place. See *Build wiring* at the bottom of this
-page for the decisions that must be made first.
-:::
+| | example | shows |
+| --- | --- | --- |
+| 1 | {doc}`ex01_eki` | EKI in its sampling and its optimization form, with one driver |
+| 2 | {doc}`ex02_enkf` | the ensemble Kalman filter on Lorenz-96, in one call |
+| 11 | {doc}`ex11_hybrid` | a filter whose update blends the sample covariance with a static one |
+| 12 | {doc}`ex12_localization` | domain localization of both update rules, with ten particles for forty variables |
 
-## Planned notebooks
+## One update
 
-`01_linear_gaussian.ipynb` — **EKI against a closed form.**
-: A linear forward model and a Gaussian prior, where the posterior is known
-  exactly. Run the sampling form and compare the ensemble's mean and covariance
-  against the analytic posterior, showing convergence in $J$ at the Monte Carlo
-  rate. This is the notebook that establishes the library computes the right
-  answer, so the comparison should be against the closed form rather than
-  against a tolerance.
+| | example | shows |
+| --- | --- | --- |
+| 3 | {doc}`ex03_one_update` | one update with each rule, against the exact posterior |
+| 6 | {doc}`ex06_two_estimators` | why adding a known noise covariance beats sampling the noise |
+| 14 | {doc}`ex14_custom_rule` | a new update rule, used unchanged in an update, a filter and an EKI run |
 
-`02_nonlinear.ipynb` — **A nonlinear model, and what the ladder buys.**
-: A mildly nonlinear model where a single unit step and an adaptive ladder give
-  visibly different answers. Show the ensemble at each step, the misfit
-  trajectory, and the ESS. Make the point that exactness is claimed for the
-  affine-Gaussian case only, and that this is an approximation with no
-  consistency guarantee.
+## Forecast and update separately
 
-`03_sampling_vs_optimizing.ipynb` — **The two forms, on one problem.**
-: The same model and data under `AdaptiveESSSchedule` to $\beta = 1$ and under
-  `FixedSchedule` with `DiscrepancyStop`. Show the difference in ensemble
-  spread, and show what happens to the optimization form with the stopping rule
-  removed — overfitting made visible.
+| | example | shows |
+| --- | --- | --- |
+| 4 | {doc}`ex04_hand_loop` | the EKI loop written as explicit calls, reproducing the driver |
+| 9 | {doc}`ex09_gibbs` | a Gibbs sampler alternating an ensemble update with a conjugate one |
+| 13 | {doc}`ex13_named_blocks` | estimating a parameter and a smoothed state as extra blocks of a filter |
 
-`04_structured_covariances.ipynb` — **When error is correlated.**
-: A problem with two observation streams, one independent and one correlated,
-  built with `block_diag`. Show that the inversion call is unchanged, and show
-  what the wrong (diagonal) noise assumption does to the answer.
+## Probabilistic operations
 
-`05_failing_model.ipynb` — **A model that fails.**
-: A forward model with a controllable failure rate. Sweep the rate, show
-  `n_valid` in the history and the damping it implies, and show where repair
-  stops being adequate.
+| | example | shows |
+| --- | --- | --- |
+| 5 | {doc}`ex05_probabilistic_ops` | both update rules built from conditioning and conditional maps |
+| 7 | {doc}`ex07_kalman_filter` | the exact Kalman filter and its log likelihood, from Gaussian operations alone |
+| 8 | {doc}`ex08_hyperparameters` | fitting hyperparameters by the gradient of the log evidence |
+| 10 | {doc}`ex10_importance` | EKI as the proposal of an importance sampler |
+| 15 | {doc}`ex15_differentiability` | derivatives through an update, an EKI run and a filter |
 
-`06_ensemble_size.ipynb` — **The subspace bound.**
-: A high-dimensional problem, $P \gg J$. Show the rank of the reachable
-  subspace, sweep $J$, and show what inflation does and does not fix. This is
-  the notebook that will be revisited when `enskit.localize` lands.
+```{toctree}
+:hidden:
+:maxdepth: 1
 
-## Build wiring
+ex01_eki
+ex02_enkf
+ex03_one_update
+ex04_hand_loop
+ex05_probabilistic_ops
+ex06_two_estimators
+ex07_kalman_filter
+ex08_hyperparameters
+ex09_gibbs
+ex10_importance
+ex11_hybrid
+ex12_localization
+ex13_named_blocks
+ex14_custom_rule
+ex15_differentiability
+```
 
-Three decisions, none yet made:
+## How the examples are built
 
-**1. Which extension.** `nbsphinx` is currently listed in the dev dependency
-group but is **not** in `docs/conf.py`'s extension list, so no notebook would
-render today. The recommendation is `myst-nb` instead: the docs already use
-`myst-parser` for Markdown, and `myst-nb` supersedes it — it registers both
-`.md` and `.ipynb` and would replace `myst_parser` in the extension list rather
-than sit alongside it. Loading both is an error.
+Each example is a percent-format Python file in `docs/examples/src/`, which
+is what is reviewed and edited. `docs/examples/build.py` executes one in a
+fresh interpreter and writes the notebook beside it with its outputs stored;
+the documentation renders those stored outputs and never executes anything.
+To run one yourself, run its source, or open its notebook:
 
-**2. Execution policy.** Executing at build time catches examples that have
-rotted against the API, and makes them fail the docs CI job, which already runs
-with warnings as errors. Committing outputs instead is faster but lets examples
-break silently. The recommendation is to execute, with `nb_execution_cache`
-enabled so unchanged notebooks are not re-run, and to keep each notebook small
-enough that the docs job stays cheap.
+```bash
+uv run python docs/examples/src/ex01_eki.py
+```
 
-**3. Whether notebooks are the source form.** A `.ipynb` under version control
-produces noisy diffs. MyST notebooks — `.md` with a code-cell syntax — diff
-cleanly and are executed identically by `myst-nb`. Worth choosing before the
-first one is written, because converting later means rewriting them.
+To regenerate the notebooks after changing a source or the package:
+
+```bash
+uv run python docs/examples/build.py
+```
+
+Two tests keep them honest. A fast one checks that every stored notebook's
+cells are exactly its source's, so a notebook cannot drift from the code it
+claims to show. A slow one, `uv run pytest -m slow`, executes every source,
+and each source ends with checks of the numbers its text states.
+
+The examples on Lorenz-96 (2, 11, 12, 13, 14) print numbers that differ
+from one platform to another. The system is chaotic, and its spin-up turns a
+difference in the last digit of one arithmetic operation into a different
+true trajectory, so another machine filters a different truth at the same
+seed. Their text states approximate values, and their checks test bands
+measured over several seeds.
