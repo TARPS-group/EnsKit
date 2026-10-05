@@ -234,9 +234,10 @@ The decay model is not affine, so this run's answer is an approximation with
 no guarantee attached. Two consequences to carry:
 
 - **Two ladders give two answers, and neither bounds the other.** A finer
-  ladder makes each step's Gaussian fit more accurate, and also accumulates
-  more sampling error and collapses the ensemble further. Refinement is not
-  monotone improvement. {doc}`04-tempering-schedules` measures this.
+  ladder makes each step's Gaussian fit more accurate, but nothing guarantees
+  that it brings the answer closer to the target, and the shape of a ladder
+  can matter more than its length. {doc}`04-tempering-schedules` compares
+  ladders of different shapes and lengths on this problem.
 - **Particles are not independent draws.** The update couples them.
   Uncertainty lives in the ensemble's spread, not in any individual particle.
 
