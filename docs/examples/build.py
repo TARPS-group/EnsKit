@@ -82,6 +82,7 @@ def build(source: pathlib.Path) -> bool:
     }
     nb.metadata["language_info"] = {"name": "python"}
     namespace: dict = {"__name__": "__main__"}
+    executed = 0
     for kind, body in cells(source):
         if kind == "markdown":
             nb.cells.append(nbformat.v4.new_markdown_cell(body))
@@ -93,7 +94,8 @@ def build(source: pathlib.Path) -> bool:
         except Exception:
             print(f"FAIL {source.stem}:\n{body}\n{traceback.format_exc()}")
             return False
-        cell = nbformat.v4.new_code_cell(body)
+        executed += 1
+        cell = nbformat.v4.new_code_cell(body, execution_count=executed)
         if printed.getvalue().strip():
             cell.outputs = [
                 nbformat.v4.new_output("stream", name="stdout", text=printed.getvalue())

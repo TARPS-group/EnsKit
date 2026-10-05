@@ -35,7 +35,7 @@ def test_there_are_fifteen_examples():
 
 @pytest.mark.parametrize("source", SOURCES, ids=lambda p: p.stem)
 def test_the_stored_notebook_is_its_source(source):
-    """The cells match the source's, in order; every code cell was executed.
+    """The cells match the source's, in order, and every code cell was executed.
 
     Regenerate with ``uv run python docs/examples/build.py <name>`` when this
     fails.
@@ -48,10 +48,10 @@ def test_the_stored_notebook_is_its_source(source):
     nbformat.validate(notebook)
     stored = [(cell.cell_type, cell.source) for cell in notebook.cells]
     assert stored == build.cells(source), f"{path.name} is stale; rebuild it"
-    for cell in notebook.cells:
-        if cell.cell_type == "code":
-            assert "execution_count" in cell
-            assert not [o for o in cell.outputs if o.output_type == "error"]
+    code = [cell for cell in notebook.cells if cell.cell_type == "code"]
+    assert [cell.execution_count for cell in code] == list(range(1, len(code) + 1))
+    for cell in code:
+        assert not [o for o in cell.outputs if o.output_type == "error"]
 
 
 @pytest.mark.parametrize("source", SOURCES, ids=lambda p: p.stem)

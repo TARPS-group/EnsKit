@@ -82,6 +82,23 @@ class DEnKF:
         return update
 
 # %% [markdown]
+# ## Checking the rule
+#
+# `enskit.testing.check_update_rule` runs a rule through the obligations every
+# update rule must meet, on a linear-Gaussian problem of its own: the blocks,
+# shapes and dtype it returns and the errors it raises; that it is
+# reproducible from its key; that one build serves any value; that its mean is
+# the exact conditional mean and, unless told otherwise, its covariance the
+# exact conditional covariance; and that it agrees under `jax.jit` and
+# `jax.vmap`. The DEnKF's covariance is larger by design, so the covariance
+# check is turned off. Run it before trusting a rule of your own.
+
+# %%
+from enskit.testing import check_update_rule
+
+check_update_rule(DEnKF(), exact_covariance=False)      # raises if an obligation fails
+
+# %% [markdown]
 # ## One update
 #
 # The test problem is linear: $u \in \mathbb R^4$ with prior
@@ -116,8 +133,10 @@ P_denkf = P_kalman + 0.25 * K @ A @ A.T @ K.T
 # per time, forcing 8, $T = 300$ times, the 20 even-numbered sites observed
 # with noise covariance $I_{20}$, and 40 initial particles drawn from
 # $\mathcal N(x_0^\dagger, I_{40})$ around the true initial state. The
-# anomalies are inflated by 1.02 before each analysis [@anderson1999]. The
-# rule draws nothing, so the filter needs no key.
+# anomalies are inflated by 1.02 before each analysis [@anderson1999], less
+# than Example 2's 1.05, because the DEnKF's halved anomaly update already
+# leaves the ensemble wider than a square-root update would. The rule draws
+# nothing, so the filter needs no key.
 #
 # It also drives `eki.run` on a two-parameter exponential decay
 # $G(u)_i = u_0\, e^{-u_1 t_i}$ at the twelve times $t_i = i/4$,

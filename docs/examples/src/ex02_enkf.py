@@ -95,7 +95,7 @@ print(f"total log evidence: {float(result.total_log_evidence):.1f}")
 # %% [markdown]
 # ## What to notice
 #
-# The time-averaged error after spin-up is about 0.3, under a third of the
+# The time-averaged error after spin-up is about 0.3, well below the
 # observation noise standard deviation of 1.0, although only half of the
 # coordinates are observed. The total log evidence has no meaning on its own;
 # it becomes useful when compared with the same quantity for a different

@@ -104,7 +104,7 @@ def draw_noise_cov(key, u):
 # $u \mid R, y_{1:n}$, so this is an approximate Gibbs sampler. Because the
 # model is linear and Gaussian, an exact draw is also available by conditioning
 # the Gaussian prior pushed through $G$ and sampling the result, as in
-# Example 7.
+# Example 3.
 
 # %%
 R = 0.4 * jnp.eye(3)
@@ -131,7 +131,7 @@ print(f"posterior mean of u: ({float(u_mean[0]):.3f}, {float(u_mean[1]):.3f}), "
 #
 # After discarding the first 50 of 400 sweeps, the estimated posterior mean of
 # $R$ has diagonal $(0.428, 0.378, 0.228)$ against the true $(0.5, 0.4, 0.3)$,
-# and it recovers the positive correlations $0.234$ and $0.079$ where the truth
+# and it recovers the positive covariances $0.234$ and $0.079$ where the truth
 # has $0.2$ and $0.1$. The prior mean $0.4\, I_3$ has no off-diagonal terms, so
 # these come from the 40 replicates. The posterior mean of $u$ is
 # $(-1.347, 1.486)$, near $u^\dagger = (-1.401, 1.432)$.

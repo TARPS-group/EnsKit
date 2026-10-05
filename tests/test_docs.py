@@ -37,6 +37,12 @@ def _blocks(page: Path) -> list[str]:
     return re.findall(r"```python\n(.*?)```", page.read_text(), re.S)
 
 
+#: The blocks of each page that begin indented, methods shown out of their
+#: class, and so are skipped. A count, so that an edit indenting a block of
+#: runnable code, which would silently stop testing it, fails instead.
+SKIPPED = {"writing-an-operator.md": 3}
+
+
 def _run(page: Path, setups: dict[int, str]) -> dict:
     """Every block of ``page`` in one namespace, ``setups[i]`` before block ``i``.
 
@@ -47,17 +53,19 @@ def _run(page: Path, setups: dict[int, str]) -> dict:
     module = types.ModuleType(f"docs_page_{page.stem.replace('-', '_')}")
     sys.modules[module.__name__] = module
     ns = module.__dict__
-    ran = 0
+    ran = skipped = 0
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         for i, block in enumerate(_blocks(page)):
             if i in setups:
                 exec(compile(setups[i], f"{page.name} setup {i}", "exec"), ns)
             if block[:1].isspace():
+                skipped += 1
                 continue
             exec(compile(block, f"{page.name} block {i}", "exec"), ns)
             ran += 1
     assert ran >= 1
+    assert skipped == SKIPPED.get(page.name, 0), (page.name, skipped)
     return ns
 
 

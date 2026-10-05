@@ -7,8 +7,8 @@ checks of what it claims. The {doc}`../tutorials/index` teach one idea at a
 time; the {doc}`../user-guide/index` answers when and why; these
 demonstrate.
 
-Every example runs on the problems of {doc}`../user-guide/toy-models`, so it
-runs from a clean checkout with no data and no code of your own. They are
+Every example runs from a clean checkout with no data and no code of your
+own, almost all of them on the problems of {doc}`../user-guide/toy-models`. They are
 grouped by the level of the API they work at, as the user guide is.
 
 ## Running an algorithm
@@ -44,7 +44,7 @@ grouped by the level of the API they work at, as the user guide is.
 | 7 | {doc}`ex07_kalman_filter` | the exact Kalman filter and its log likelihood, from Gaussian operations alone |
 | 8 | {doc}`ex08_hyperparameters` | fitting hyperparameters by the gradient of the log evidence |
 | 10 | {doc}`ex10_importance` | EKI as the proposal of an importance sampler |
-| 15 | {doc}`ex15_differentiability` | derivatives through an update, an EKI run and a filter |
+| 15 | {doc}`ex15_differentiability` | derivatives through an update, an EKI run, and an ensemble likelihood whose simulator is outside JAX |
 
 ```{toctree}
 :hidden:

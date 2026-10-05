@@ -41,7 +41,7 @@ problem = toy.linear_state_space()       # A, Q, H, R, the initial state, 20 obs
 rule = kalman.Matheron()
 
 def forecast(ens, key):
-    k_transition, k_noise = jax.random.split(key)
+    k_transition, k_noise = jax.random.split(key)    # as enkf.forecast splits it
     ens = maps.pushforward(ens, problem.transition, inputs="x", output="x",
                            key=k_transition)
     return maps.pushforward(ens, maps.AdditiveNoise(problem.transition_noise),
@@ -133,7 +133,8 @@ bool(jnp.all(mine["x"] == theirs["x"]))                 # True
   (example 13 in the {doc}`../examples/index`).
 - **Data or noise that change between steps**: a subsampled data vector, a
   noise covariance re-estimated from the data, or a step that is retried at a
-  shorter increment (example 4).
+  shorter increment. Example 4 writes the EKI loop such a change starts
+  from.
 - **An algorithm that is neither EKI nor a filter**: a sweep that updates
   each block conditionally on the others (example 9), or a Gaussian
   approximation of your own passed to the update (example 11).

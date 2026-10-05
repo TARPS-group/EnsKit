@@ -1263,7 +1263,8 @@ def add_dark_variants(document) -> None:
 
     for image in list(document.findall(nodes.image)):
         uri = image["uri"]
-        if "_generated/figures/" not in uri or uri.endswith("-dark.png"):
+        generated = "_generated/figures/" in uri and uri.endswith(".png")
+        if not generated or uri.endswith("-dark.png"):
             continue
         dark = image.deepcopy()
         dark["uri"] = uri.removesuffix(".png") + "-dark.png"
@@ -1280,7 +1281,9 @@ def setup(app):
         default_priority = 500
 
         def apply(self, **kwargs):
-            add_dark_variants(self.document)
+            # only HTML honors Furo's theme classes; elsewhere both would show
+            if self.app.builder.format == "html":
+                add_dark_variants(self.document)
 
     def generate(_app):
         force = os.environ.get("ENSKIT_DOCS_FIGURES") == "force"

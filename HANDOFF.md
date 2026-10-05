@@ -89,7 +89,17 @@ docstring, README and landing page describe both algorithms.
 **Found here:** #76, a composite operator's `shape` is exponential in its
 nesting depth (each uncompressed `condition` doubles the `Product.shape`
 calls; correct results, exploding time). Shipped paths compress, so they
-avoid it.
+avoid it. #78, from the adversarial review: nothing compares a stored
+notebook's outputs with a fresh run, so a rendered number inside an
+example's assertion band can go stale silently.
+
+**The adversarial review** found no wrong numbers. Its trivial findings were
+fixed here: two misdescriptions in the gallery index and example 9, an
+assertion that could not fail (the builder now records execution counts), a
+pin on a rounding boundary in example 15, the dark-variant transform
+restricted to HTML and to `.png` figures, the one-step band test made to
+compare the two ensemble sizes rather than fit a band, the docs harness
+counting the blocks it skips, and example 14 showing `check_update_rule`.
 
 **For later PRs.**
 

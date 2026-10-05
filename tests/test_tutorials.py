@@ -26,11 +26,10 @@ The identity behind the ``center_misfit`` gap is *not* re-tested here — it is
 ``tests/test_eki.py::test_11_the_center_misfit_differs_from_the_mean_by_exactly_the_spread_term``.
 This file pins only the numbers tutorial 2 prints.
 
-Section 5 holds the assertions whose page claims no longer hold since PR 7
-changed the prior draw (``EKIState.from_prior`` now splits its key, and
-``Gaussian.sample`` splits it again). Each is a strict ``xfail`` naming the
-sentence it pins, so the claim is neither deleted nor silently passing, and
-the test fails once the page or the draw makes it true again.
+Section 5 pins the sentences PR 11 wrote in place of four claims that
+stopped holding when PR 7 changed the prior draw (``EKIState.from_prior`` now
+splits its key, and ``Gaussian.sample`` splits it again). Each test quotes
+the sentence it pins.
 """
 from __future__ import annotations
 
@@ -537,6 +536,7 @@ def test_3_a_generated_figure_is_paired_with_its_dark_variant():
     figure = nodes.figure()
     figure += nodes.image(uri="../_generated/figures/01-answer.png", alt="the answer")
     figure += nodes.image(uri="../_static/logo.png")
+    figure += nodes.image(uri="../_generated/figures/sketch.svg")
     document += figure
     figures.add_dark_variants(document)
     images = list(document.findall(nodes.image))
@@ -544,8 +544,9 @@ def test_3_a_generated_figure_is_paired_with_its_dark_variant():
         "../_generated/figures/01-answer.png",
         "../_generated/figures/01-answer-dark.png",
         "../_static/logo.png",
+        "../_generated/figures/sketch.svg",
     ]
-    assert [i["classes"] for i in images] == [["only-light"], ["only-dark"], []]
+    assert [i["classes"] for i in images] == [["only-light"], ["only-dark"], [], []]
     assert images[1]["alt"] == "the answer"
 
 
@@ -757,10 +758,22 @@ def test_4_the_two_forms_figure_plots_what_tutorial_3_says():
 # ===========================================================================
 
 
-@pytest.mark.parametrize("n_particles", [64, 2048])
-def test_5_the_one_step_error_is_the_gaussian_fit_not_the_ensemble_size(
-    n_particles,
-):
+def _one_step_overspread(n_particles):
+    """The one-step ensemble's spread over the exact posterior's, per parameter."""
+    problem = toy.exponential_decay()
+    result = run(
+        _state(n_particles),
+        problem.forward,
+        problem.y,
+        problem.noise_cov,
+        update_rule=MATHERON,
+        schedule=FixedSchedule.constant(1.0, n_steps=1),
+    )
+    _, posterior_sd = figures._tempered_moments(1.0)
+    return _sd(result.ensemble) / posterior_sd
+
+
+def test_5_the_one_step_error_is_the_gaussian_fit_not_the_ensemble_size():
     """Tutorial 1: "the discrepancy does not go away with a larger ensemble".
 
     The page attributes the one-step failure to the Gaussian approximation
@@ -769,23 +782,13 @@ def test_5_the_one_step_error_is_the_gaussian_fit_not_the_ensemble_size(
     in the decay rate large (19.5 times the exact spread at 64 particles,
     22.5 at 2048), so the attribution holds.
 
-    Stated as a band rather than a pinned value: the point is that the ratio
-    stays large, not that it takes a particular value at a particular size.
+    The claim is about the trend, so the two sizes are compared directly:
+    thirty-two times the particles must not shrink the overspread in either
+    parameter, and the rate's must stay large at both.
     """
-    problem = toy.exponential_decay()
-    state = _state(n_particles)
-    result = run(
-        state,
-        problem.forward,
-        problem.y,
-        problem.noise_cov,
-        update_rule=MATHERON,
-        schedule=FixedSchedule.constant(1.0, n_steps=1),
-    )
-    _, posterior_sd = figures._tempered_moments(1.0)
-    ratio = _sd(result.ensemble) / posterior_sd
-    assert 15.0 < ratio[1] < 26.0, (n_particles, ratio)
-    assert 1.4 < ratio[0] < 2.5, (n_particles, ratio)
+    small, large = _one_step_overspread(64), _one_step_overspread(2048)
+    assert (large >= small).all(), (small, large)
+    assert small[1] > 15.0 and large[1] > 15.0, (small, large)
 
 
 def test_5_an_evaluation_and_its_record_carry_the_same_level():

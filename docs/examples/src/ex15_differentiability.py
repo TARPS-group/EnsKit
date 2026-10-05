@@ -188,7 +188,7 @@ print(f"vmapped over two ensembles: {float(two[0]):.3f}, {float(two[1]):.3f}")
 # ## What to notice
 #
 # With three exactly zero singular values the plain-SVD derivative is `nan`,
-# while the custom rules give 0.6042, matching the central finite difference
+# while the custom rules give 0.604, matching the central finite difference
 # to a relative error below $10^{-9}$. The derivative of the four-step run,
 # $-9.364 \times 10^{-6}$, agrees with its finite difference to a relative
 # error below $10^{-6}$. The simulator run under `jax.jit` and `jax.vmap`
@@ -203,7 +203,7 @@ def rel_err(a, b):
 
 assert jnp.isnan(grad_naive)
 assert jnp.allclose(naive_posterior_spread(0.0), posterior_spread(0.0), rtol=1e-12)
-assert round(float(grad_spread), 4) == 0.6042
+assert round(float(grad_spread), 3) == 0.604
 assert rel_err(grad_spread, fd) < 1e-9
 assert f"{float(g_ad):.4g}" == "-9.364e-06"
 assert rel_err(g_ad, g_fd) < 1e-6

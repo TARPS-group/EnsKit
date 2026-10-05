@@ -68,7 +68,8 @@ print(problem)
 # terms. Pushing $x$ through a linear map moves the independent term of $x$
 # into the shared factor $F$. The initial covariance contributes three columns,
 # and each absorbed transition-noise term $Q$ adds three more, so without
-# intervention the latent width would reach $3 + 3T = 63$ after 20 steps.
+# intervention the latent width grows by three a step, to $3 + 3T = 63$ after
+# 20 steps; the checks follow that growth over the first eight.
 # `compress` re-factors $F$ to a width of at most the total dimension of the
 # remaining blocks, here 3.
 
@@ -123,7 +124,6 @@ for t, y in enumerate(problem.observations[:8], start=1):
                     .add_noise(y=problem.noise_cov)
                     .condition(y=y))
     assert uncompressed.latent_dim == 3 + 3 * t
-assert 3 + 3 * problem.n_times == 63
 
 reference, log_evidence = problem.exact_filter()
 assert jnp.allclose(log_likelihood, jnp.sum(log_evidence), rtol=0, atol=1e-9)
