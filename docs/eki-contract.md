@@ -63,8 +63,8 @@ layer computes is elementwise: whitened residuals' norms, log-space weight
 ratios, the repair's masked means, and the clamps of the schedules.
 
 Outside the layer: the forward model (any simulator, {ref}`maps-simulators`),
-parameter transformations and constraints, and localization (an update rule,
-PR 9). {ref}`eki-excluded` lists what else is left out and why.
+parameter transformations and constraints, and localization (an update rule of the Kalman layer,
+`kalman.LocalizedUpdateRule`). {ref}`eki-excluded` lists what else is left out and why.
 
 (eki-notation)=
 ## Notation and conventions
@@ -207,8 +207,8 @@ subspace spanned by the initial particles**, of dimension at most $J - 1$,
 however many steps are run. $J$ bounds what a run can represent, not only how
 accurately it estimates moments. Multiplicative inflation and both relaxations
 stay in the subspace; additive inflation is the only shipped mechanism that
-leaves it; localization (PR 9) escapes it by giving each neighborhood its own
-combination.
+leaves it, besides `kalman.LocalizedUpdateRule`, which escapes it by giving
+each neighborhood its own combination.
 
 (eki-honesty)=
 ### What the layer does not promise
@@ -497,8 +497,8 @@ in this order, before each step:
 ## Update rules
 
 The update rule is any {class}`enskit.kalman.UpdateRule` and is **required**:
-`kalman.SymmetricSquareRoot()`, `kalman.Matheron()`, a localized rule
-(PR 9) or your own, written against {ref}`kalman-update-rule`. There is no
+`kalman.SymmetricSquareRoot()`, `kalman.Matheron()`,
+`kalman.LocalizedUpdateRule(...)` or your own, written against {ref}`kalman-update-rule`. There is no
 default, for the reason the Kalman layer gives: neither shipped rule is right
 everywhere.
 
@@ -1076,7 +1076,7 @@ common variants.
 | EKI as iterative regularization (Iglesias, 2016) | `FixedSchedule.constant(1.0, n)` with `DiscrepancyStop()` |
 | adaptive regularization (Iglesias & Yang, 2021) | `AdaptiveMisfitSchedule` with `DiscrepancyStop()` |
 | inflated or relaxed variants | any of the above with `inflation=` or `relaxation=` |
-| localized EKI | `update_rule=` a localized rule (PR 9) |
+| localized EKI | `update_rule=kalman.LocalizedUpdateRule(...)` |
 | a hybrid or shrinkage covariance | `approximation=` and `Matheron` |
 | Tikhonov-regularized EKI | an augmented problem, below |
 | changing the data between steps, backtracking | a loop over `evaluate` and `assimilate` |
@@ -1118,7 +1118,7 @@ Not normative. The driver calls `maps.pushforward` once and `kalman.update`
 once per step; the shared policies call the four Kalman functions; nothing
 else of the layers below is used. The EnKF driver (PR 8) reuses the policies
 and their protocols with `time` as its context, and calls the same `update`
-after its forecast. Localization (PR 9) arrives as an update rule, with no
+after its forecast. Localization is an update rule, `kalman.LocalizedUpdateRule`, and needs no
 change here. `enskit.testing` holds the policy checks; `enskit.toy` holds
 problems for the tests and documentation, and nothing here imports either.
 
@@ -1299,6 +1299,9 @@ hand-written in NumPy, and exactness is checked against closed forms.
 34. **The policies and the checks**: the four policies validate, round-trip,
     print and keep float32; the shipped schedules, inflations, relaxations and
     stop pass their checks; each check fails a mutant of each obligation.
+35. **Localization**: a `LocalizedUpdateRule` runs through the driver, equal
+    to its wrapped rule when every taper weight is 1, different and finite at
+    a small radius.
 
 Targeted regression tests guard the layer's silent failures, under the
 package's do-not-delete rule: the inflation convention; the repair not

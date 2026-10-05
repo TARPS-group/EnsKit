@@ -8,8 +8,9 @@ built from them.
 
 The operator, distribution, map and update layers, and Ensemble Kalman
 Inversion on top of them, are implemented and tested: you can run an
-inversion today. The ensemble Kalman filter and localization are planned and
-not yet built.
+inversion today. Domain localization, needed when the parameter dimension far
+exceeds the ensemble size, is an update rule ({doc}`user-guide/localization`)
+the driver accepts. The ensemble Kalman filter is planned and not yet built.
 :::
 
 ## What problem does this solve?
@@ -176,6 +177,7 @@ user-guide/operators
 user-guide/distributions
 user-guide/maps
 user-guide/updates
+user-guide/localization
 user-guide/running-an-inversion
 user-guide/writing-a-forward-model
 user-guide/toy-models

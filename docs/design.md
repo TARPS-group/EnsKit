@@ -118,7 +118,7 @@ subspace algebra is preserved exactly, the per-block analyses are independent,
 and each yields a weight vector in $\mathbb{R}^J$ applied to that block's own
 anomalies.
 
-EnsKit will implement domain localization, because it preserves the conditioning
+EnsKit implements domain localization (`enskit.kalman.LocalizedUpdateRule`), because it preserves the conditioning
 kernel above and parallelizes cleanly.
 
 Two hazards worth designing against. Parameters with no location — globally

@@ -5,8 +5,10 @@ built from them.
 
 **Status: pre-alpha.** The operator, distribution, map and update layers, and
 Ensemble Kalman Inversion on top of them, are implemented, tested and
-documented: you can run an inversion today. The ensemble Kalman filter and
-localization are planned and not yet built.
+documented: you can run an inversion today, with domain localization
+(`enskit.kalman.LocalizedUpdateRule`) as its update rule where the parameter
+dimension far exceeds the ensemble size. The ensemble Kalman filter is planned
+and not yet built.
 
 ## What it is
 
@@ -26,7 +28,8 @@ methods, in layers that build on each other:
 - **`enskit.maps`**: pushing a distribution through a simulator, or exactly
   through a linear map or additive noise.
 - **`enskit.kalman`**: one ensemble Kalman update, with the square-root and the
-  perturbed-observation (Matheron) rules, and inflation and relaxation.
+  perturbed-observation (Matheron) rules, domain localization, and inflation
+  and relaxation.
 - **`enskit.algorithms.eki`**: Ensemble Kalman Inversion itself: tempering
   schedules, stopping rules, failure handling and the driver loop, in both the
   approximate-sampling and the optimization form.

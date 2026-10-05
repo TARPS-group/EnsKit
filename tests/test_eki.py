@@ -2442,6 +2442,39 @@ def test_26_the_landing_page_example_runs():
     assert np.abs(fitted - np.asarray(ns["y"])).max() < 0.3
 
 
+def test_35_a_localized_rule_runs_through_the_driver_unchanged():
+    """``LocalizedUpdateRule`` plugs into ``update_rule=`` with no driver change.
+
+    At a radius so large that every taper weight is 1 to round-off and every
+    datum is in every neighborhood, the localized run is the plain one. At a
+    small radius it differs, and stays finite.
+    """
+    problem = _AffineProblem(P=6, N=4, J=8, seed=23)
+    # A localized rule needs row-local noise: restricting a correlated block
+    # to a neighborhood is not an operator-layer operation.
+    problem.R = np.diag(np.diag(problem.R))
+    problem.noise_cov = PSDDiagonal(jnp.asarray(np.diag(problem.R)))
+    sites = jnp.arange(problem.P, dtype=float)[:, None]
+    data_sites = jnp.asarray([[0.5], [2.0], [3.5], [5.0]])
+    plain = _run(problem, schedule=FixedSchedule((0.5, 0.5)))
+    for rule in (SQRT, MATHERON):
+        wide = kalman.DomainLocalization(
+            {"u": sites}, data_sites, radius=1e9, max_neighbors=problem.N
+        )
+        localized = _run(problem, schedule=FixedSchedule((0.5, 0.5)),
+                         update_rule=kalman.LocalizedUpdateRule(rule, wide))
+        reference = _run(problem, schedule=FixedSchedule((0.5, 0.5)), update_rule=rule)
+        scale = np.abs(_u(reference)).max()
+        assert np.abs(_u(localized) - _u(reference)).max() < 1e-10 * scale
+    narrow = kalman.DomainLocalization(
+        {"u": sites}, data_sites, radius=1.5, max_neighbors=2
+    )
+    local = _run(problem, schedule=FixedSchedule((0.5, 0.5)),
+                 update_rule=kalman.LocalizedUpdateRule(SQRT, narrow))
+    assert np.all(np.isfinite(_u(local)))
+    assert np.abs(_u(local) - _u(plain)).max() > 1e-3
+
+
 # ===========================================================================
 # Section 2 -- one targeted regression test per silent-failure class
 #

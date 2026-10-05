@@ -188,8 +188,9 @@ Pushing distributions through maps, and the simulator contract. See
 
 ## enskit.kalman
 
-Ensemble Kalman updates, inflation and relaxation. See
-{doc}`../user-guide/updates` for when to use each rule, and
+Ensemble Kalman updates, localization, inflation and relaxation. See
+{doc}`../user-guide/updates` for when to use each rule,
+{doc}`../user-guide/localization` for localization, and
 {doc}`../kalman-contract` for the full behavioral contract.
 
 ```{eval-rst}
@@ -218,6 +219,17 @@ Ensemble Kalman updates, inflation and relaxation. See
 
 .. autoclass:: enskit.kalman.Matheron
    :members: build
+```
+
+### Localization
+
+```{eval-rst}
+.. autoclass:: enskit.kalman.LocalizedUpdateRule
+   :members: build
+
+.. autoclass:: enskit.kalman.DomainLocalization
+
+.. autofunction:: enskit.kalman.gaspari_cohn
 ```
 
 ### Inflation and relaxation
