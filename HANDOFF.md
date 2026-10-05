@@ -9,14 +9,83 @@ adopted, the same day after PR 1's renames, again after PR 2's linalg
 additions, and 2026-10-04 after PR 3's distribution contract, PR 10's
 Kronecker operators, PR 4's `enskit.distribution`, the fix for #60, PR 5's
 `enskit.maps`, PR 6's `enskit.kalman`, PR 9's localization and PR 7's
-`enskit.algorithms.eki`, and 2026-10-05 after PR 8's `enskit.algorithms.enkf`
-and PR 11's documentation.
+`enskit.algorithms.eki`, and 2026-10-05 after PR 8's `enskit.algorithms.enkf`,
+PR 11's documentation and PR 12's release.
 Read
 `CLAUDE.md` first for conventions, including the layer rules, which the
 redesign replaced; then the two sections below; then the rest of this file,
 which describes the code as it stands before the redesign lands. That
 description is historical: where it names `pyeki.<module>`, the module is now
 `enskit.<module>`.
+
+## 2026-10-05: PR 12, release 0.1.0
+
+**Decided with the maintainer:** 0.1.0 is a **tagged GitHub release, not a
+PyPI upload**; PyPI is held off, and is #80. The five
+issues still open in the "EnsKit 0.1" milestone (#47, #68, #69, #72, #73)
+moved to a new "EnsKit 0.2" milestone; #51, #54, #68, #69 and #76 are the
+changelog's known limitations.
+
+**The release procedure** is in `CLAUDE.md` under *Releases*. In short: the
+version is written once, `enskit.__version__` (hatch reads it, `docs/conf.py`
+imports it); `CHANGELOG.md` is new, included in the docs as
+`docs/changelog.md`; `tests/test_release.py` checks the changelog heading
+against the version, every `git+...@vX.Y.Z` install command against the
+newest released tag, the installation page's stated floors against
+`pyproject.toml`, and runs the README's three blocks, which nothing ran
+before. Pushing a tag `v*` runs `.github/workflows/release.yml`: tag against
+version, build, the full default suite against the installed wheel with the
+source directory deleted, and `gh release create` with the changelog entry
+and both distributions.
+
+**After this merges**, the maintainer tags the merge commit `v0.1.0` and
+pushes the tag. Then the **first PR after the release** sets `__version__` to
+`0.2.0.dev0` and opens `## 0.2.0 (unreleased)` in the changelog;
+`test_release.py` accepts exactly that state.
+
+**Dependency floors were measured, not guessed.** `jax>=0.4`/`numpy>=1.24`
+had never been tested. Now `jax>=0.10.1`, `numpy>=2.0` (JAX 0.10.1 itself
+requires NumPy 2.0), checked by CI's new `minimum-versions` job, which
+installs with `uv pip install --resolution lowest-direct --upgrade -e .` on
+Python 3.11. Without `--upgrade` uv keeps the locked versions, which satisfy
+the bounds, and the job silently tests the lock.
+Below 0.10.1 every number still agrees; what fails:
+
+| JAX | fails |
+| --- | --- |
+| 0.4.38 | the two pinned-draw snapshots, the systematic-resampling regression, and two `check_simulator` cases |
+| 0.5.3, 0.6.0 | `check_simulator` reports the symmetric coupling through its permutation check, not the subset one, so the test's message match fails (the defect is still rejected) |
+| up to 0.8.0 | both count tests: `jax.monitoring.unregister_event_duration_listener` does not exist yet |
+| 0.9.0 to 0.10.0 | `test_enkf.py::test_12`: the first new length compiles 9 operations and the next 7, against an asserted equal increment of at most 8 |
+
+Lowering the floor means relaxing those count tests, which is a decision
+about what the count tests promise, not a packaging fix.
+
+**The sdist** carries `enskit/`, `tests/`, `docs/` (without the redesign's
+working material), the README, changelog and license: 0.7 MB, down from
+1.2 MB, and it no longer carries `memory/`, `HANDOFF.md`, `CLAUDE.md` or
+`uv.lock`. Unpacked on its own, it builds the docs with `-W` and passes the
+default suite. `notebooks/README.md`, which listed three planned notebooks
+that the examples gallery replaced, is deleted.
+
+**For later PRs.**
+
+- **PyPI** is #80. A README bound for PyPI needs absolute links (its
+  `CHANGELOG.md` link is relative), and the install commands change.
+- Every PR that changes what a user sees adds a changelog line (`CLAUDE.md`,
+  *Finishing a PR*).
+- **#81**, from the adversarial review: the published docs deploy from `main`
+  and so will describe unreleased interfaces while the install commands name
+  `v0.1.0`; there is no branch for a patch release; and `main` reports
+  `0.1.0` until the version-bump PR merges. Settle it before or with that PR.
+- **The adversarial review's trivial findings were fixed here**: the
+  `minimum-versions` job tested the lock (now `--upgrade`, and it asserts the
+  installed versions equal the floors); the installation page misstated what
+  `uv add` writes; the tag regex missed `.git@` and `rev =` spellings; the
+  status lines named the version; `release.yml` did not check that the tag is
+  on `main`; the float32 limitation said "tempered" though every EKI run
+  scales its noise; #7, #63 and #64 joined the known limitations; and the
+  README test now fails on a warning instead of hiding it.
 
 ## 2026-10-05: PR 11, the documentation
 
@@ -1071,8 +1140,9 @@ pyEKI. Nothing domain-specific should come back across.
 Follow the plan in `docs/redesign/index.md`, one pull request at a time, in
 a fresh session for each, as described in "Pull requests and handoffs" in
 `CLAUDE.md`. PRs 1 (#35), 2 (#36), 3 (#37), 4 (#38), 5 (#39), 6 (#40),
-7 (#41), 8 (#42), 9 (#43), 10 (#44) and 11 (#45) are done. PR 12 (#46,
-release 0.1.0) is next.
+7 (#41), 8 (#42), 9 (#43), 10 (#44), 11 (#45) and 12 (#46) are done: the
+plan is complete. Further work is tracked in the "EnsKit 0.2" milestone and
+the open issues.
 #54's fix would change the regressions pinned in
 obligation 17, by design. The notes below, written before the redesign,
 still apply to the pull requests they name; their `pyeki` modules are now

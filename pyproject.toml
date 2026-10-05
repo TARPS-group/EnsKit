@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "enskit"
-version = "0.1.0.dev0"
+dynamic = ["version"]
 description = "Building blocks for ensemble Kalman methods"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -18,7 +18,7 @@ keywords = [
     "derivative-free optimization",
 ]
 classifiers = [
-    "Development Status :: 2 - Pre-Alpha",
+    "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
     "License :: OSI Approved :: MIT License",
     "Topic :: Scientific/Engineering :: Mathematics",
@@ -27,8 +27,8 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
 ]
 dependencies = [
-    "jax>=0.4",
-    "numpy>=1.24",
+    "jax>=0.10.1",
+    "numpy>=2.0",
 ]
 
 [project.urls]
@@ -54,8 +54,21 @@ dev = [
     "myst-nb>=1.1",
 ]
 
+# The version is `enskit.__version__`, the one place it is written.
+[tool.hatch.version]
+path = "enskit/__init__.py"
+
 [tool.hatch.build.targets.wheel]
 packages = ["enskit"]
+
+# The source distribution carries what building and testing the package needs:
+# the tests read the documentation's pages, notebooks and figures. The
+# redesign's working material and the repository's own notes stay out.
+[tool.hatch.build.targets.sdist]
+include = ["/enskit", "/tests", "/docs", "/README.md", "/CHANGELOG.md", "/LICENSE"]
+exclude = ["/docs/redesign/document", "/docs/redesign/notebooks",
+           "/docs/redesign/prototype", "/docs/redesign/stubs",
+           "/docs/redesign/design.html", "/docs/_build", "/docs/_generated"]
 
 [tool.ruff]
 target-version = "py311"

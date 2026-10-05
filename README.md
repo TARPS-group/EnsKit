@@ -3,8 +3,10 @@
 Building blocks for ensemble Kalman methods, and Ensemble Kalman Inversion and
 the ensemble Kalman filter built from them.
 
-**Status: pre-alpha.** Every layer is implemented, tested and documented, and
-the interfaces may still change before the first release.
+**Status: alpha.** Every layer is implemented, tested and documented. Until
+1.0, a minor release (0.2, 0.3, ...) may change the interfaces, and the
+[changelog](CHANGELOG.md) lists every such change; a patch release does not
+change them.
 
 ## What it is
 
@@ -50,11 +52,16 @@ the user guide works through it.
 
 ## Installation
 
+EnsKit is not on PyPI yet. Install a release from its tag:
+
 ```bash
-uv sync
+uv add "enskit @ git+https://github.com/TARPS-group/EnsKit@v0.1.0"
 ```
 
-For development, including docs and test tooling:
+or, with pip, `pip install "enskit @ git+https://github.com/TARPS-group/EnsKit@v0.1.0"`.
+It needs Python 3.11 or later, JAX and NumPy.
+
+For development, from a clone, including docs and test tooling:
 
 ```bash
 uv sync --group dev

@@ -35,6 +35,35 @@ jobs:
       - name: Test
         run: uv run pytest --cov=enskit --cov-report=term-missing
 
+  # The oldest JAX and NumPy that pyproject.toml allows, on the oldest Python,
+  # so the dependencies' lower bounds stay true.
+  minimum-versions:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv python install 3.11
+      - run: uv sync --group dev --python 3.11
+      # `--upgrade` re-resolves; without it uv keeps the locked versions, which
+      # already satisfy the bounds.
+      - name: Install the lowest allowed dependencies
+        run: uv pip install --resolution lowest-direct --upgrade -e .
+      - name: The installed versions are the lower bounds
+        run: |
+          uv run --no-sync python - <<'EOF'
+          import re, tomllib
+          from importlib.metadata import version
+          from packaging.version import Version
+          deps = tomllib.load(open("pyproject.toml", "rb"))["project"]["dependencies"]
+          for dep in deps:
+              name, floor = re.fullmatch(r"(\w+)>=([\d.]+)", dep).groups()
+              print(name, version(name), "floor", floor)
+              assert Version(version(name)) == Version(floor), dep
+          EOF
+      - run: uv run --no-sync pytest
+
   examples:
     runs-on: ubuntu-latest
     steps:

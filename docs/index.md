@@ -3,11 +3,12 @@
 Building blocks for ensemble Kalman methods, and Ensemble Kalman Inversion and
 the ensemble Kalman filter built from them.
 
-:::{admonition} Pre-alpha
+:::{admonition} Alpha
 :class: warning
 
-Every layer is implemented and tested, and the interfaces may still change
-before the first release.
+EnsKit is in alpha. Until 1.0, a minor release may change the interfaces, and
+the {doc}`changelog` lists every such change; a patch release does not change
+them.
 :::
 
 ## What problem does this solve?
@@ -166,6 +167,7 @@ notes, and the API.
 :hidden:
 
 installation
+changelog
 ```
 
 ```{toctree}

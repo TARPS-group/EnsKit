@@ -6,10 +6,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # the `figures` module
 
+from enskit import __version__  # noqa: E402
+
 project = "EnsKit"
 author = "Andrew Roberts"
 copyright = "2026, Andrew Roberts"
-release = "0.1.0.dev0"
+release = __version__
 
 extensions = [
     "sphinx.ext.autodoc",
