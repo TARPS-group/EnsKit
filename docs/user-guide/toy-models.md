@@ -2,7 +2,8 @@
 
 `enskit.toy` ships three small calibration problems, each bundling a forward
 model with a prior, an observation error covariance, a synthetic observation
-and the parameters that generated it, `u_true`. They exist so that the package's own
+and the parameters that generated it, `u_true`, and two state-space problems
+for filtering ([below](#state-space-problems)). They exist so that the package's own
 tests, this documentation and the tutorials all work the same problems, and so
 that trying EnsKit needs no data and no model of your own.
 
@@ -15,7 +16,7 @@ whole obligation. What these problems exemplify is that callable and the setup
 around it. Nothing in the library imports this module.
 :::
 
-## The three problems
+## The three calibration problems
 
 | factory | model | for |
 | --- | --- | --- |
@@ -29,6 +30,25 @@ in a docs build, in a test, and on your machine.
 
 Every problem's parameters are the one block `"u"`: `problem.prior` is an
 `enskit.distribution.Gaussian` over it, and a run's particles carry it.
+
+(state-space-problems)=
+## The two state-space problems
+
+| factory | model | for |
+| --- | --- | --- |
+| `lorenz96(state_dim=40, n_times=300, obs_every=2)` | the Lorenz-96 system on a ring of sites (Lorenz, 1996), one fourth-order Runge–Kutta step per time, every `obs_every`-th site observed | a chaotic system an ensemble filter can track, and that needs localization at small ensembles |
+| `linear_state_space(state_dim=3, data_dim=2, n_times=20)` | $x_t = A x_{t-1} + w_t$, $y_t = H x_t + e_t$, all Gaussian | a filter whose answer is known exactly, from `exact_filter()` |
+
+Both carry what `enkf.filter` takes under the same names, `initial`,
+`transition`, `observe`, `noise_cov` and `observations`, and the states that
+generated the observations as `truth`, row $t$ with observation row $t$. The
+state is the block `"x"`. `Lorenz96` adds `coords` and `obs_coords`, the site
+of each state coordinate and of each observed value, for
+`kalman.DomainLocalization`; `toy.lorenz96_step` is its transition as a
+function, with a forcing that may differ per particle.
+`linear_state_space(transition_noise_std=0.0)` has no transition noise, and
+then an ensemble filter with the square-root update reproduces
+`exact_filter()` to round-off. {doc}`filtering` runs both.
 
 ## A complete run, against a known answer
 
@@ -225,3 +245,9 @@ one from the factory instead.
 
 The closed form follows the new covariance, since `posterior()` reads the
 field.
+
+## References
+
+- Lorenz, E. N. (1996). Predictability: a problem partly solved. In
+  *Proceedings of the ECMWF Seminar on Predictability*, vol. 1, 1–18.
+  Reading, UK.

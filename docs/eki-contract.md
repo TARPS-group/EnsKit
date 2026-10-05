@@ -696,7 +696,8 @@ policies that wrap the functions of {ref}`kalman-inflation` in them.
 | `Inflation` | `inflation(key, *, ensemble, **context)`, on the particles just before they are used (EKI: before each evaluation) | an unweighted `Ensemble` with the same blocks in order, dimensions, count and dtype |
 | `Relaxation` | `relaxation(*, prior, posterior, **context)`, just after each update, `prior` its input and `posterior` its result | the same, relative to `posterior` |
 
-A driver passes the context it has as keywords (EKI: `step` and `beta`), and a
+A driver passes the context it has as keywords (EKI: `step` and `beta`; the
+EnKF: `time`, {ref}`enkf-policies`), and a
 policy must accept and ignore what it does not use. A policy consumes its key
 whole, is deterministic given its arguments, and holds no state. The driver
 checks each result's structure statically and raises (`ValueError`, or
@@ -728,7 +729,12 @@ as given, and never returns inflated ones. Relaxation runs on the update's
 result, with `prior` the evaluated particles (inflated and repaired, with the
 prediction block), so its default `names` are the parameter blocks. Used
 together, the two compound: a relaxation restores spread toward the inflated
-particles' (#71). **Both
+particles'. That is deliberate, and the EnKF does the same
+({ref}`enkf-policies`): `prior` is the particles the update started from, the
+prior or background ensemble of the cited papers, so with
+`MultiplicativeInflation(lam)` and `RelaxToPriorSpread(1.0)` each step's
+spread is $\lambda$ times the last and grows geometrically. The two are
+usually alternatives (#71, settled in PR 8). **Both
 change the target on purpose**: a run that uses them is not a tempering ladder
 for $\pi_\beta$, and the sampling form should use neither.
 
@@ -1116,9 +1122,9 @@ models), and a driver that changes the data (expressible by hand, as above).
 
 Not normative. The driver calls `maps.pushforward` once and `kalman.update`
 once per step; the shared policies call the four Kalman functions; nothing
-else of the layers below is used. The EnKF driver (PR 8) reuses the policies
-and their protocols with `time` as its context, and calls the same `update`
-after its forecast. Localization is an update rule, `kalman.LocalizedUpdateRule`, and needs no
+else of the layers below is used. The EnKF ({doc}`enkf-contract`) reuses the
+policies and their protocols with `time` as its context, and calls the same
+`update` after its forecast. Localization is an update rule, `kalman.LocalizedUpdateRule`, and needs no
 change here. `enskit.testing` holds the policy checks; `enskit.toy` holds
 problems for the tests and documentation, and nothing here imports either.
 

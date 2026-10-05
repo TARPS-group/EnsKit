@@ -1,16 +1,17 @@
 # EnsKit
 
-Building blocks for ensemble Kalman methods, and Ensemble Kalman Inversion
-built from them.
+Building blocks for ensemble Kalman methods, and Ensemble Kalman Inversion and
+the ensemble Kalman filter built from them.
 
 :::{admonition} Pre-alpha
 :class: warning
 
 The operator, distribution, map and update layers, and Ensemble Kalman
-Inversion on top of them, are implemented and tested: you can run an
-inversion today. Domain localization, needed when the parameter dimension far
+Inversion and the ensemble Kalman filter ({doc}`user-guide/filtering`) on top
+of them, are implemented and tested: you can run an inversion or a filter
+today. Domain localization, needed when the parameter or state dimension far
 exceeds the ensemble size, is an update rule ({doc}`user-guide/localization`)
-the driver accepts. The ensemble Kalman filter is planned and not yet built.
+both drivers accept.
 :::
 
 ## What problem does this solve?
@@ -62,7 +63,8 @@ inflation and relaxation around them.
 :::{grid-item-card} Algorithms
 `enskit.algorithms.eki` runs Ensemble Kalman Inversion: tempering schedules,
 stopping rules, failure handling and the driver loop, in both the
-approximate-sampling and the optimization form.
+approximate-sampling and the optimization form. `enskit.algorithms.enkf` runs
+the ensemble Kalman filter over a sequence of observations.
 :::
 
 :::{grid-item-card} Checks and toy problems
@@ -75,7 +77,7 @@ library.
 ## What EnsKit is not
 
 EnsKit does not implement production forward models, priors, or Gaussian
-process kernels. It ships three toy problems, in `enskit.toy`, for its own
+process kernels. It ships five toy problems, in `enskit.toy`, for its own
 tests and this documentation.
 The forward model is any callable from parameters to predicted observations,
 and a prior covariance is any operator meeting the covariance interface.
@@ -179,6 +181,7 @@ user-guide/maps
 user-guide/updates
 user-guide/localization
 user-guide/running-an-inversion
+user-guide/filtering
 user-guide/writing-a-forward-model
 user-guide/toy-models
 user-guide/writing-an-operator
@@ -202,6 +205,7 @@ distribution-contract
 maps-contract
 kalman-contract
 eki-contract
+enkf-contract
 joint-factor
 design
 redesign/index

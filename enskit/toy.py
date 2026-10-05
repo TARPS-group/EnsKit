@@ -1,9 +1,12 @@
-"""Toy problems: small forward models, with the priors and data to drive them.
+"""Toy problems: small models, with the priors and data to drive them.
 
-Three self-contained inverse problems, for the package's own tests and for
-the documentation. Each bundles a forward model with a prior, a noise
-covariance, synthetic data and the parameters that generated them, so a
-tutorial or a test spends two lines on setup rather than twelve.
+Three inverse problems and two state-space problems, for the package's own
+tests and for the documentation. An inverse problem bundles a forward model
+with a prior, a noise covariance, synthetic data and the parameters that
+generated them; a state-space problem bundles a transition and an observation
+model with an initial distribution, a noise covariance, a sequence of
+synthetic observations and the states that generated them. A tutorial or a
+test spends two lines on setup rather than twelve.
 
 ============================ ==================================================
 factory                      builds
@@ -15,14 +18,23 @@ factory                      builds
                              nonlinear
 :func:`restricted_decay`     :class:`RestrictedDecay` — the same decay model
                              with a valid domain, so particles outside it fail
+:func:`lorenz96`             :class:`Lorenz96` — a chaotic state on a ring of
+                             sites, half of them observed, with site
+                             coordinates for localization
+:func:`linear_state_space`   :class:`LinearStateSpace` — linear dynamics and
+                             observations, whose exact filter is available
 ============================ ==================================================
+
+:func:`lorenz96_step` is the Lorenz-96 transition as a function, for a
+transition that reads more blocks than the state.
 
 **These are not production models, and they are not an interface.** EnsKit
 ships no forward models for real use and defines no base class, protocol or
-registry for one: a forward model is any simulator in the sense of
-:func:`enskit.maps.pushforward`, here taking a ``(J, P)`` array of parameters
-to ``(J, N)`` predictions. What these classes exemplify is that callable and
-the problem around it, nothing more.
+registry for one: a forward model, a transition or an observation model is
+any simulator in the sense of :func:`enskit.maps.pushforward`, here taking a
+``(J, P)`` array of parameters to ``(J, N)`` predictions, or ``(J, d)``
+states to ``(J, d)`` states. What these classes exemplify is that callable
+and the problem around it, nothing more.
 
 Using one::
 
@@ -38,15 +50,17 @@ Using one::
 
     result.mean("u"), problem.u_true      # the answer, and what generated the data
 
-Conventions shared by all three:
+Conventions shared by all five:
 
-- **The parameters are the block** ``"u"``. Each prior is a
-  :class:`~enskit.distribution.Gaussian` over that one block, and the forward
-  model is called with its ``(J, P)`` array.
+- **The parameters are the block** ``"u"`` **and the state the block**
+  ``"x"``. Each prior or initial distribution is a
+  :class:`~enskit.distribution.Gaussian` over that one block, and the models
+  are called with its ``(J, P)`` or ``(J, d)`` array.
 - **A problem is a frozen dataclass of plain public values, and is not
-  callable.** Pass ``forward``, ``y`` and ``noise_cov`` as three separate
-  arguments; nothing in :mod:`enskit.algorithms` accepts a problem object in
-  their place.
+  callable.** Pass its pieces (``forward``, ``y`` and ``noise_cov``; or
+  ``transition``, ``observe``, ``noise_cov`` and ``observations``) as
+  separate arguments; nothing in :mod:`enskit.algorithms` accepts a problem
+  object in their place.
 - **Every field is a value a caller could have written themselves**, so a
   problem can be modified by constructing the class directly rather than
   through its factory — with a different noise covariance, for instance.
@@ -99,12 +113,17 @@ from .distribution import Gaussian
 from .linalg import Dense, LinOp, PSDDiagonal, PSDLinOp, value_check
 
 __all__ = [
-    "ExponentialDecay",
-    "LinearGaussian",
-    "RestrictedDecay",
-    "exponential_decay",
     "linear_gaussian",
+    "LinearGaussian",
+    "exponential_decay",
+    "ExponentialDecay",
     "restricted_decay",
+    "RestrictedDecay",
+    "lorenz96",
+    "lorenz96_step",
+    "Lorenz96",
+    "linear_state_space",
+    "LinearStateSpace",
 ]
 
 # The largest array LinearGaussian.posterior will build, in elements. The
@@ -112,6 +131,16 @@ __all__ = [
 # of width k, so the cap is on the larger of the two products, and the peak is
 # a small multiple of it -- see LinearGaussian.posterior's Notes.
 _MAX_POSTERIOR_ELEMENTS = 20_000_000
+
+# The steps the Lorenz-96 truth is run before its first recorded state, from
+# a start near the unstable fixed point x = F onto the attractor.
+_LORENZ96_SPIN_UP = 1000
+
+# The state-space problems derive their keys from fold_in(key(seed), this),
+# never from key(seed) itself: with JAX's partitionable threefry,
+# fold_in(k, i) equals split(k, n)[i] for every n > i, so a key folded with
+# a small integer is one a caller's split of the same seed also produces.
+_TOY_STREAM = 0x746F79
 
 
 # ---------------------------------------------------------------------------
@@ -797,6 +826,567 @@ class RestrictedDecay:
 
 
 # ---------------------------------------------------------------------------
+# the Lorenz-96 problem
+# ---------------------------------------------------------------------------
+
+
+def lorenz96(
+    *,
+    state_dim: int = 40,
+    n_times: int = 300,
+    obs_every: int = 2,
+    noise_std: float = 1.0,
+    initial_std: float = 1.0,
+    forcing: float = 8.0,
+    dt: float = 0.05,
+    seed: int = 0,
+) -> Lorenz96:
+    r"""A :class:`Lorenz96` problem: a chaotic state on a ring, half observed.
+
+    The true state starts at :math:`F + 0.01\,z` for a standard normal
+    :math:`z \in \mathbb R^d`, is run for :math:`1000` steps onto the
+    attractor, and then for ``n_times`` further steps, each one
+    :func:`lorenz96_step`. Every ``obs_every``-th site, starting at site 0, is
+    observed after every step with independent noise of standard deviation
+    ``noise_std``. The initial distribution is centered on the true state
+    before the first of those steps:
+
+    .. math::
+
+        x_0 \sim \mathcal N\big(x_0^\dagger,\ \sigma_0^2 I_d\big), \qquad
+        y_t = H x_t^\dagger + e_t, \quad e_t \sim \mathcal N(0, \sigma^2 I_N),
+        \qquad t = 1, \dots, T,
+
+    with :math:`\sigma_0` = ``initial_std``, :math:`\sigma` = ``noise_std``,
+    and :math:`H` the selection of the observed sites.
+
+    Parameters
+    ----------
+    state_dim
+        The number of sites :math:`d`, at least 4. Keyword-only.
+    n_times
+        The number of observation times :math:`T`. Keyword-only.
+    obs_every
+        The spacing of the observed sites, from 1 (every site) to
+        ``state_dim``. Keyword-only.
+    noise_std, initial_std
+        The observation noise and initial standard deviations, positive.
+        Keyword-only.
+    forcing
+        :math:`F`, finite. Keyword-only.
+    dt
+        The step length, positive. Keyword-only.
+    seed
+        Seeds the starting point and the observation noise. Keyword-only.
+
+    Returns
+    -------
+    Lorenz96
+
+    Raises
+    ------
+    TypeError
+        If a size is not an ``int``.
+    ValueError
+        If ``state_dim`` is below 4, ``n_times`` below 1, ``obs_every``
+        outside ``[1, state_dim]``, a standard deviation or ``dt`` not
+        positive and finite, or ``forcing`` not finite.
+
+    Notes
+    -----
+    At the defaults, an ensemble Kalman filter with 40 particles and
+    :class:`~enskit.kalman.Matheron` tracks the truth with an analysis error
+    well below the observation noise; with 10 particles it needs
+    localization (:class:`~enskit.kalman.LocalizedUpdateRule`), with which
+    :attr:`Lorenz96.coords` and :attr:`Lorenz96.obs_coords` are meant to be
+    used.
+
+    The keys are split from ``jax.random.fold_in(jax.random.key(seed),
+    0x746F79)``, so no key a caller splits from ``jax.random.key(seed)`` into
+    fewer than ``0x746F79`` (about 7.6 million) keys reproduces the problem's
+    draws.
+
+    References
+    ----------
+    Lorenz, E. N. (1996). Predictability: a problem partly solved. In
+    *Proceedings of the ECMWF Seminar on Predictability*, vol. 1, 1–18.
+    Reading, UK.
+    """
+    where = "lorenz96"
+    _check_dim(where, "state_dim", state_dim)
+    if state_dim < 4:
+        raise ValueError(
+            f"{where}: state_dim must be at least 4, got {state_dim}; the "
+            f"equations read the sites i - 2, i - 1 and i + 1, which must be "
+            f"distinct from i"
+        )
+    _check_dim(where, "n_times", n_times)
+    _check_dim(where, "obs_every", obs_every)
+    if obs_every > state_dim:
+        raise ValueError(
+            f"{where}: obs_every must be at most state_dim = {state_dim}, got "
+            f"{obs_every}"
+        )
+    _check_scale(where, "noise_std", noise_std)
+    _check_scale(where, "initial_std", initial_std)
+    _check_scale(where, "dt", dt)
+    forcing = _check_finite(where, "forcing", forcing)
+    key_start, key_noise = _toy_keys(seed, 2)
+    start = forcing + 0.01 * jax.random.normal(key_start, (state_dim,))
+    x0, truth = _lorenz96_trajectory(start, forcing, float(dt), n_times)
+    observed = jnp.arange(0, state_dim, obs_every)
+    data_dim = int(observed.shape[0])
+    error = noise_std * jax.random.normal(key_noise, (n_times, data_dim))
+    return Lorenz96(
+        forcing=forcing,
+        dt=float(dt),
+        initial=Gaussian(
+            {"x": x0},
+            block_covs={"x": PSDDiagonal(jnp.full(state_dim, float(initial_std) ** 2))},
+        ),
+        observe=maps.Linear(Dense(jnp.eye(state_dim)[observed])),
+        noise_cov=PSDDiagonal(jnp.full(data_dim, float(noise_std) ** 2)),
+        observations=truth[:, observed] + error,
+        truth=truth,
+        obs_coords=observed.astype(jnp.result_type(float))[:, None],
+    )
+
+
+def lorenz96_step(x, forcing=8.0, dt=0.05) -> Array:
+    r"""One fourth-order Runge–Kutta step of the Lorenz-96 equations.
+
+    On the trailing axis of ``x``, sites :math:`i = 0, \dots, d - 1` with
+    indices taken modulo :math:`d`:
+
+    .. math::
+
+        f_i(x) = (x_{i+1} - x_{i-2})\, x_{i-1} - x_i + F, \qquad
+        x \mapsto x + \tfrac{\Delta t}{6}\,(k_1 + 2k_2 + 2k_3 + k_4),
+
+    with :math:`k_1 = f(x)`, :math:`k_2 = f(x + \tfrac{\Delta t}{2} k_1)`,
+    :math:`k_3 = f(x + \tfrac{\Delta t}{2} k_2)` and
+    :math:`k_4 = f(x + \Delta t\, k_3)`.
+
+    Parameters
+    ----------
+    x : Array
+        ``(..., d)``; leading axes are a batch, so a ``(J, d)`` ensemble block
+        is advanced row by row.
+    forcing : float or Array
+        :math:`F`, a scalar, or an array broadcasting against ``x``: a
+        ``(J, 1)`` block gives each particle its own forcing.
+    dt : float
+        :math:`\Delta t`.
+
+    Returns
+    -------
+    Array
+        ``x`` advanced by one step, of the broadcast shape.
+
+    References
+    ----------
+    Lorenz, E. N. (1996). Predictability: a problem partly solved. In
+    *Proceedings of the ECMWF Seminar on Predictability*, vol. 1, 1–18.
+    Reading, UK.
+    """
+    return _lorenz96_step(jnp.asarray(x), jnp.asarray(forcing), jnp.asarray(dt))
+
+
+@dataclass(frozen=True, eq=False, repr=False)
+class Lorenz96:
+    r"""The Lorenz-96 system on a ring of sites, observed at a subset of them.
+
+    .. math::
+
+        x_t = M(x_{t-1}), \qquad y_t = H x_t + e_t, \quad
+        e_t \sim \mathcal N(0, R), \qquad t = 1, \dots, T,
+
+    with :math:`M` one :func:`lorenz96_step` of length ``dt`` at forcing
+    ``forcing``, no transition noise, and :math:`H` a selection of sites. The
+    state is the block ``"x"``. Build one with :func:`lorenz96`.
+
+    Parameters
+    ----------
+    forcing, dt
+        :math:`F` and :math:`\Delta t`, Python floats. Keyword-only.
+    initial
+        The distribution of :math:`x_0`, a
+        :class:`~enskit.distribution.Gaussian` with the one block ``"x"`` of
+        dimension ``d``. Keyword-only.
+    observe
+        :math:`H`, a :class:`~enskit.maps.Linear` from ``d`` to ``N``.
+        Keyword-only.
+    noise_cov
+        :math:`R`, a :class:`~enskit.linalg.PSDLinOp` of side ``N``.
+        Keyword-only.
+    observations
+        :math:`y_1, \dots, y_T`, a ``(T, N)`` array. Keyword-only.
+    truth
+        :math:`x_1^\dagger, \dots, x_T^\dagger`, the states the observations
+        were generated from, a ``(T, d)`` array: row :math:`t` goes with
+        observation row :math:`t`. Keyword-only.
+    obs_coords
+        Where each observed value lives, a ``(N, 1)`` array of site indices,
+        for :class:`~enskit.kalman.DomainLocalization`. Keyword-only.
+
+    Raises
+    ------
+    TypeError
+        If a field has the wrong type.
+    ValueError
+        If the fields disagree on ``d``, ``N`` or ``T``.
+    """
+
+    forcing: float = field(kw_only=True)
+    dt: float = field(kw_only=True)
+    initial: Gaussian = field(kw_only=True)
+    observe: maps.Linear = field(kw_only=True)
+    noise_cov: PSDLinOp = field(kw_only=True)
+    observations: Array = field(kw_only=True)
+    truth: Array = field(kw_only=True)
+    obs_coords: Array = field(kw_only=True)
+
+    def __post_init__(self) -> None:
+        name = "Lorenz96"
+        _check_finite(name, "forcing", self.forcing)
+        _check_scale(name, "dt", self.dt)
+        state_dim, data_dim, n_times = _check_state_space(
+            name,
+            initial=self.initial,
+            observe=self.observe,
+            noise_cov=self.noise_cov,
+            observations=self.observations,
+            truth=self.truth,
+        )
+        if state_dim < 4:
+            raise ValueError(
+                f"{name}: the state must have at least 4 sites, got {state_dim}"
+            )
+        _check_array_field(name, "obs_coords", self.obs_coords, (data_dim, 1))
+
+    @property
+    def state_dim(self) -> int:
+        """The number of sites :math:`d`."""
+        return int(self.truth.shape[1])
+
+    @property
+    def data_dim(self) -> int:
+        """The number of observed values per time, :math:`N`."""
+        return int(self.observations.shape[1])
+
+    @property
+    def n_times(self) -> int:
+        """The number of observation times :math:`T`."""
+        return int(self.observations.shape[0])
+
+    @property
+    def coords(self) -> Array:
+        """Where each state coordinate lives: the ``(d, 1)`` site indices."""
+        return jnp.arange(self.state_dim, dtype=jnp.result_type(float))[:, None]
+
+    def transition(self, x) -> Array:
+        """The transition :math:`M`: ``(J, d)`` states in, ``(J, d)`` out.
+
+        Parameters
+        ----------
+        x
+            Every particle's state, one per row.
+
+        Returns
+        -------
+        Array
+            ``(J, d)``, each row advanced by one :func:`lorenz96_step`.
+
+        Raises
+        ------
+        ValueError
+            If ``x`` is not exactly two-dimensional with ``d`` columns.
+        """
+        x = _check_ensemble("Lorenz96", x, self.state_dim, method="transition")
+        return lorenz96_step(x, self.forcing, self.dt)
+
+    def __repr__(self) -> str:
+        """As ``Lorenz96(state_dim=40, data_dim=20, n_times=300)``; never raises."""
+        try:
+            return (
+                f"Lorenz96(state_dim={self.state_dim}, data_dim={self.data_dim}, "
+                f"n_times={self.n_times})"
+            )
+        except Exception:
+            return "<Lorenz96 (unprintable fields)>"
+
+
+# ---------------------------------------------------------------------------
+# the linear state-space problem
+# ---------------------------------------------------------------------------
+
+
+def linear_state_space(
+    *,
+    state_dim: int = 3,
+    data_dim: int = 2,
+    n_times: int = 20,
+    transition_noise_std: float = 0.3,
+    noise_std: float = 0.5,
+    initial_std: float = 1.0,
+    seed: int = 0,
+) -> LinearStateSpace:
+    r"""A :class:`LinearStateSpace` problem with random, stable dynamics.
+
+    The transition is :math:`A = 0.95\,U` for a random orthogonal :math:`U`,
+    so every eigenvalue has modulus 0.95; :math:`H` has independent
+    :math:`\mathcal N(0, 1/d)` entries. The true initial state is a draw from
+    the initial distribution, and the truth and observations follow the model
+    with the stated noise:
+
+    .. math::
+
+        x_0 \sim \mathcal N(0, \sigma_0^2 I_d), \qquad
+        Q = \sigma_q^2 I_d, \qquad R = \sigma^2 I_N,
+
+    with :math:`\sigma_0` = ``initial_std``, :math:`\sigma_q` =
+    ``transition_noise_std`` and :math:`\sigma` = ``noise_std``.
+
+    Parameters
+    ----------
+    state_dim, data_dim
+        :math:`d` and :math:`N`. Keyword-only.
+    n_times
+        The number of observation times :math:`T`. Keyword-only.
+    transition_noise_std
+        :math:`\sigma_q`, finite and not negative; ``0`` gives no transition
+        noise, and ``transition_noise`` is then ``None``. Keyword-only.
+    noise_std, initial_std
+        Positive. Keyword-only.
+    seed
+        Seeds the matrices, the true initial state and every noise draw.
+        Keyword-only.
+
+    Returns
+    -------
+    LinearStateSpace
+
+    Raises
+    ------
+    TypeError
+        If a size is not an ``int``.
+    ValueError
+        If a size is below 1, or a standard deviation is out of range.
+
+    Notes
+    -----
+    With ``transition_noise_std=0``, an ensemble Kalman filter with the
+    symmetric square-root update, started from particles whose sample moments
+    equal the initial distribution's, reproduces :meth:`exact_filter` to
+    round-off whenever the ensemble has at least :math:`d + 1` particles:
+    the sample moments then pass through every step exactly.
+    """
+    where = "linear_state_space"
+    _check_dim(where, "state_dim", state_dim)
+    _check_dim(where, "data_dim", data_dim)
+    _check_dim(where, "n_times", n_times)
+    _check_scale(where, "noise_std", noise_std)
+    _check_scale(where, "initial_std", initial_std)
+    q = _check_finite(where, "transition_noise_std", transition_noise_std)
+    if q < 0.0:
+        raise ValueError(
+            f"{where}: transition_noise_std must not be negative, got "
+            f"{transition_noise_std}"
+        )
+    k_a, k_h, k_x0, k_q, k_r = _toy_keys(seed, 5)
+    U, _ = jnp.linalg.qr(jax.random.normal(k_a, (state_dim, state_dim)))
+    A = 0.95 * U
+    H = jax.random.normal(k_h, (data_dim, state_dim)) / math.sqrt(state_dim)
+    x0 = initial_std * jax.random.normal(k_x0, (state_dim,))
+    shocks = q * jax.random.normal(k_q, (n_times, state_dim))
+    truth = _linear_trajectory(A, x0, shocks)
+    error = noise_std * jax.random.normal(k_r, (n_times, data_dim))
+    return LinearStateSpace(
+        transition=maps.Linear(Dense(A)),
+        transition_noise=None if q == 0.0 else PSDDiagonal(jnp.full(state_dim, q**2)),
+        observe=maps.Linear(Dense(H)),
+        noise_cov=PSDDiagonal(jnp.full(data_dim, float(noise_std) ** 2)),
+        initial=Gaussian(
+            {"x": jnp.zeros(state_dim)},
+            block_covs={"x": PSDDiagonal(jnp.full(state_dim, float(initial_std) ** 2))},
+        ),
+        observations=truth @ H.T + error,
+        truth=truth,
+    )
+
+
+@dataclass(frozen=True, eq=False, repr=False)
+class LinearStateSpace:
+    r"""Linear dynamics and linear observations, all noise Gaussian.
+
+    .. math::
+
+        x_0 \sim \mathcal N(m_0, P_0), \qquad
+        x_t = A x_{t-1} + w_t, \quad w_t \sim \mathcal N(0, Q), \qquad
+        y_t = H x_t + e_t, \quad e_t \sim \mathcal N(0, R),
+
+    for :math:`t = 1, \dots, T`. The filtering distributions are Gaussian and
+    :meth:`exact_filter` computes them, which makes this the problem to check
+    an ensemble filter against. The state is the block ``"x"``. Build one with
+    :func:`linear_state_space`.
+
+    Parameters
+    ----------
+    transition
+        :math:`A`, a :class:`~enskit.maps.Linear` from ``d`` to ``d``.
+        Keyword-only.
+    transition_noise
+        :math:`Q`, a :class:`~enskit.linalg.PSDLinOp` of side ``d``, or
+        ``None`` for none. Keyword-only.
+    observe
+        :math:`H`, a :class:`~enskit.maps.Linear` from ``d`` to ``N``.
+        Keyword-only.
+    noise_cov
+        :math:`R`, of side ``N``. Keyword-only.
+    initial
+        :math:`\mathcal N(m_0, P_0)`, a
+        :class:`~enskit.distribution.Gaussian` with the one block ``"x"``.
+        Keyword-only.
+    observations
+        A ``(T, N)`` array. Keyword-only.
+    truth
+        The states the observations were generated from, ``(T, d)``.
+        Keyword-only.
+
+    Raises
+    ------
+    TypeError
+        If a field has the wrong type.
+    ValueError
+        If the fields disagree on ``d``, ``N`` or ``T``.
+    """
+
+    transition: maps.Linear = field(kw_only=True)
+    transition_noise: PSDLinOp | None = field(kw_only=True)
+    observe: maps.Linear = field(kw_only=True)
+    noise_cov: PSDLinOp = field(kw_only=True)
+    initial: Gaussian = field(kw_only=True)
+    observations: Array = field(kw_only=True)
+    truth: Array = field(kw_only=True)
+
+    def __post_init__(self) -> None:
+        name = "LinearStateSpace"
+        state_dim, _, _ = _check_state_space(
+            name,
+            initial=self.initial,
+            observe=self.observe,
+            noise_cov=self.noise_cov,
+            observations=self.observations,
+            truth=self.truth,
+        )
+        _check_linear_map(name, "transition", self.transition, state_dim, state_dim)
+        if self.transition_noise is not None:
+            if not isinstance(self.transition_noise, PSDLinOp):
+                raise TypeError(
+                    f"{name}.transition_noise: must be an enskit.linalg.PSDLinOp or "
+                    f"None, got {type(self.transition_noise).__name__}"
+                )
+            _check_not_family(name, "transition_noise", self.transition_noise)
+            if self.transition_noise.shape[0] != state_dim:
+                raise ValueError(
+                    f"{name}: {self.transition_noise!r} has side "
+                    f"{self.transition_noise.shape[0]}, but the state has dimension "
+                    f"{state_dim}"
+                )
+
+    @property
+    def state_dim(self) -> int:
+        """The state dimension :math:`d`."""
+        return int(self.truth.shape[1])
+
+    @property
+    def data_dim(self) -> int:
+        """The number of observed values per time, :math:`N`."""
+        return int(self.observations.shape[1])
+
+    @property
+    def n_times(self) -> int:
+        """The number of observation times :math:`T`."""
+        return int(self.observations.shape[0])
+
+    def exact_filter(self) -> tuple[tuple[Gaussian, ...], Array]:
+        r"""The exact filtering distributions and one-step log evidences.
+
+        The Kalman recursion, with :math:`m_0, P_0` the initial mean and
+        covariance:
+
+        .. math::
+
+            \begin{aligned}
+            m_t^- &= A m_{t-1}, & P_t^- &= A P_{t-1} A^\top + Q, \\
+            S_t &= H P_t^- H^\top + R, & K_t &= P_t^- H^\top S_t^{-1}, \\
+            m_t &= m_t^- + K_t (y_t - H m_t^-), & P_t &= P_t^- - K_t S_t K_t^\top,
+            \end{aligned}
+
+        and the log evidence of time :math:`t` is
+        :math:`\log \mathcal N(y_t;\ H m_t^-,\ S_t)`, whose sum over
+        :math:`t` is :math:`\log p(y_{1:T})`.
+
+        Computed with the operations of the layers below, one time at a
+        time::
+
+            belief = belief.pipe(maps.pushforward, self.transition,
+                                 inputs="x", output="x")
+            belief = belief.pipe(maps.pushforward,
+                                 maps.AdditiveNoise(self.transition_noise),
+                                 inputs="x", output="x")      # when Q is given
+            joint = belief.pipe(maps.pushforward, self.observe,
+                                inputs="x", output="y").add_noise(y=self.noise_cov)
+            log_evidence = joint.log_density(y=y)
+            belief = joint.condition(y=y).compress()
+
+        Returns
+        -------
+        distributions : tuple of Gaussian
+            :math:`\mathcal N(m_t, P_t)` over the block ``"x"``, for
+            :math:`t = 1, \dots, T`.
+        log_evidence : Array
+            ``(T,)``.
+
+        Notes
+        -----
+        ``compress`` after each conditioning keeps the latent width at most
+        ``d``; without it, each absorbed :math:`Q` would widen the factor by
+        its own width at every time.
+        """
+        belief = self.initial
+        distributions, log_evidence = [], []
+        for y in self.observations:
+            belief = belief.pipe(
+                maps.pushforward, self.transition, inputs="x", output="x"
+            )
+            if self.transition_noise is not None:
+                belief = belief.pipe(
+                    maps.pushforward,
+                    maps.AdditiveNoise(self.transition_noise),
+                    inputs="x",
+                    output="x",
+                )
+            joint = belief.pipe(
+                maps.pushforward, self.observe, inputs="x", output="y"
+            ).add_noise(y=self.noise_cov)
+            log_evidence.append(joint.log_density(y=y))
+            belief = joint.condition(y=y).compress()
+            distributions.append(belief)
+        return tuple(distributions), jnp.stack(log_evidence)
+
+    def __repr__(self) -> str:
+        """As ``LinearStateSpace(state_dim=3, data_dim=2, n_times=20)``; never raises."""
+        try:
+            return (
+                f"LinearStateSpace(state_dim={self.state_dim}, "
+                f"data_dim={self.data_dim}, n_times={self.n_times})"
+            )
+        except Exception:
+            return "<LinearStateSpace (unprintable fields)>"
+
+
+# ---------------------------------------------------------------------------
 # private: shared validation and per-particle models
 # ---------------------------------------------------------------------------
 
@@ -915,7 +1505,9 @@ def _check_scale(where: str, name: str, value) -> None:
         )
 
 
-def _check_ensemble(cls_name: str, ensemble, parameter_dim: int):
+def _check_ensemble(
+    cls_name: str, ensemble, parameter_dim: int, *, method: str = "forward"
+):
     """Require exactly ``(J, parameter_dim)``: every particle's parameters, one per row.
 
     The generalized-ufunc convention would carry any leading batch rank
@@ -929,12 +1521,12 @@ def _check_ensemble(cls_name: str, ensemble, parameter_dim: int):
     shape = getattr(ensemble, "shape", None)
     if shape is None:
         raise TypeError(
-            f"{cls_name}.forward: expected a (J, {parameter_dim}) array, got "
+            f"{cls_name}.{method}: expected a (J, {parameter_dim}) array, got "
             f"{type(ensemble).__name__}, which has no shape"
         )
     if len(shape) != 2 or shape[1] != parameter_dim:
         raise ValueError(
-            f"{cls_name}.forward: expected a (J, {parameter_dim}) ensemble, got shape "
+            f"{cls_name}.{method}: expected a (J, {parameter_dim}) ensemble, got shape "
             f"{tuple(shape)}. The model is called once with the whole "
             f"ensemble, one particle per row — not with a single parameter "
             f"vector, and never with a further leading axis."
@@ -1013,3 +1605,124 @@ def _decay_problem(
     noise_cov = PSDDiagonal(jnp.full(n_times, float(noise_std) ** 2))
     error = noise_std * jax.random.normal(jax.random.key(seed), (n_times,))
     return times, prior, noise_cov, _decay(u_true, times) + error, u_true
+
+
+def _check_finite(where: str, name: str, value) -> float:
+    """Require a finite real scalar, returned as a Python float."""
+    if isinstance(value, bool):
+        raise TypeError(f"{where}: {name} must be a real scalar, got the bool {value!r}")
+    try:
+        number = float(value)
+    except (TypeError, ValueError) as exc:
+        raise TypeError(
+            f"{where}: {name} must be a real scalar, got {type(value).__name__}"
+        ) from exc
+    if not math.isfinite(number):
+        raise ValueError(f"{where}: {name} must be finite, got {value}")
+    return number
+
+
+def _check_linear_map(cls_name: str, field_name: str, value, d_out: int, d_in: int):
+    """Require a single-input :class:`~enskit.maps.Linear` of shape ``(d_out, d_in)``."""
+    if not isinstance(value, maps.Linear) or value.input_names is not None:
+        raise TypeError(
+            f"{cls_name}.{field_name}: must be an enskit.maps.Linear of one operator, "
+            f"got {type(value).__name__}. Wrap a matrix as "
+            f"maps.Linear(enskit.linalg.Dense(matrix))."
+        )
+    shape = tuple(value.op.shape)
+    if shape != (d_out, d_in):
+        raise ValueError(
+            f"{cls_name}.{field_name}: the operator has shape {shape}, expected "
+            f"({d_out}, {d_in})"
+        )
+
+
+def _check_state_space(
+    cls_name: str, *, initial, observe, noise_cov, observations, truth
+) -> tuple[int, int, int]:
+    """Validate the fields both state-space problems carry; return ``(d, N, T)``."""
+    if not isinstance(initial, Gaussian):
+        raise TypeError(
+            f"{cls_name}.initial: must be an enskit.distribution.Gaussian, got "
+            f"{type(initial).__name__}"
+        )
+    if not isinstance(noise_cov, PSDLinOp):
+        raise TypeError(
+            f"{cls_name}.noise_cov: must be an enskit.linalg.PSDLinOp, got "
+            f"{type(noise_cov).__name__}"
+        )
+    _check_not_family(cls_name, "initial", initial)
+    _check_not_family(cls_name, "noise_cov", noise_cov)
+    if initial.names != ("x",):
+        raise ValueError(
+            f"{cls_name}: the initial distribution must have exactly one block, 'x', "
+            f"got blocks {initial.names}"
+        )
+    state_dim = initial.dims["x"]
+    data_dim = noise_cov.shape[0]
+    _check_linear_map(cls_name, "observe", observe, data_dim, state_dim)
+    shape = getattr(observations, "shape", None)
+    if shape is None or len(shape) != 2 or shape[0] < 1:
+        raise ValueError(
+            f"{cls_name}.observations: expected a (T, {data_dim}) array with T >= 1, "
+            f"got {shape if shape is not None else type(observations).__name__}"
+        )
+    n_times = int(shape[0])
+    _check_array_field(cls_name, "observations", observations, (n_times, data_dim))
+    _check_array_field(cls_name, "truth", truth, (n_times, state_dim))
+    return state_dim, data_dim, n_times
+
+
+def _toy_keys(seed: int, n: int) -> tuple:
+    """``n`` keys for a state-space problem, from a stream callers do not reach."""
+    stream = jax.random.fold_in(jax.random.key(seed), _TOY_STREAM)
+    return tuple(jax.random.split(stream, n))
+
+
+def _lorenz96_tendency(x: Array, forcing: Array) -> Array:
+    """``f(x)`` of the Lorenz-96 equations, on the trailing axis."""
+    return (
+        (jnp.roll(x, -1, axis=-1) - jnp.roll(x, 2, axis=-1)) * jnp.roll(x, 1, axis=-1)
+        - x
+        + forcing
+    )
+
+
+@jax.jit
+def _lorenz96_step(x: Array, forcing: Array, dt: Array) -> Array:
+    """One fourth-order Runge-Kutta step, compiled once per shape."""
+    k1 = _lorenz96_tendency(x, forcing)
+    k2 = _lorenz96_tendency(x + 0.5 * dt * k1, forcing)
+    k3 = _lorenz96_tendency(x + 0.5 * dt * k2, forcing)
+    k4 = _lorenz96_tendency(x + dt * k3, forcing)
+    return x + dt / 6.0 * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
+
+
+def _lorenz96_trajectory(
+    start: Array, forcing: float, dt: float, n_times: int
+) -> tuple[Array, Array]:
+    """Spin up onto the attractor, then record ``n_times`` steps.
+
+    Returns the state after the spin-up, :math:`x_0^\\dagger`, and the
+    ``(T, d)`` states after each further step.
+    """
+
+    def step(x, _):
+        x = _lorenz96_step(x, jnp.asarray(forcing), jnp.asarray(dt))
+        return x, x
+
+    x0, _ = jax.lax.scan(step, start, None, length=_LORENZ96_SPIN_UP)
+    _, truth = jax.lax.scan(step, x0, None, length=n_times)
+    return x0, truth
+
+
+def _linear_trajectory(A: Array, x0: Array, shocks: Array) -> Array:
+    """``x_t = A x_{t-1} + w_t`` for each row ``w_t`` of ``shocks``; ``(T, d)``."""
+
+    def step(x, w):
+        x = A @ x + w
+        return x, x
+
+    _, truth = jax.lax.scan(step, x0, shocks)
+    return truth
