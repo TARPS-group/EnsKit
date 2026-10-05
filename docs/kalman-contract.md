@@ -26,8 +26,9 @@ listed in {ref}`kalman-implementation-changes`. Where this page departs from
 the design's stubs (`docs/redesign/stubs/kalman.py`), it says so in
 {ref}`kalman-departures`, and this page wins.
 
-Localization (`LocalizedUpdateRule`, `DomainLocalization`, `gaspari_cohn`)
-belongs to this layer but arrives in PR 9, which adds its own section here.
+PR 9 added localization (`LocalizedUpdateRule`, `DomainLocalization`,
+`gaspari_cohn`) the same way: {ref}`kalman-localization` was written first,
+then implemented, and its departures and changes are listed with the rest.
 :::
 
 (kalman-scope)=
@@ -46,6 +47,9 @@ $y^*$. The layer provides:
   `ParticleUpdate`, what a rule builds;
 - **two rules**: the deterministic symmetric square-root rule
   (`SymmetricSquareRoot`) and the stochastic rule (`Matheron`);
+- **domain localization** around either rule (`LocalizedUpdateRule`), with
+  its geometry (`DomainLocalization`) and the Gaspari–Cohn taper
+  (`gaspari_cohn`);
 - **four functions on ensembles** that the algorithms apply around an update:
   multiplicative and additive inflation, and relaxation to the prior spread
   or to the prior perturbations.
@@ -59,10 +63,15 @@ What the layer is not:
   happens before the update, in user code or an algorithm.
 - It never repairs failed particles ({ref}`kalman-failed`) and never
   resamples.
-- It computes no conditioning of its own. Every gain, transform and whitening
-  is a call into `enskit.distribution`, so the numerical rules of
-  {doc}`distribution-contract` (one thin SVD of the whitened factor, centering
-  before whitening, the identity completion) hold here by construction.
+- It computes no conditioning of its own, with one exception. Every gain,
+  transform and whitening of the two rules is a call into
+  `enskit.distribution`, so the numerical rules of {doc}`distribution-contract`
+  (one thin SVD of the whitened factor, centering before whitening, the
+  identity completion) hold here by construction. Localization, whose local
+  problems the distribution layer cannot express, whitens the aligned
+  approximation's factor rows itself and builds one `IdentityPlusGram` per
+  local problem, under the same rules and with the same whitening and result
+  checks ({ref}`kalman-localized-rule`).
 
 (kalman-notation)=
 ## Notation
@@ -98,6 +107,9 @@ block is a *target*.
 | `ParticleUpdate` | protocol: called with the given values, returns the updated particles |
 | `SymmetricSquareRoot` | the deterministic rule: realize after condition |
 | `Matheron` | the stochastic rule: transport the particles through the conditional map |
+| `LocalizedUpdateRule` | domain localization around either rule |
+| `DomainLocalization` | locations, taper, radius and neighborhood size |
+| `gaspari_cohn` | the compactly supported fifth-order taper |
 | `inflate_multiplicative` | scale anomalies by $\lambda$ |
 | `inflate_additive` | add centered Gaussian draws |
 | `relax_to_prior_spread` | RTPS: relax the per-coordinate spread toward the prior's |
@@ -427,6 +439,254 @@ path, the alignment check.
 **Call**: the key is required (`ValueError` when missing). It is split as in
 {ref}`kalman-prng`.
 
+(kalman-localization)=
+## Localization
+
+With $J$ particles, every update above moves each target block within the
+span of its own anomalies, a space of dimension at most $J - 1$, and its gain
+is built from sample covariances whose entries between unrelated coordinates
+are noise of order $1/\sqrt{J}$. When the targets and the given blocks are
+spatially extended and $J$ is much smaller than their dimensions, both limit
+the update. **Domain localization** (Ott et al., 2004; Hunt et al., 2007)
+replaces the one global update by one local update per target coordinate,
+which sees only the given coordinates near it, each with its noise inflated
+by the reciprocal of a taper of its distance. Each local update has its own
+weights in $\mathbb R^J$, so the corrections taken together are not confined
+to the anomalies' span.
+
+The layer implements domain localization, not covariance localization
+(Houtekamer & Mitchell, 2001; Hamill et al., 2001), which tapers the sample
+covariance entrywise: the entrywise product destroys the factor's low rank,
+and with it the whitened factor and its one thin SVD that every update here
+is built on. The two are closely related (Sakov & Bertino, 2011).
+
+(kalman-domain-localization)=
+### `DomainLocalization(target_coords, given_coords, *, radius, max_neighbors, taper=None, distance=None)`
+
+The geometry of a localized update, which the caller supplies: the layer
+never constructs locations or distances. Notation for this section:
+
+| symbol | meaning |
+| ------ | ------- |
+| $c_p \in \mathbb R^q$ | the location of coordinate $p$ of a located target block, row $p$ of `target_coords[x]` |
+| $c_i \in \mathbb R^q$ | the location of given coordinate $i$, $i = 1, \dots, N$, over the given blocks concatenated |
+| $d(c_p, c_i)$ | the distance, `distance(c_p, points)`; Euclidean by default |
+| $L$ | `radius`, the taper's support |
+| $\rho$ | `taper`, a function of $r = d/L$ |
+| $K$ | `max_neighbors`, the neighborhood size |
+| $\mathcal N_p = (i_1, \dots, i_K)$ | the neighborhood of $c_p$: the $K$ given coordinates nearest it |
+| $\rho_{pk}$ | the weight of neighbor $k$, $\rho\big(d(c_p, c_{i_k})/L\big)$ |
+
+The neighborhood of $c_p$ is the $K$ given coordinates with the smallest
+distances to it, nearest first, ties broken by the lower index in the order of
+`given_coords`. Every neighborhood has the same size $K$, so the local updates
+vectorize with no data-dependent shapes; a neighbor beyond the radius has
+$\rho_{pk} = 0$ and no influence, and $\rho_{pk} > 0$ is the validity mask. A
+given coordinate within the radius but outside the $K$ nearest has no
+influence either: $K$ truncates the taper, and $K = N$ never does.
+
+- `target_coords`: a mapping from target block name to a `(d_x, q)` array of
+  locations, one row per coordinate, or to `None` for a block without a
+  location (a global parameter, say), which gets the global update
+  ({ref}`kalman-localized-rule`). At least one block has locations.
+- `given_coords`: a mapping from given block name to a `(d_c, q)` array, or
+  one bare `(N, q)` array, accepted when exactly one block is given. The bare
+  form spares the caller of an algorithm from naming the algorithm's internal
+  block. The mapping's order sets the concatenation order, and so the
+  tie-breaking.
+- Every array is real and exactly 2-D with at least one row, all with the
+  same $q \ge 1$. Integer locations are converted to the default floating
+  dtype.
+- `radius`: a real scalar (a Python number or a 0-d array, which may be
+  traced); in debug mode finite and positive.
+- `max_neighbors`: an integer (anything `operator.index` accepts, but not a
+  `bool`), $1 \le K \le N$.
+- `taper`: `None` (`gaspari_cohn`), or a callable from an array of
+  $r \ge 0$ to an array of the same shape, of values in $[0, 1]$.
+- `distance`: `None` (Euclidean), or a callable `(point (q,), points (m, q))
+  -> (m,)`, applied under `jax.vmap` over the points $c_p$. A periodic domain
+  passes a periodic distance.
+
+The neighborhoods and weights are computed **at construction**, in the
+locations' floating dtype, and stored, so
+a build does no geometry and a `DomainLocalization` built once serves every
+update of a run. They are readable as `neighbors[x]`, a `(d_x, K)` integer
+array of indices into the concatenated given coordinates, and `weights[x]`,
+the `(d_x, K)` array of $\rho_{pk}$, for each located block $x$. The radius
+enters only the weights, so a localization built inside a traced function is
+differentiable in it.
+
+Any taper with values in $[0, 1]$ gives a valid update: a weight only scales
+a noise variance, $r_i \mapsto r_i / \rho_{pk}$, and the local problem stays a
+Gaussian one. That a taper must be a positive-definite function, which depends
+on the dimension $q$ (Gaspari & Cohn, 1999), is a requirement of covariance
+localization, where the taper multiplies a covariance; it is not one here. A
+weight above 1 would shrink a noise variance below the known one, and is
+refused in debug mode.
+
+**Construction** checks, in order: argument types (`TypeError`: a
+`target_coords` that is not a mapping, a name that is not a `str`, a `None`
+in `given_coords`, a `max_neighbors` that is not an integer or is a `bool`, a
+`taper` or `distance` that is not callable, a complex or boolean array); an
+empty `given_coords` (`ValueError`); shapes and sizes
+(`ValueError`: an array not 2-D or with no rows, differing $q$, no located
+block, a `radius` that is not a scalar, $K$ outside
+$[1, N]$, a distance or taper result of the wrong shape); then, in debug mode,
+that every location and the radius are finite, the radius positive, every
+distance finite and nonnegative, and every weight finite and in $[0, 1]$
+(`ValueError`).
+
+(kalman-gaspari-cohn)=
+### `gaspari_cohn(r)`
+
+The fifth-order piecewise rational function of Gaspari & Cohn (1999,
+eq. 4.10), on $r = d/L$, with $z = 2|r|$:
+
+$$
+\rho(r) = \begin{cases}
+  -\tfrac14 z^5 + \tfrac12 z^4 + \tfrac58 z^3 - \tfrac53 z^2 + 1,
+    & 0 \le z \le 1,\\[2pt]
+  \tfrac1{12} z^5 - \tfrac12 z^4 + \tfrac58 z^3 + \tfrac53 z^2 - 5z + 4
+    - \tfrac{2}{3z}, & 1 < z \le 2,\\[2pt]
+  0, & z > 2 .
+\end{cases}
+$$
+
+It equals 1 at $r = 0$, decreases to exactly 0 at $|r| = 1$ and stays there,
+and is a positive-definite correlation function in up to three dimensions.
+Elementwise on an array of any shape, keeping its floating dtype (an integer
+array is converted to the default floating dtype), with a finite derivative
+everywhere (the $1/z$ term is never evaluated at $z \le 1$). The second
+branch rounds to slightly negative values near $z = 2$ (about $-10^{-6}$ in
+float32), so the result is clamped at zero.
+
+(kalman-localized-rule)=
+### `LocalizedUpdateRule(update_rule, localization)`
+
+An `UpdateRule` performing domain localization around `update_rule`, a
+`SymmetricSquareRoot` or a `Matheron` (`TypeError` otherwise), with the
+geometry `localization`, a `DomainLocalization` (`TypeError` otherwise).
+
+**The local problem.** For coordinate $p$ of a located target block $x$, the
+local problem is the update of that one coordinate given the coordinates
+$\mathcal N_p$ of the given blocks, with noise variance $r_{i_k}/\rho_{pk}$ in
+place of $r_{i_k}$, a neighbor with $\rho_{pk} = 0$ being absent. **The
+localized update of coordinate $p$ is the wrapped rule's update on its local
+problem**, for the stochastic rule with one noise draw shared by every local
+problem. That is the normative definition; the formulas below compute it.
+
+With $S = (WF_c)^\top \in \mathbb R^{J \times N}$ the whitened factor of
+the given blocks ({ref}`dist-notation`), $f_p \in \mathbb R^J$ row $p$ of
+$x$'s factor row $F_x$, and $m_{x,p}$ entry $p$ of its mean, the local
+whitened factor and its operator are
+
+$$
+S_p = \Big[\sqrt{\rho_{p1}}\, S_{\cdot i_1}\ \cdots\ \sqrt{\rho_{pK}}\, S_{\cdot i_K}\Big]
+  \in \mathbb R^{J \times K},
+\qquad A_p = I_J + S_p S_p^\top ,
+$$
+
+since for row-local noise the local whitener is $W$ restricted to
+$\mathcal N_p$ and multiplied by $\sqrt{\rho_{pk}}$. Then, for particle $j$:
+
+- around **`SymmetricSquareRoot`**,
+
+  $$
+  x'_{jp} = m_{x,p} + f_p^\top A_p^{-1} S_p\, b_p
+    + \sqrt{J-1}\,\big(A_p^{-1/2} f_p\big)_j ,
+  \qquad (b_p)_k = \sqrt{\rho_{pk}}\,\big(W(y^* - m_c)\big)_{i_k} ;
+  $$
+
+- around **`Matheron`**, on the aligned path of {ref}`kalman-matheron`,
+
+  $$
+  x'_{jp} = x_{jp} + f_p^\top A_p^{-1} S_p\, b_{pj},
+  \qquad (b_{pj})_k = \sqrt{\rho_{pk}}\,\big(W(y^* - g_j)\big)_{i_k} - \varepsilon_{j i_k},
+  $$
+
+  with $W(y^* - g_j) = W(y^* - m_c) - \sqrt{J-1}\,S_{j\cdot}^\top$ and
+  $\varepsilon$ the one `normal(k_noise, (J, N))` draw of `Matheron`
+  ({ref}`kalman-prng`). In the local problem's whitened coordinates
+  $\varepsilon_{ji_k}$ is a draw of noise of variance $r_{i_k}/\rho_{pk}$, so
+  the local spread is the local problem's.
+
+A target block named in `target_coords` with `None` gets the wrapped rule's
+**global** update, with $S$ itself, every given coordinate at weight 1, and
+for `Matheron` the same $\varepsilon$. (Every target has a factor row: an
+aligned approximation refuses a block with neither a row nor a term, and a
+target with a term is refused.) Neither $A_p$ nor anything else here depends on
+$y^*$, so the build computes, for each located coordinate, the **local gain
+row** $\kappa_p = S_p^\top A_p^{-1} f_p \in \mathbb R^K$ and, around
+`SymmetricSquareRoot`, the **local anomalies** $\sqrt{J-1}\,A_p^{-1/2} f_p$;
+a call only gathers and contracts.
+
+Two consequences, both tested:
+
+- **No localization, no change.** With $K = N$ and every weight 1, every
+  $A_p$ is $A$ with the columns of $S$ permuted, so the localized update
+  equals the wrapped rule's global update to round-off, for the same key.
+  This is the check that catches a mis-indexed neighborhood.
+- A zero weight gives a zero column of $S_p$, and so an exactly zero singular
+  value; `IdentityPlusGram`'s derivative rules keep first derivatives finite
+  there. The square root of a weight is taken with a zero derivative at zero,
+  not an infinite one, so **the derivative with respect to a weight that is
+  exactly zero is zero by convention**. For a taper that reaches zero with
+  zero slope, `gaspari_cohn` among them, a derivative in the radius is
+  therefore exact; one that reaches zero with nonzero slope (a linear ramp)
+  loses that one-sided term. The Euclidean distance has a zero derivative,
+  not `nan`, where two locations coincide.
+
+**Restrictions**, each refused at build:
+
+- **Row-local noise.** Every given block has an independent term that is a
+  `PSDDiagonal` or an `Identity`, possibly wrapped in `PSDScaled` any number
+  of times (as an algorithm's tempered `R * (1 / delta)` is); `TypeError`
+  otherwise, and `ValueError` for a given block with no term. A local problem
+  needs the noise covariance restricted to a neighborhood, and a principal
+  submatrix of a correlated block is not an operator-layer operation; whitening
+  the whole block and then selecting rows would condition on the wrong
+  problem silently.
+- **The particles' dtype.** Each noise whitens to the particles' dtype
+  (`TypeError`). Operators carry no dtype, and a scalar scale of a float32
+  operator promotes it to float64 (issue #68), which
+  would otherwise give a float64 result silently.
+- **Alignment.** The approximation is an `EnsembleGaussian` with the
+  particles' count (`ValueError`), and aligned with them (the alignment check,
+  in debug mode): both local formulas read the whitened residuals off $S$.
+- **No target terms.** No target block has an independent term
+  (`ValueError`).
+- **The localization fits the problem.** The given blocks are those of
+  `given_coords`, as a set, or exactly one with the bare form (`ValueError`);
+  every name in `target_coords` is a block (`KeyError`) and a target
+  (`ValueError`); **every target block is named in `target_coords`**, with
+  `None` for a global update (`ValueError`: a forgotten block would otherwise
+  get the global update silently); and each array has its block's dimension
+  in rows (`ValueError`).
+
+**Build** checks, in order: the arguments of {ref}`kalman-validation`; the
+approximation's type; the localization against the problem, in the order
+listed; the targets' terms; the given blocks' terms (present and row-local);
+then, in debug mode, the finiteness of the particles and the alignment check.
+The work follows: the dtype check and the whitening check on $S$ right after
+it is computed.
+
+**Call**: the values as for {ref}`kalman-particle-update`; around `Matheron`
+the key is required (`ValueError`) and split as `Matheron` splits it; around
+`SymmetricSquareRoot` a key is type-checked and otherwise ignored. In debug
+mode the call checks that the values are finite, runs the whitening check on
+$W(y^* - m_c)$, and checks every updated block (the result check).
+
+**Cost.** The build whitens $J$ vectors per given block, the factor rows
+once, shared by every local problem; a call whitens one. There is one SVD of
+a $J \times K$ array per located coordinate with a factor row, computed at
+build under `jax.vmap`, so one batched `svd` per located block, and one SVD of
+the $J \times N$ array $S$ if a target named with `None` has a factor row. A
+call computes no SVD. The build holds every local factor of a block at once,
+$d_x J K$ numbers; a call around `Matheron` gathers $J d_x K$. Constructing a
+`DomainLocalization` computes every distance from each located block's
+coordinates to the given ones, a $d_x \times N$ array, and so is
+$O(d_x N q)$ in time and memory, with no size guard yet (issue #69).
+
 (kalman-failed)=
 ## Failed and weighted particles
 
@@ -565,6 +825,7 @@ given blocks with factor rows, with $k$ the approximation's latent width
 | `SymmetricSquareRoot`, exact | $0$ | $0$ | 0 (one thin QR per call) |
 | `Matheron`, aligned | $J$ | $1$ | 1, at build |
 | `Matheron`, general | $k$ | $J$ | 1, at build |
+| `LocalizedUpdateRule`, either rule | $J$ | $1$ | one $J \times K$ per located coordinate, and one $J \times N$ if a global target has a factor row, at build |
 
 So one aligned stochastic update costs $J + 1$ whitened vectors and one
 square-root update $J + 1$; a general stochastic update on an approximation of
@@ -586,6 +847,8 @@ are pinned and snapshotted by the tests:
 | call | draw |
 | ---- | ---- |
 | `Matheron`'s update | `k_targets, k_noise = split(key)`, always. With $n_T$ the number of target blocks with an independent term: `keys = split(k_targets, n_T)` and $e_{x} = L_x$ `normal(keys[i], (J, w_x))` for the $i$-th such block in the approximation's block order (no split when $n_T = 0$). The given blocks' noise is the conditional map's draw with `k_noise`: `normal(k_noise, (J, N))`, its columns the given blocks' whitened coordinates in block order, on both paths |
+| `LocalizedUpdateRule(Matheron())`'s update | `k_targets, k_noise = split(key)`, as `Matheron`; $\varepsilon$ = `normal(k_noise, (J, N))`, its columns the given blocks' whitened coordinates in block order, shared by every local and global update. `k_targets` is unused, since targets have no terms |
+| `LocalizedUpdateRule(SymmetricSquareRoot())`'s update | none |
 | `SymmetricSquareRoot`'s update | the key whole to the `SquareRootMap`, or on the exact path to `realize_particles`: the draw of `realize_particles` over the target blocks |
 | `update` | the key whole to the built update |
 | `inflate_additive` | `keys = split(key, n)`, $n$ the number of named blocks, in the ensemble's block order; $\varepsilon = L_b$ `normal(keys[i], (J, w_b))`; centered by `mean(eps, axis=0, keepdims=True)` when unweighted, `sum(weights[:, None] * eps, axis=0, keepdims=True)` when weighted |
@@ -637,7 +900,11 @@ capabilities; the pair's agreement (relaxations); then tier 4.
 | an approximation of another dtype | `TypeError` |
 | no target block | `ValueError` |
 | `Matheron` with a given block without an independent term | `ValueError` |
-| `SymmetricSquareRoot` on a plain `Gaussian`, or an `EnsembleGaussian` of another count | `ValueError` |
+| `SymmetricSquareRoot` or `LocalizedUpdateRule` on a plain `Gaussian`, or an `EnsembleGaussian` of another count | `ValueError` |
+| `LocalizedUpdateRule` wrapping another rule, or given a geometry that is not a `DomainLocalization` | `TypeError` |
+| `LocalizedUpdateRule` with a given block's noise not row-local | `TypeError` |
+| `LocalizedUpdateRule` with a given block without noise, a target with a term, a target missing from `target_coords`, given blocks other than the localization's, or locations of the wrong size | `ValueError` |
+| a `DomainLocalization` argument of the wrong type, shape or size | `TypeError` / `ValueError` ({ref}`kalman-domain-localization`) |
 | mixed noisy and exact given blocks | `ValueError` |
 | exact values with $N > J - 1$ | `ValueError` |
 | `noise` on a block that is not given | `ValueError` |
@@ -649,7 +916,7 @@ capabilities; the pair's agreement (relaxations); then tier 4.
 | a raw `uint32` key | `TypeError` |
 | a capability missing (`whiten`, `factor`) | `UnsupportedOpError`, from the operator layer |
 | any call on a vmapped family | `ValueError` |
-| a failed particle, a misaligned approximation, a non-finite or non-positive scale, an `alpha` outside $[0, 1]$, a non-finite result | `ValueError` in debug mode; `nan` or a wrong finite result otherwise |
+| a failed particle, a misaligned approximation, a non-finite or non-positive scale, an `alpha` outside $[0, 1]$, a non-finite location, distance or radius, a taper weight outside $[0, 1]$, a non-finite result | `ValueError` in debug mode; `nan` or a wrong finite result otherwise |
 
 The layer defines no exception types. The whitening and result checks of the
 conditional maps ({ref}`dist-accuracy`) run inside every update, so a
@@ -686,6 +953,14 @@ derivative.
   path it takes. For the exact square-root path the data are the
   approximation and the static fields the names. Their unflattening bypasses
   any constructor.
+- `LocalizedUpdateRule` is a pytree whose children are the wrapped rule and
+  the localization. `DomainLocalization` is a pytree whose data are the
+  locations, the radius, the neighbors and the weights, and whose static
+  fields are the block names, $K$ and the taper's name, so that a fresh
+  `lambda` passed as taper or distance does not make `jit` retrace. A localized
+  built update is a private class whose data are the whitened factor $S$, the
+  given terms and means, the local gain rows, neighbors and anomalies, the
+  global operator and factor rows, and (around `Matheron`) the particles.
 - Building and calling are `jit`- and `vmap`-safe, with no data-dependent
   shapes. Under `vmap` over the given values one build serves every value.
 - A vmapped family of ensembles, distributions or built updates is refused by
@@ -700,7 +975,14 @@ Matheron()
 SymmetricSquareRoot()
 MatheronUpdate(given=('g',), targets=('u',), n_particles=32, aligned=True)
 ExactSquareRootUpdate(given=('g',), targets=('u',), n_particles=32)
+DomainLocalization(target_dims={'x': 40, 'theta': None}, given_dims={'g': 20}, coord_dim=1, max_neighbors=10, taper=gaspari_cohn)
+LocalizedUpdateRule(Matheron(), DomainLocalization(...))
+LocalizedUpdate(rule=Matheron(), given=('g',), targets=('x', 'theta'), n_particles=10, located=('x',))
 ```
+
+With a bare `given_coords`, `given_dims` is the number of rows. The rule's
+repr abbreviates its localization; neither shows the radius, which may be an
+array.
 
 `SymmetricSquareRoot`'s noisy build returns the `SquareRootMap`, with its own
 repr. A vmapped built update wraps its form in `vmapped(..., batch=...)`.
@@ -711,8 +993,8 @@ repr. A vmapped built update wraps its form in `vmapped(..., batch=...)`.
 `enskit.kalman` exports exactly: `update`, `gaussian_approximation`,
 `UpdateRule`, `ParticleUpdate`, `SymmetricSquareRoot`, `Matheron`,
 `inflate_multiplicative`, `inflate_additive`, `relax_to_prior_spread` and
-`relax_to_prior_perturbations`. PR 9 adds `LocalizedUpdateRule`,
-`DomainLocalization` and `gaspari_cohn`. Its private modules are imported only
+`relax_to_prior_perturbations`, `LocalizedUpdateRule`, `DomainLocalization`
+and `gaspari_cohn`. Its private modules are imported only
 from inside `enskit.kalman`; it imports `enskit.distribution` and
 `enskit.linalg` and nothing else of the package.
 
@@ -724,7 +1006,7 @@ layers. It may import any layer and is imported by none. This PR adds two.
 Each raises `AssertionError` with a message naming the obligation that
 failed, and returns `None` when every check passes.
 
-**`check_update_rule(rule, *, key=None, exact_covariance=True)`** checks a
+**`check_update_rule(rule, *, key=None, exact_covariance=True, diagonal_noise=False)`** checks a
 user's `UpdateRule` against {ref}`kalman-particle-update`, on a fixture it
 builds itself: a linear-Gaussian joint with two target blocks and a noisy
 given block, $J = 12$ exact-moment particles, `gaussian_approximation`, and
@@ -748,7 +1030,13 @@ the exact conditional from `Gaussian.condition`. It checks, in order:
 
 `key` seeds the stochastic checks (a fixed key by default, so the check is
 reproducible). A rule that claims no exact covariance, such as the
-deterministic EnKF, passes `exact_covariance=False`. The fixture has one given
+deterministic EnKF, passes `exact_covariance=False`. A rule that accepts only
+row-local noise, such as `LocalizedUpdateRule`, passes `diagonal_noise=True`:
+the fixture's noise is then the `PSDDiagonal` of its covariance's diagonal,
+everything else unchanged. The blocks are `"u"` (dimension 3) and `"v"`
+(dimension 2), targets, and `"g"` (dimension 4), given, so a localization for
+the fixture can be built; one with $K = N$ and every weight 1 makes a
+localized rule exact. The fixture has one given
 block and no target with an independent term, so the check says nothing about
 several given blocks or a target's draw: a rule's own tests cover those.
 
@@ -795,10 +1083,11 @@ the hybrid covariance of Example 11 reaching it through `approximation=`; that
 approximation is a plain `Gaussian`, so `Matheron` takes its general path and
 `SymmetricSquareRoot` refuses it.
 
-**Localization** (PR 9) is an `UpdateRule` wrapping one of the two rules. It
-reads the aligned approximation's factor rows and builds one
-`IdentityPlusGram` per neighborhood itself, and it shares one whitened draw
-between every local update.
+**Localization** is consumed by passing `LocalizedUpdateRule(rule,
+localization)` as either driver's `update_rule`; neither driver knows about
+it. The EKI driver's tempered noise `R * (1 / delta)` of a `PSDDiagonal` is
+row-local. Its given block is internal to the driver, which is what the bare
+`given_coords` form is for.
 
 (kalman-conformance)=
 ## Conformance
@@ -884,6 +1173,42 @@ quantity's scale.
 19. **Examples.** Examples 3 and 14 of the design run against the layer and
     their final checks pass.
 
+The obligations of {ref}`kalman-localization`, on `tests/test_localization.py`,
+with the dense reference for a local problem written out in Hunt et al.'s
+(2007) form, from the neighborhoods found by sorting distances in NumPy:
+
+20. **`gaspari_cohn`** against its formula, continuous at $z = 1$ and $z = 2$,
+    exactly zero beyond, even, with a finite derivative everywhere, keeping
+    float32.
+21. **The geometry.** Neighbors and weights against a NumPy sort, with ties
+    broken by the lower index, a periodic distance, a bare `given_coords`, and
+    every construction check of {ref}`kalman-domain-localization`, the
+    debug-mode ones included.
+22. **Exactness, no localization.** With $K = N$ and weight 1, both localized
+    rules equal their wrapped rule's global update to round-off, `Matheron`
+    for the same key, with located and global targets, and both pass
+    `check_update_rule` with `diagonal_noise=True`.
+23. **Exactness, local problems.** Each updated coordinate equals the dense
+    update of its local problem: `SymmetricSquareRoot`'s mean and anomalies,
+    and `Matheron`'s every particle with the draw recomputed, for a taper
+    that zeroes some neighbors, two given blocks whose `given_coords` order
+    differs from the approximation's, a scaled diagonal noise, and a global
+    target beside a located one.
+24. **Hazards.** A global target is updated exactly as the wrapped rule
+    updates it, so its pooling over every given coordinate is kept; a target
+    left out of `target_coords` raises; a taper that is not positive definite
+    (a boxcar) still gives each local problem's exact update; a weight above
+    1 raises in debug mode; a correlated noise block raises.
+25. **The span.** With $J$ much smaller than the target's dimension, the
+    localized increments of the mean leave the span of the prior anomalies,
+    and the global ones do not.
+26. **Counts, derivatives, JAX, `repr`.** $J + 1$ whitened vectors per
+    update; one batched `svd` per located block plus one for global targets,
+    none per call; first derivatives finite, at zero weights included, and
+    agreeing with finite differences, in the values, the particles and the
+    radius; pytree round trips, `jit`, `vmap` over values, a refused family;
+    float32 kept; the reprs of {ref}`kalman-repr`.
+
 ### Ported regression tests
 
 The update policies of `enskit.eki` are reimplemented by this layer, so the
@@ -940,6 +1265,29 @@ differs, it governs.
    Example 14. **`check_conditional_map`** arrives here, as the distribution
    contract says, and takes a `tol`.
 
+Localization's departures, from PR 9:
+
+10. **Every target block is named in `target_coords`**, with `None` for a
+    global update. The stubs let an omitted block mean `None`, so a block
+    forgotten or misspelled at a call site got the global update with nothing
+    raised.
+11. **The shared draw is a draw of each local problem's noise.** The
+    stochastic local residual is $\sqrt{\rho}\,W(y^* - g_j) - \varepsilon_j$,
+    not the design prototype's $\sqrt{\rho}\,\big(W(y^* - g_j) -
+    \varepsilon_j\big)$. The prototype's perturbation has the untapered
+    variance $r_i$ where the local problem's noise has $r_i/\rho_{pk}$, so
+    each coordinate's spread fell short of its local problem's conditional
+    by $\kappa_p^\top \operatorname{diag}(1 - \rho_{pk})\,\kappa_p$, with
+    the stub's "the wrapped rule's update on the local problem" no longer
+    true. The two agree at weight 1.
+12. **The neighborhoods are computed at construction** and stored, not at
+    every build; the stub did not say when.
+13. **`DomainLocalization` validates its arguments**, and `Identity` noise is
+    row-local beside `PSDDiagonal`. A taper weight outside $[0, 1]$ raises in
+    debug mode.
+14. **`check_update_rule` takes `diagonal_noise`**, since its fixture's
+    correlated noise is refused by a localized rule.
+
 (kalman-implementation-changes)=
 ## Changes made while implementing
 
@@ -967,6 +1315,22 @@ it, and its adversarial review, changed it as follows:
    ({ref}`kalman-matheron`), and the user guide's hybrid example pushes
    through `maps.Linear`, which absorbs its static covariance first.
 
+PR 9's localization section was changed by its adversarial review:
+
+7. **The localized build checks that each noise whitens to the particles'
+   dtype.** A scaled float32 noise gave a float64 result, since the result's
+   dtype followed the whitened factor's.
+8. **The derivative at a zero weight is stated as a convention**, and the
+   Euclidean distance takes a safe square root: a target located exactly at
+   a given coordinate gave `nan` derivatives in the locations.
+9. **The taper and the distance are no longer static fields** of
+   `DomainLocalization`; only the taper's name is kept, for `repr`. Fresh
+   callables made `jit` retrace every time.
+10. **`max_neighbors` takes any integer**, a NumPy integer included; a `None`
+    in `given_coords` raises `TypeError`, and the empty-mapping check follows
+    the type checks.
+11. **The construction cost is stated** ({ref}`kalman-localized-rule`, *Cost*).
+
 (kalman-excluded)=
 ## Deliberately excluded
 
@@ -990,6 +1354,24 @@ given blocks' noise only in whitened coordinates, inside the conditional map;
 drawing it through a factor as well would corrupt the joint law
 ({ref}`dist-matheron`). The rule never accepts or returns its perturbations.
 
+**Covariance localization.** It tapers the sample covariance entrywise, which
+destroys the low rank that every update here is built on
+({ref}`kalman-localization`).
+
+**Localization of correlated noise.** A neighborhood aligned to the blocks of
+a block-diagonal noise covariance could be supported; one that cuts across a
+correlated block cannot, by an operator-layer operation. Only row-local noise
+is accepted, which covers the common diagonal case.
+
+**Localization of a plain `Gaussian`.** A hybrid covariance's approximation
+is not aligned. The stochastic rule's general path could be localized, at
+$k \times K$ per local problem, and issue #47 records another option:
+defining alignment by the first $J$ latent columns.
+
+**Grouping coordinates that share a location.** Coordinates at one location
+have the same neighborhood and weights, and so the same $A_p$; the layer
+still computes one SVD per coordinate.
+
 **A configurable divisor** in the relaxations' spreads: $J - 1$, as
 everywhere.
 
@@ -1005,15 +1387,30 @@ everywhere.
   *Monthly Weather Review*, 129(3), 420–436.
 - Burgers, G., van Leeuwen, P. J. & Evensen, G. (1998). Analysis scheme in the
   ensemble Kalman filter. *Monthly Weather Review*, 126(6), 1719–1724.
+- Gaspari, G. & Cohn, S. E. (1999). Construction of correlation functions in
+  two and three dimensions. *Quarterly Journal of the Royal Meteorological
+  Society*, 125(554), 723–757.
+- Hamill, T. M., Whitaker, J. S. & Snyder, C. (2001). Distance-dependent
+  filtering of background error covariance estimates in an ensemble Kalman
+  filter. *Monthly Weather Review*, 129(11), 2776–2790.
 - Hamill, T. M. & Whitaker, J. S. (2005). Accounting for the error due to
   unresolved scales in ensemble data assimilation: a comparison of different
   approaches. *Monthly Weather Review*, 133(11), 3132–3147.
 - Houtekamer, P. L. & Mitchell, H. L. (1998). Data assimilation using an
   ensemble Kalman filter technique. *Monthly Weather Review*, 126(3),
   796–811.
+- Houtekamer, P. L. & Mitchell, H. L. (2001). A sequential ensemble Kalman
+  filter for atmospheric data assimilation. *Monthly Weather Review*, 129(1),
+  123–137.
 - Hunt, B. R., Kostelich, E. J. & Szunyogh, I. (2007). Efficient data
   assimilation for spatiotemporal chaos: a local ensemble transform Kalman
   filter. *Physica D*, 230(1–2), 112–126.
+- Ott, E., Hunt, B. R., Szunyogh, I., Zimin, A. V., Kostelich, E. J.,
+  Corazza, M., Kalnay, E., Patil, D. J. & Yorke, J. A. (2004). A local
+  ensemble Kalman filter for atmospheric data assimilation. *Tellus A*,
+  56(5), 415–428.
+- Sakov, P. & Bertino, L. (2011). Relation between two common localisation
+  methods for the EnKF. *Computational Geosciences*, 15(2), 225–237.
 - Sakov, P. & Oke, P. R. (2008). A deterministic formulation of the ensemble
   Kalman filter: an alternative to ensemble square root filters. *Tellus A*,
   60(2), 361–371.

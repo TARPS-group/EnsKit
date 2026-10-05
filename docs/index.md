@@ -6,8 +6,10 @@ Ensemble Kalman Inversion for derivative-free Bayesian calibration.
 :class: warning
 
 The linear operator, Gaussian conditioning and EKI layers are implemented and
-tested — you can run an inversion today. The localization layer, needed when
-the parameter dimension far exceeds the ensemble size, is not yet built.
+tested — you can run an inversion today. Domain localization, needed when the
+parameter dimension far exceeds the ensemble size, is implemented as an update
+rule ({doc}`user-guide/localization`); the redesigned EKI driver that accepts
+it is in progress.
 :::
 
 ## What problem does this solve?
@@ -157,6 +159,7 @@ user-guide/operators
 user-guide/distributions
 user-guide/maps
 user-guide/updates
+user-guide/localization
 user-guide/conditioning
 user-guide/running-an-inversion
 user-guide/writing-a-forward-model

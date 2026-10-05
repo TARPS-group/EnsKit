@@ -3,9 +3,10 @@
 Ensemble Kalman Inversion for derivative-free Bayesian calibration.
 
 **Status: pre-alpha.** The linear operator, Gaussian conditioning and EKI layers
-are implemented, tested and documented — you can run an inversion today. The
-localization layer, needed when the parameter dimension far exceeds the ensemble
-size, is not yet built.
+are implemented, tested and documented — you can run an inversion today. Domain
+localization, needed when the parameter dimension far exceeds the ensemble
+size, is implemented as an update rule (`enskit.kalman.LocalizedUpdateRule`);
+the redesigned EKI driver that accepts it is in progress.
 
 ## What it is
 
@@ -26,7 +27,7 @@ common variants, built on:
   inflation, and the driver loop, in both the approximate-sampling and the
   optimization form.
 - **Localization** for problems where the parameter dimension far exceeds the
-  ensemble size. *(planned)*
+  ensemble size.
 
 ## What it is not
 
