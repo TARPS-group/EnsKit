@@ -129,10 +129,10 @@ from enskit import toy
 
 problem = toy.exponential_decay()
 
-problem.u_dim     # 2  -- P, the number of parameters
-problem.v_dim     # 12 -- N, the number of observations
-problem.u_true    # [2.  1.5]
-problem.y[:4]     # [1.3705  0.929   0.6856  0.45  ]
+problem.parameter_dim   # 2  -- P, the number of parameters
+problem.data_dim        # 12 -- N, the number of observations
+problem.u_true          # [2.  1.5]
+problem.y[:4]           # [1.3705  0.929   0.6856  0.45  ]
 ```
 
 :::{important}
@@ -154,11 +154,12 @@ defined by how it acts on vectors rather than by a stored matrix. See
 which represents a diagonal covariance matrix.
 
 ```python
-from enskit.gauss import Gaussian
+from enskit.distribution import Gaussian
 from enskit.linalg import PSDDiagonal
 
-prior = Gaussian(mean=jnp.array([1.0, 1.0]),
-                 cov=PSDDiagonal(jnp.array([1.0, 1.0])))
+# A Gaussian over one block of parameters, named "u": (mean, covariance).
+prior = Gaussian.independent(u=(jnp.array([1.0, 1.0]),
+                                PSDDiagonal(jnp.array([1.0, 1.0]))))
 noise_cov = PSDDiagonal(jnp.full(12, 0.02 ** 2))
 ```
 
@@ -222,12 +223,13 @@ predictive distribution*: model predictions generated from parameter vectors
 sampled from the prior.
 
 ```python
-from enskit.eki import EKIState
+from enskit.algorithms import eki
 
-state = EKIState.from_prior(jax.random.key(0), problem.prior, n_members=64)
-state.ensemble.shape                     # (64, 2)
+state = eki.EKIState.from_prior(jax.random.key(0), problem.prior,
+                                n_particles=64)
+state.ensemble["u"].shape                # (64, 2)
 
-predictions = problem.forward(state.ensemble)
+predictions = problem.forward(state.ensemble["u"])
 predictions.shape                        # (64, 12)
 ```
 
@@ -258,8 +260,8 @@ narrow this spread.
 
 We now consider how to transform the prior ensemble into an approximate
 posterior ensemble. The mathematical details are beyond the scope of this
-introduction — see {doc}`../user-guide/conditioning`, and
-{doc}`../gaussian-contract` for the precise statements — but we describe the
+introduction — see {doc}`../user-guide/updates`, and
+{doc}`../distribution-contract` for the precise statements — but we describe the
 process from a high level.
 
 Pushing the prior parameter samples through the forward map yields samples
@@ -282,14 +284,14 @@ heavily on the size of the ensemble. The plots below summarize the result of
 applying the one-step update.
 
 ```python
-from enskit.eki import FixedSchedule, PathwiseUpdate, run
+from enskit import kalman
 
-one_step = run(state, problem.forward, problem.y, problem.noise_cov,
-               schedule=FixedSchedule.constant(1.0, n_steps=1),
-               update=PathwiseUpdate())
+one_step = eki.run(state, problem.forward, problem.y, problem.noise_cov,
+                   update_rule=kalman.Matheron(),
+                   schedule=eki.FixedSchedule.constant(1.0, n_steps=1))
 
-one_step.mean                            # [2.0227  1.666 ]
-one_step.ensemble.std(axis=0, ddof=1)    # [0.0835  0.7719]
+one_step.mean("u")                            # [1.9875  1.5678]
+one_step.ensemble["u"].std(axis=0, ddof=1)    # [0.0567  0.6194]
 ```
 
 `PathwiseUpdate` is one of two ensemble update methods implemented in EnsKit,
@@ -331,14 +333,16 @@ guaranteed to even approximately match; the EKI update rests on matching the
 first two moments.
 
 ```python
-from enskit.gauss import GaussianJoint
+from enskit import maps
 
-joint = GaussianJoint.from_samples(u_samples=state.ensemble,
-                                   v_samples=problem.forward(state.ensemble))
-conditioned = joint.condition(problem.y, problem.noise_cov)
+# The particles of u alongside their predictions g = G(u).
+joint = state.ensemble.pipe(maps.pushforward, problem.forward, output="g")
+conditioned = (joint.project()                    # the moment-matched Gaussian
+               .add_noise(g=problem.noise_cov)    # y = g + noise
+               .condition(g=problem.y))           # conditioned on y
 
-conditioned.mean                     # [2.0129  1.6505]
-conditioned.cov.diag() ** 0.5        # [0.0781  0.7632]
+conditioned.mean("u")                    # [1.9883  1.5709]
+conditioned.cov("u").diag() ** 0.5       # [0.0584  0.6448]
 ```
 
 ## Improving the approximation with multiple steps
@@ -421,22 +425,21 @@ tempering values (like above), we instead utilize a method that automatically
 adapts the step size as the algorithm runs.
 
 ```python
-from enskit.eki import AdaptiveESSSchedule
-
-result = run(state, problem.forward, problem.y, problem.noise_cov,
-             schedule=AdaptiveESSSchedule(), update=PathwiseUpdate())
+result = eki.run(state, problem.forward, problem.y, problem.noise_cov,
+                 update_rule=kalman.Matheron(),
+                 schedule=eki.AdaptiveESSSchedule())
 
 result.status            # 'schedule_exhausted' -- the ladder reached beta = 1
-result.n_evaluations     # 8 -- batched forward model calls
+result.n_evaluations     # 7 -- batched forward model calls
 result.beta              # 1.0
 ```
 
-This run required eight calls of the batched forward model, each on 64
-ensemble members, implying 512 parameter evaluations in total. See
+This run required seven calls of the batched forward model, each on 64
+ensemble members, implying 448 parameter evaluations in total. See
 {doc}`04-tempering-schedules` for details on the adaptive tempering levels.
 
 ```{figure} ../_generated/figures/01-bridge-tracked.png
-:alt: Nine panels, one per level of the adaptive ladder, each showing contours of the exact tempered distribution with that level's 64 ensemble members over them. The members follow the contours closely except at the second level, where the exact distribution is a curved ridge.
+:alt: Eight panels, one per level of the adaptive ladder, each showing contours of the exact tempered distribution with that level's 64 ensemble members over them. The members follow the contours closely except at the second level, where the exact distribution is a curved ridge.
 :width: 100%
 
 The contours of the (exact) bridging distributions, at the levels chosen by
@@ -462,9 +465,9 @@ through the forward model, with the noisy observations overlaid.
 Once the algorithm has run, we can investigate the output.
 
 ```python
-result.ensemble.shape                 # (64, 2)
-result.mean                           # [1.978   1.4771]
-result.ensemble.std(axis=0, ddof=1)   # [0.0414  0.0318]
+result.ensemble["u"].shape                 # (64, 2)
+result.mean("u")                            # [1.9745  1.4737]
+result.ensemble["u"].std(axis=0, ddof=1)    # [0.0346  0.0288]
 ```
 
 Since we know the true posterior in this case, we can compute how well the EKI
@@ -474,15 +477,15 @@ the EKI estimates.
 
 ```python
 import jax.numpy as jnp
-from enskit.eki import misfits
 
 amp = jnp.linspace(1.70, 2.25, 400)
 rate = jnp.linspace(1.25, 1.70, 400)
 A, R = jnp.meshgrid(amp, rate, indexing="ij")
 grid = jnp.stack([A.ravel(), R.ravel()], axis=-1)      # (160000, 2)
 
-log_density = (problem.prior.log_density(grid)
-               - misfits(problem.y, problem.forward(grid), problem.noise_cov))
+log_density = (problem.prior.log_density(u=grid)
+               - eki.misfits(problem.y, problem.forward(grid),
+                             problem.noise_cov))
 weights = jnp.exp(log_density - log_density.max())
 weights = weights / weights.sum()
 
@@ -496,12 +499,11 @@ jnp.sqrt(jnp.diag(exact_cov))         # [0.0366  0.0317]
 
 | | mean | standard deviation | correlation |
 | --- | --- | --- | --- |
-| EKI ensemble | `[1.9780, 1.4771]` | `[0.0414, 0.0318]` | 0.864 |
+| EKI ensemble | `[1.9745, 1.4737]` | `[0.0346, 0.0288]` | 0.727 |
 | true posterior | `[1.9769, 1.4719]` | `[0.0366, 0.0317]` | 0.822 |
 
-The mean agrees to within 0.006 in both parameters, and the decay rate's
-spread to within a fraction of a percent; the amplitude's spread comes out
-about 13% too wide.
+The mean agrees to within 0.003 in both parameters, and the spreads come out
+about 5% too narrow in the amplitude and 9% too narrow in the rate.
 
 One thing to keep in mind is that the ensemble samples are not independent:
 the EKI update couples them through the sample mean and covariance estimates.

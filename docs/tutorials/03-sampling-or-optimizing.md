@@ -19,11 +19,12 @@ The problem and the initial ensemble are the ones the previous two pages used:
 ```python
 import enskit
 import jax
-from enskit import toy
-from enskit.eki import EKIState
+from enskit import kalman, toy
+from enskit.algorithms import eki
 
 problem = toy.exponential_decay()
-state = EKIState.from_prior(jax.random.key(0), problem.prior, n_members=64)
+state = eki.EKIState.from_prior(jax.random.key(0), problem.prior,
+                                n_particles=64)
 ```
 
 ## Two destinations on one ladder
@@ -56,15 +57,14 @@ A budget of $\beta = 1$, an adaptive ladder, and no stopping rule — which is
 what {doc}`01-first-inversion` and {doc}`02-reading-a-run` used.
 
 ```python
-from enskit.eki import AdaptiveESSSchedule, run
+sampled = eki.run(state, problem.forward, problem.y, problem.noise_cov,
+                  update_rule=kalman.SymmetricSquareRoot(),
+                  schedule=eki.AdaptiveESSSchedule())
 
-sampled = run(state, problem.forward, problem.y, problem.noise_cov,
-              schedule=AdaptiveESSSchedule())
-
-sampled.beta                             # 1.0
-sampled.budget_complete                  # True
-sampled.mean                             # [1.9802  1.4741]
-sampled.ensemble.std(axis=0, ddof=1)     # [0.0396  0.0363]
+sampled.beta                                  # 1.0
+sampled.budget_complete                       # True
+sampled.mean("u")                             # [1.9794  1.4737]
+sampled.ensemble["u"].std(axis=0, ddof=1)     # [0.0374  0.0338]
 ```
 
 `AdaptiveESSSchedule` has `beta_target=1.0` by default, and the driver
@@ -77,23 +77,22 @@ evaluations.
 Unit steps, no budget, and a rule that decides when to stop.
 
 ```python
-from enskit.eki import DiscrepancyStop, FixedSchedule
-
-fit = run(state, problem.forward, problem.y, problem.noise_cov,
-          schedule=FixedSchedule.constant(1.0, n_steps=200),
-          stop=DiscrepancyStop(tau=1.0))
+fit = eki.run(state, problem.forward, problem.y, problem.noise_cov,
+              update_rule=kalman.SymmetricSquareRoot(),
+              schedule=eki.FixedSchedule.constant(1.0, n_steps=200),
+              stop=eki.DiscrepancyStop(tau=1.0))
 
 fit.status                # 'stopping_rule'
-fit.beta                  # 3.0
-fit.n_evaluations         # 4
-fit.n_completed_steps     # 3
-fit.mean                  # [1.9819  1.4758]
+fit.beta                  # 2.0
+fit.n_evaluations         # 3
+fit.n_completed_steps     # 2
+fit.mean("u")             # [1.9942  1.5117]
 ```
 
 `FixedSchedule.constant(1.0, n_steps=200)` is a ladder of up to 200 unit
 steps. It has no budget, so it does not stop at $\beta = 1$; the 200 is an
 upper bound on the run's length, and the stopping rule is expected to end it
-first. Here it ended after three steps, at $\beta = 3$.
+first. Here it ended after two steps, at $\beta = 2$.
 
 **Why a stopping rule is not optional.** Left to run, the optimization form
 keeps fitting. It cannot distinguish signal from noise, so past a point it is
@@ -115,10 +114,10 @@ about $N/2$, which is 6 for this problem's twelve observations.
 prediction — `center_misfit` — drops to that level. In this run:
 
 ```python
-fit.stacked.center_misfit    # [9654.0285  577.3526  6.5196  4.5978]
+fit.stacked.center_misfit    # [35993.2811  257.3198  5.6266]
 ```
 
-6.52 is above the threshold of 6, so the run continued; 4.60 is below it, so
+257.32 is above the threshold of 6, so the run continued; 5.63 is below it, so
 it stopped. `tau` is a tolerance on that threshold, which becomes
 $\tau^2 N / 2$: `tau=2.0` stops at 24 instead of 6, which is a more
 conservative choice and, on this problem, stops one step earlier.
@@ -142,17 +141,17 @@ The target's mean is `[1.9769, 1.4719]` and its standard deviations are
 
 | run | reached | forward calls | error in the mean | spread, relative to the target |
 | --- | --- | --- | --- | --- |
-| sampling, adaptive ladder | $\beta = 1$ | 6 | 0.0033 | `[1.08, 1.14]` |
-| optimization, `tau=2` | $\beta = 2$ | 3 | 0.0528 | `[1.40, 2.94]` |
-| optimization, `tau=1` | $\beta = 3$ | 4 | 0.0049 | `[0.87, 0.98]` |
-| optimization, 30 unit steps | $\beta = 30$ | 30 | 0.0005 | `[0.19, 0.19]` |
+| sampling, adaptive ladder | $\beta = 1$ | 6 | 0.0025 | `[1.02, 1.07]` |
+| optimization, `tau=2` | $\beta = 2$ | 3 | 0.0397 | `[1.15, 2.94]` |
+| optimization, `tau=1` | $\beta = 2$ | 3 | 0.0397 | `[1.15, 2.94]` |
+| optimization, 30 unit steps | $\beta = 30$ | 30 | 0.0006 | `[0.19, 0.19]` |
 
 ```{figure} ../_generated/figures/03-two-forms.png
 :alt: Left, three ensembles in the amplitude-rate plane against contours of the target distribution. Right, ensemble spread against beta for the optimization form, on a log scale, with the stopping point marked.
 :width: 100%
 
 Left, the sampling form at $\beta = 1$, the optimization form stopped at
-$\beta = 3$, and the same run continued to $\beta = 30$, against contours of
+$\beta = 2$, and the same run continued to $\beta = 30$, against contours of
 the target distribution. Right, the optimization form's spread as $\beta$
 grows, with the level at which `DiscrepancyStop(tau=1.0)` fires and the
 sampling form's spread for comparison.
@@ -160,7 +159,7 @@ sampling form's spread for comparison.
 
 Read the last two rows together. The optimization form run to $\beta = 30$
 finds the best-fitting parameters almost exactly — the smallest error in the
-mean of the four rows, six times smaller than the sampling form's — and
+mean of the four rows, four times smaller than the sampling form's — and
 reports a spread five times too small. That combination is the whole character of the
 optimization form: an excellent point estimate, and an uncertainty that is not
 one. Its terminal spread measures how far the ensemble has converged
@@ -184,10 +183,10 @@ how well the parameters are known. Use `AdaptiveESSSchedule()`, leave
 best-fitting configuration, a starting point for something else, or a
 calibration to be validated separately. Use
 `FixedSchedule.constant(1.0, n_steps=…)` with a `DiscrepancyStop`. Read
-`result.mean`, and do not read the spread as uncertainty.
+`result.mean("u")`, and do not read the spread as uncertainty.
 
 On this problem the optimization form is also the cheaper of the two, at three
-or four forward evaluations against six. That ordering is not guaranteed — it
+forward evaluations against six. That ordering is not guaranteed — it
 depends on how fine a ladder the sampling form needs, which is the subject of
 {doc}`04-tempering-schedules` — but the optimization form asks less of the
 ladder, so it is the usual direction.
@@ -198,17 +197,18 @@ A stopping rule fires on the misfits, and does not know whether the schedule
 has a budget. So it can end a sampling run partway up the ladder:
 
 ```python
-trap = run(state, problem.forward, problem.y, problem.noise_cov,
-           schedule=AdaptiveESSSchedule(),          # budget: beta = 1
-           stop=DiscrepancyStop(tau=1.0))           # fires on the misfit
+trap = eki.run(state, problem.forward, problem.y, problem.noise_cov,
+               update_rule=kalman.SymmetricSquareRoot(),
+               schedule=eki.AdaptiveESSSchedule(),     # budget: beta = 1
+               stop=eki.DiscrepancyStop(tau=1.0))      # fires on the misfit
 
-trap.beta                                # 0.0677
-trap.stop_fired                          # True
-trap.budget_complete                     # False
-trap.ensemble.std(axis=0, ddof=1)        # [0.1504  0.1431]
+trap.beta                                     # 0.0571
+trap.stop_fired                               # True
+trap.budget_complete                          # False
+trap.ensemble["u"].std(axis=0, ddof=1)        # [0.1461  0.1454]
 ```
 
-The run ended at $\beta = 0.068$, which is neither destination. Its ensemble
+The run ended at $\beta = 0.057$, which is neither destination. Its ensemble
 describes a distribution a small fraction of the way up the ladder, and its
 spread is about four times the target's. Nothing raises, because both
 arguments are legal. The pair `stop_fired=True` with `budget_complete=False`
@@ -238,7 +238,7 @@ no guarantee attached. Two consequences to carry:
   lives in the ensemble's spread, not in any individual member.
 
 If you want to check the machinery rather than illustrate it, use a problem
-with an exact answer. `toy.linear_gaussian(u_dim=…, v_dim=…)` is affine with a
+with an exact answer. `toy.linear_gaussian(parameter_dim=…, data_dim=…)` is affine with a
 Gaussian prior, and its `posterior()` returns the exact target at
 $\beta = 1$ — or `posterior(beta=…)` at any level, so an intermediate step is
 checkable too. {doc}`../user-guide/toy-models` works that comparison

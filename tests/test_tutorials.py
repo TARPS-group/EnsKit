@@ -25,6 +25,12 @@ nonlinear problem has a reference at all.
 The identity behind the ``center_misfit`` gap is *not* re-tested here — it is
 ``tests/test_eki.py::test_11_the_center_misfit_differs_from_the_mean_by_exactly_the_spread_term``.
 This file pins only the numbers tutorial 2 prints.
+
+Section 5 holds the assertions whose page claims no longer hold since PR 7
+changed the prior draw (``EKIState.from_prior`` now splits its key, and
+``Gaussian.sample`` splits it again). Each is a strict ``xfail`` naming the
+sentence it pins, so the claim is neither deleted nor silently passing, and
+the test fails once the page or the draw makes it true again.
 """
 from __future__ import annotations
 
@@ -38,20 +44,18 @@ import pytest
 from conftest import prints_as
 
 import enskit  # noqa: F401  -- enables x64 before any array exists
-from enskit import toy
-from enskit.eki import (
+from enskit import kalman, maps, toy
+from enskit.algorithms import eki
+from enskit.algorithms.eki import (
     AdaptiveESSSchedule,
     DiscrepancyStop,
     EKIState,
     FixedSchedule,
-    PathwiseUpdate,
-    TransformUpdate,
     effective_sample_size,
     iterate,
-    misfits,
     run,
 )
-from enskit.gauss import Gaussian, GaussianJoint
+from enskit.distribution import Gaussian
 from enskit.linalg import PSDDiagonal
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "docs"))
@@ -59,6 +63,23 @@ import figures  # noqa: E402  -- docs/figures.py, on the path just above
 
 #: The pages this file covers, for the reference scan below.
 TUTORIAL_DIR = Path(__file__).resolve().parents[1] / "docs" / "tutorials"
+
+#: The update rules the pages run: tutorial 1's, and tutorials 2 and 3's.
+MATHERON = kalman.Matheron()
+SQUARE_ROOT = kalman.SymmetricSquareRoot()
+
+
+def _state(n_particles=64):
+    """The initial state every page draws: key 0, from the problem's prior."""
+    problem = toy.exponential_decay()
+    return EKIState.from_prior(
+        jax.random.key(0), problem.prior, n_particles=n_particles
+    )
+
+
+def _sd(ensemble):
+    """Block ``"u"``'s per-coordinate standard deviation, as the pages print it."""
+    return np.asarray(ensemble["u"]).std(axis=0, ddof=1)
 
 
 # ===========================================================================
@@ -70,7 +91,7 @@ def test_1_tutorial_1_blocks_run():
     """Every runnable block of "From approximate conditioning to EKI", in order."""
     problem = toy.exponential_decay()
 
-    assert (problem.u_dim, problem.v_dim) == (2, 12)
+    assert (problem.parameter_dim, problem.data_dim) == (2, 12)
     prints_as(problem.u_true, [2.0, 1.5])
     prints_as(problem.y[:4], [1.3705, 0.929, 0.6856, 0.45])
 
@@ -95,47 +116,52 @@ def test_1_tutorial_1_blocks_run():
     assert jnp.array_equal(vmapped(ensemble), problem.forward(ensemble))
 
     # The prior and the noise the page writes out are the problem's own.
-    prior = Gaussian(
-        mean=jnp.array([1.0, 1.0]), cov=PSDDiagonal(jnp.array([1.0, 1.0]))
+    prior = Gaussian.independent(
+        u=(jnp.array([1.0, 1.0]), PSDDiagonal(jnp.array([1.0, 1.0])))
     )
     noise_cov = PSDDiagonal(jnp.full(12, 0.02**2))
-    assert jnp.array_equal(prior.mean, problem.prior.mean)
-    assert jnp.array_equal(prior.cov.to_dense(), problem.prior.cov.to_dense())
+    assert prior.names == problem.prior.names == ("u",)
+    assert jnp.array_equal(prior.mean("u"), problem.prior.mean("u"))
+    assert jnp.array_equal(
+        prior.cov("u").to_dense(), problem.prior.cov("u").to_dense()
+    )
     assert jnp.array_equal(noise_cov.to_dense(), problem.noise_cov.to_dense())
     # The page states these as m0 = [1, 1], C0 = I, Sigma = 0.02^2 I.
-    assert jnp.array_equal(prior.cov.to_dense(), jnp.eye(2))
+    assert jnp.array_equal(prior.cov("u").to_dense(), jnp.eye(2))
     assert jnp.array_equal(noise_cov.to_dense(), 0.02**2 * jnp.eye(12))
 
-    state = EKIState.from_prior(jax.random.key(0), problem.prior, n_members=64)
-    assert state.ensemble.shape == (64, 2)
-    predictions = problem.forward(state.ensemble)
+    state = eki.EKIState.from_prior(
+        jax.random.key(0), problem.prior, n_particles=64
+    )
+    assert state.ensemble["u"].shape == (64, 2)
+    predictions = problem.forward(state.ensemble["u"])
     assert predictions.shape == (64, 12)
 
-    one_step = run(
+    one_step = eki.run(
         state,
         problem.forward,
         problem.y,
         problem.noise_cov,
-        schedule=FixedSchedule.constant(1.0, n_steps=1),
-        update=PathwiseUpdate(),
+        update_rule=kalman.Matheron(),
+        schedule=eki.FixedSchedule.constant(1.0, n_steps=1),
     )
-    prints_as(one_step.mean, [2.0227, 1.666])
-    prints_as(one_step.ensemble.std(axis=0, ddof=1), [0.0835, 0.7719])
+    prints_as(one_step.mean("u"), [1.9875, 1.5678])
+    prints_as(one_step.ensemble["u"].std(axis=0, ddof=1), [0.0567, 0.6194])
 
-    # The Gaussian the update conditions, which the members are drawn from.
-    joint = GaussianJoint.from_samples(
-        u_samples=state.ensemble, v_samples=problem.forward(state.ensemble)
+    # The Gaussian the update conditions, which the particles are drawn from.
+    joint = state.ensemble.pipe(maps.pushforward, problem.forward, output="g")
+    conditioned = (
+        joint.project().add_noise(g=problem.noise_cov).condition(g=problem.y)
     )
-    conditioned = joint.condition(problem.y, problem.noise_cov)
-    prints_as(conditioned.mean, [2.0129, 1.6505])
-    prints_as(conditioned.cov.diag() ** 0.5, [0.0781, 0.7632])
+    prints_as(conditioned.mean("u"), [1.9883, 1.5709])
+    prints_as(conditioned.cov("u").diag() ** 0.5, [0.0584, 0.6448])
 
     # "mean and covariance that should approximately match the sample mean and
     # covariance of the ensemble above (they would match exactly if we had
     # instead used `TransformUpdate`)." Both halves are asserted: approximate
-    # under the pathwise update, exact under the transform.
-    gaussian_sd = np.sqrt(np.asarray(conditioned.cov.diag()))
-    ensemble_sd = np.asarray(one_step.ensemble.std(axis=0, ddof=1))
+    # under the Matheron update, exact under the symmetric square root.
+    gaussian_sd = np.sqrt(np.asarray(conditioned.cov("u").diag()))
+    ensemble_sd = _sd(one_step.ensemble)
     relative = np.abs(ensemble_sd - gaussian_sd) / gaussian_sd
     assert relative.max() < 0.08, relative
     assert relative.max() > 1e-3, relative  # approximate, not exact
@@ -145,29 +171,33 @@ def test_1_tutorial_1_blocks_run():
         problem.forward,
         problem.y,
         problem.noise_cov,
+        update_rule=SQUARE_ROOT,
         schedule=FixedSchedule.constant(1.0, n_steps=1),
-        update=TransformUpdate(),
     )
-    exact_cov = np.cov(np.asarray(deterministic.ensemble), rowvar=False, ddof=1)
-    gaussian_cov = np.asarray(conditioned.cov.to_dense())
-    assert float(jnp.abs(conditioned.mean - deterministic.mean).max()) < 1e-14
+    exact_cov = np.cov(np.asarray(deterministic.ensemble["u"]), rowvar=False, ddof=1)
+    gaussian_cov = np.asarray(conditioned.cov("u").to_dense())
+    assert (
+        float(jnp.abs(conditioned.mean("u") - deterministic.mean("u")).max())
+        < 1e-14
+    )
     assert np.abs(gaussian_cov - exact_cov).max() < 1e-15
 
-    result = run(
+    result = eki.run(
         state,
         problem.forward,
         problem.y,
         problem.noise_cov,
-        schedule=AdaptiveESSSchedule(),
-        update=PathwiseUpdate(),
+        update_rule=kalman.Matheron(),
+        schedule=eki.AdaptiveESSSchedule(),
     )
     assert result.status == "schedule_exhausted"
-    assert result.n_evaluations == 8
+    assert result.n_evaluations == 7
     assert float(result.beta) == 1.0
-    assert result.n_evaluations * 64 == 512
-    assert result.ensemble.shape == (64, 2)
-    prints_as(result.mean, [1.978, 1.4771])
-    prints_as(result.ensemble.std(axis=0, ddof=1), [0.0414, 0.0318])
+    # "This run required seven calls ... 448 parameter evaluations in total."
+    assert result.n_evaluations * 64 == 448
+    assert result.ensemble["u"].shape == (64, 2)
+    prints_as(result.mean("u"), [1.9745, 1.4737])
+    prints_as(result.ensemble["u"].std(axis=0, ddof=1), [0.0346, 0.0288])
 
     # The grid block the page closes on, and the table it fills in.
     amp = jnp.linspace(1.70, 2.25, 400)
@@ -176,7 +206,7 @@ def test_1_tutorial_1_blocks_run():
     grid = jnp.stack([A.ravel(), R.ravel()], axis=-1)
     assert grid.shape == (160_000, 2)
 
-    log_density = problem.prior.log_density(grid) - misfits(
+    log_density = problem.prior.log_density(u=grid) - eki.misfits(
         problem.y, problem.forward(grid), problem.noise_cov
     )
     weights = jnp.exp(log_density - log_density.max())
@@ -202,34 +232,37 @@ def test_1_tutorial_1_blocks_run():
     exact_corr = float(
         exact_cov[0, 1] / jnp.sqrt(exact_cov[0, 0] * exact_cov[1, 1])
     )
-    ensemble = np.asarray(result.ensemble)
+    ensemble = np.asarray(result.ensemble["u"])
     prints_as(exact_corr, 0.822, 3)
-    prints_as(float(np.corrcoef(ensemble.T)[0, 1]), 0.864, 3)
+    prints_as(float(np.corrcoef(ensemble.T)[0, 1]), 0.727, 3)
 
-    # "The mean agrees to within 0.006 in both parameters, and the decay
-    # rate's spread to within a fraction of a percent; the amplitude's spread
-    # comes out about 13% too wide."
-    assert np.abs(np.asarray(result.mean) - np.asarray(exact_mean)).max() < 0.006
-    sd_ratio = np.asarray(result.ensemble.std(axis=0, ddof=1)) / exact_sd
-    assert abs(sd_ratio[1] - 1.0) < 0.01, sd_ratio
-    assert 1.10 < sd_ratio[0] < 1.16, sd_ratio
+    # "The mean agrees to within 0.003 in both parameters, and the spreads
+    # come out about 5% too narrow in the amplitude and 9% too narrow in the
+    # rate."
+    mean_error = np.abs(np.asarray(result.mean("u")) - np.asarray(exact_mean))
+    assert mean_error.max() < 0.003, mean_error
+    sd_ratio = _sd(result.ensemble) / exact_sd
+    prints_as(1.0 - sd_ratio, [0.05, 0.09], 2)
 
     # The truth sits inside the ensemble's spread in both parameters, which is
     # the reason the page can show `u_true` on the figure without apology.
-    error = np.abs(np.asarray(result.mean) - np.asarray(problem.u_true))
-    assert np.all(error < np.asarray(result.ensemble.std(axis=0, ddof=1)))
+    error = np.abs(np.asarray(result.mean("u")) - np.asarray(problem.u_true))
+    assert np.all(error < _sd(result.ensemble))
 
 
 def test_1_tutorial_2_blocks_run():
     """Every runnable block of "Reading a run", in order."""
     problem = toy.exponential_decay()
-    state = EKIState.from_prior(jax.random.key(0), problem.prior, n_members=64)
-    result = run(
+    state = eki.EKIState.from_prior(
+        jax.random.key(0), problem.prior, n_particles=64
+    )
+    result = eki.run(
         state,
         problem.forward,
         problem.y,
         problem.noise_cov,
-        schedule=AdaptiveESSSchedule(),
+        update_rule=kalman.SymmetricSquareRoot(),
+        schedule=eki.AdaptiveESSSchedule(),
     )
 
     assert result.status == "schedule_exhausted"
@@ -239,10 +272,12 @@ def test_1_tutorial_2_blocks_run():
     assert result.min_n_valid == 64
     assert result.n_evaluations == 6
     assert result.n_completed_steps == 6
+    # "in particle evaluations `n_evaluations * n_particles` — 384 here".
+    assert result.n_evaluations * state.n_particles == 384
 
     history = result.stacked
-    prints_as(history.beta, [0.0, 0.001, 0.0028, 0.0115, 0.0677, 0.5514])
-    prints_as(history.increment, [0.001, 0.0018, 0.0087, 0.0562, 0.4837, 0.4486])
+    prints_as(history.beta, [0.0, 0.001, 0.0029, 0.0112, 0.0571, 0.3152])
+    prints_as(history.increment, [0.001, 0.0019, 0.0083, 0.0459, 0.2581, 0.6848])
 
     # The eleven fields the page's table groups.
     for field in (
@@ -260,16 +295,19 @@ def test_1_tutorial_2_blocks_run():
     ):
         assert np.asarray(getattr(history, field)).shape == (6,)
 
-    prints_as(history.misfit_min[-1], 4.5927)
-    prints_as(history.misfit_mean[-1], 6.7961)
-    prints_as(history.misfit_max[-1], 43.2523)
-    assert float(history.misfit_max[-1] / history.misfit_mean[-1]) > 6.0
+    prints_as(history.misfit_min[-1], 4.5889)
+    prints_as(history.misfit_mean[-1], 8.1181)
+    prints_as(history.misfit_max[-1], 69.4678)
+    # "The worst particle fits eight times worse than the average one."
+    assert float(history.misfit_max[-1] / history.misfit_mean[-1]) > 8.0
+    # "the first step's misfit is 5.9e5"
+    prints_as(history.misfit_mean[0] / 1e5, 5.9, 1)
 
     evaluation = result.last_evaluation
-    prints_as(evaluation.misfits[:4], [5.0189, 29.4126, 4.9678, 4.7952])
-    prints_as(evaluation.center_misfit, 4.6065)
-    prints_as(evaluation.misfits.mean(), 6.7961)
-    prints_as(evaluation.misfits.mean() - evaluation.center_misfit, 2.1896)
+    prints_as(evaluation.misfits[:4], [5.5138, 28.2639, 4.721, 5.1447])
+    prints_as(evaluation.center_misfit, 4.6114)
+    prints_as(evaluation.misfits.mean(), 8.1181)
+    prints_as(evaluation.misfits.mean() - evaluation.center_misfit, 3.5066)
 
     # The page's plotting block. matplotlib is on the Agg backend, since
     # importing `figures` above set it.
@@ -280,16 +318,18 @@ def test_1_tutorial_2_blocks_run():
     plt.yscale("log")
     plt.close(figure)
 
-    fitted = Gaussian.from_samples(result.ensemble)
-    prints_as(fitted.mean, [1.9802, 1.4741])
-    prints_as(fitted.cov.diag() ** 0.5, [0.0396, 0.0363])
-    correlation = float(np.corrcoef(np.asarray(result.ensemble).T)[0, 1])
-    prints_as(correlation, 0.83, decimals=2)
+    fitted = result.ensemble.project()
+    prints_as(fitted.mean("u"), [1.9794, 1.4737])
+    prints_as(fitted.cov("u").diag() ** 0.5, [0.0374, 0.0338])
+    correlation = float(np.corrcoef(np.asarray(result.ensemble["u"]).T)[0, 1])
+    prints_as(correlation, 0.80, decimals=2)
 
-    phi = misfits(problem.y, problem.forward(result.ensemble), problem.noise_cov)
-    prints_as(phi.mean(), 5.7186)
-    prints_as(effective_sample_size(phi, 0.1), 61.7289)
-    prints_as(effective_sample_size(phi, 1.0), 57.1571)
+    phi = eki.misfits(
+        problem.y, problem.forward(result.ensemble["u"]), problem.noise_cov
+    )
+    prints_as(phi.mean(), 5.6556)
+    prints_as(eki.effective_sample_size(phi, 0.1), 62.458)
+    prints_as(eki.effective_sample_size(phi, 1.0), 52.945)
 
     # The note on the first step's effective sample size and the increment
     # floor: the schedule wanted a shorter step than 1e-3 and could not take
@@ -301,66 +341,76 @@ def test_1_tutorial_2_blocks_run():
                 problem.forward,
                 problem.y,
                 problem.noise_cov,
+                update_rule=SQUARE_ROOT,
                 schedule=AdaptiveESSSchedule(),
             )
         )
     )
     _, record, first_evaluation = first
     assert float(record.increment) == pytest.approx(1e-3)
-    prints_as(record.ess, 24.5662)
-    prints_as(effective_sample_size(first_evaluation.misfits, 1e-4), 53.32, 2)
+    prints_as(record.ess, 24.5511)
+    prints_as(effective_sample_size(first_evaluation.misfits, 1e-4), 47.03, 2)
 
 
 def test_1_tutorial_3_blocks_run():
     """Every runnable block of "Sampling or optimizing", in order."""
     problem = toy.exponential_decay()
-    state = EKIState.from_prior(jax.random.key(0), problem.prior, n_members=64)
+    state = eki.EKIState.from_prior(
+        jax.random.key(0), problem.prior, n_particles=64
+    )
 
-    sampled = run(
+    sampled = eki.run(
         state,
         problem.forward,
         problem.y,
         problem.noise_cov,
-        schedule=AdaptiveESSSchedule(),
+        update_rule=kalman.SymmetricSquareRoot(),
+        schedule=eki.AdaptiveESSSchedule(),
     )
     assert float(sampled.beta) == 1.0
     assert sampled.budget_complete is True
-    prints_as(sampled.mean, [1.9802, 1.4741])
-    prints_as(sampled.ensemble.std(axis=0, ddof=1), [0.0396, 0.0363])
-    assert AdaptiveESSSchedule().beta_target == 1.0
+    # "Here it took six forward evaluations."
+    assert sampled.n_evaluations == 6
+    prints_as(sampled.mean("u"), [1.9794, 1.4737])
+    prints_as(sampled.ensemble["u"].std(axis=0, ddof=1), [0.0374, 0.0338])
+    assert eki.AdaptiveESSSchedule().beta_target == 1.0
 
-    fit = run(
+    fit = eki.run(
         state,
         problem.forward,
         problem.y,
         problem.noise_cov,
-        schedule=FixedSchedule.constant(1.0, n_steps=200),
-        stop=DiscrepancyStop(tau=1.0),
+        update_rule=kalman.SymmetricSquareRoot(),
+        schedule=eki.FixedSchedule.constant(1.0, n_steps=200),
+        stop=eki.DiscrepancyStop(tau=1.0),
     )
     assert fit.status == "stopping_rule"
-    assert float(fit.beta) == 3.0
-    assert fit.n_evaluations == 4
-    assert fit.n_completed_steps == 3
-    prints_as(fit.mean, [1.9819, 1.4758])
-    prints_as(fit.stacked.center_misfit, [9654.0285, 577.3526, 6.5196, 4.5978])
-    # The page reads the threshold off those values: 6.52 above, 4.60 below.
-    threshold = 1.0**2 * problem.v_dim / 2
+    assert float(fit.beta) == 2.0
+    assert fit.n_evaluations == 3
+    assert fit.n_completed_steps == 2
+    prints_as(fit.mean("u"), [1.9942, 1.5117])
+    prints_as(fit.stacked.center_misfit, [35993.2811, 257.3198, 5.6266])
+    # The page reads the threshold off those values: 257.32 above, 5.63 below.
+    threshold = 1.0**2 * problem.data_dim / 2
     assert threshold == 6.0
     assert float(fit.stacked.center_misfit[-2]) > threshold
     assert float(fit.stacked.center_misfit[-1]) <= threshold
 
-    trap = run(
+    trap = eki.run(
         state,
         problem.forward,
         problem.y,
         problem.noise_cov,
-        schedule=AdaptiveESSSchedule(),
-        stop=DiscrepancyStop(tau=1.0),
+        update_rule=kalman.SymmetricSquareRoot(),
+        schedule=eki.AdaptiveESSSchedule(),
+        stop=eki.DiscrepancyStop(tau=1.0),
     )
-    prints_as(trap.beta, 0.0677)
+    prints_as(trap.beta, 0.0571)
+    # "The run ended at beta = 0.057"
+    prints_as(trap.beta, 0.057, 3)
     assert trap.stop_fired is True
     assert trap.budget_complete is False
-    prints_as(trap.ensemble.std(axis=0, ddof=1), [0.1504, 0.1431])
+    prints_as(trap.ensemble["u"].std(axis=0, ddof=1), [0.1461, 0.1454])
 
 
 def test_2_tutorial_3s_comparison_table():
@@ -373,7 +423,7 @@ def test_2_tutorial_3s_comparison_table():
     moving would invert one of those readings without changing the prose.
     """
     problem = toy.exponential_decay()
-    state = EKIState.from_prior(jax.random.key(0), problem.prior, n_members=64)
+    state = _state()
     reference_mean, reference_sd = figures._tempered_moments(1.0)
     prints_as(reference_mean, [1.9769, 1.4719])
     prints_as(reference_sd, [0.0366, 0.0317])
@@ -393,49 +443,56 @@ def test_2_tutorial_3s_comparison_table():
     reached, calls, mean_error, sd_ratio = {}, {}, {}, {}
     for name, kwargs in rows.items():
         result = run(
-            state, problem.forward, problem.y, problem.noise_cov, **kwargs
+            state,
+            problem.forward,
+            problem.y,
+            problem.noise_cov,
+            update_rule=SQUARE_ROOT,
+            **kwargs,
         )
         reached[name] = float(result.beta)
         calls[name] = result.n_evaluations
         mean_error[name] = float(
-            np.abs(np.asarray(result.mean) - reference_mean).max()
+            np.abs(np.asarray(result.mean("u")) - reference_mean).max()
         )
-        sd_ratio[name] = np.asarray(
-            result.ensemble.std(axis=0, ddof=1)
-        ) / reference_sd
+        sd_ratio[name] = _sd(result.ensemble) / reference_sd
 
-    assert reached == {"sampling": 1.0, "tau2": 2.0, "tau1": 3.0, "beta30": 30.0}
-    assert calls == {"sampling": 6, "tau2": 3, "tau1": 4, "beta30": 30}
-    prints_as(mean_error["sampling"], 0.0033, 4)
-    prints_as(mean_error["tau2"], 0.0528, 4)
-    prints_as(mean_error["tau1"], 0.0049, 4)
-    prints_as(mean_error["beta30"], 0.0005, 4)
-    prints_as(sd_ratio["sampling"], [1.08, 1.14], 2)
-    prints_as(sd_ratio["tau2"], [1.4, 2.94], 2)
-    prints_as(sd_ratio["tau1"], [0.87, 0.98], 2)
+    assert reached == {"sampling": 1.0, "tau2": 2.0, "tau1": 2.0, "beta30": 30.0}
+    assert calls == {"sampling": 6, "tau2": 3, "tau1": 3, "beta30": 30}
+    prints_as(mean_error["sampling"], 0.0025, 4)
+    prints_as(mean_error["tau2"], 0.0397, 4)
+    prints_as(mean_error["tau1"], 0.0397, 4)
+    prints_as(mean_error["beta30"], 0.0006, 4)
+    prints_as(sd_ratio["sampling"], [1.02, 1.07], 2)
+    prints_as(sd_ratio["tau2"], [1.15, 2.94], 2)
+    prints_as(sd_ratio["tau1"], [1.15, 2.94], 2)
     prints_as(sd_ratio["beta30"], [0.19, 0.19], 2)
 
-    # "the smallest error in the mean of the four rows, six times smaller than
-    # the sampling form's".
+    # "the smallest error in the mean of the four rows, four times smaller
+    # than the sampling form's".
     assert mean_error["beta30"] == min(mean_error.values())
-    assert 5.5 < mean_error["sampling"] / mean_error["beta30"] < 7.5
-    # "a spread five times too small", and "within 13% of the target's".
+    assert 3.5 < mean_error["sampling"] / mean_error["beta30"] < 4.5
+    # "a spread five times too small". The `tau=1` row's "within 13% of the
+    # target's" no longer holds: see `test_8_...tau_1_spread...`.
     assert 4.5 < 1.0 / sd_ratio["beta30"].max() < 5.5
-    assert np.abs(sd_ratio["tau1"] - 1.0).max() < 0.13
-    # "nearly three times too large in the rate" one step earlier: the point
-    # is that the spread is set by where the run stopped, not by the target.
+    # "nearly three times too large in the rate" at `tau=2`: the point is that
+    # the spread is set by where the run stopped, not by the target.
     assert sd_ratio["tau2"][1] > 2.8
+    # "On this problem the optimization form is also the cheaper of the two,
+    # at three forward evaluations against six."
+    assert calls["tau2"] == calls["tau1"] == 3 < calls["sampling"] == 6
     # "the trap's spread is about four times the target's".
     trap = run(
         state,
         problem.forward,
         problem.y,
         problem.noise_cov,
+        update_rule=SQUARE_ROOT,
         schedule=AdaptiveESSSchedule(),
         stop=DiscrepancyStop(tau=1.0),
     )
-    trap_ratio = np.asarray(trap.ensemble.std(axis=0, ddof=1)) / reference_sd
-    prints_as(trap_ratio, [4.11, 4.51], 2)
+    trap_ratio = _sd(trap.ensemble) / reference_sd
+    prints_as(trap_ratio, [3.99, 4.58], 2)
 
 
 # ===========================================================================
@@ -473,16 +530,16 @@ def test_3_every_figure_a_page_references_is_generated():
 def test_4_the_prior_predictive_figure_plots_what_tutorial_1_says():
     """Tutorial 1's opening figure, and the two counts in its caption."""
     data = figures.prior_predictive()[1]
-    assert data["n_members"] == 64
+    assert data["n_particles"] == 64
     # The caption says "some curves leave the panel, and some have a negative
     # decay rate", so that is what is asserted; the exact counts follow as a
     # regression pin on the picture rather than on the prose, since a figure
     # in which every curve or no curve left the panel would be a different
     # figure making a different point.
-    assert 0 < data["prior_curves_leaving_panel"] < data["n_members"]
-    assert 0 < data["prior_negative_rates"] < data["n_members"]
-    assert data["prior_curves_leaving_panel"] == 7
-    assert data["prior_negative_rates"] == 9
+    assert 0 < data["prior_curves_leaving_panel"] < data["n_particles"]
+    assert 0 < data["prior_negative_rates"] < data["n_particles"]
+    assert data["prior_curves_leaving_panel"] == 12
+    assert data["prior_negative_rates"] == 13
     # The panel's own limits, which decide that first count.
     prints_as(data["prediction_ylim"], [-0.6, 2.4], 2)
     # "the noise in this problem is quite small, so the bars are obscured by
@@ -495,27 +552,28 @@ def test_4_the_prior_predictive_figure_plots_what_tutorial_1_says():
 def test_4_the_one_step_figure_plots_what_tutorial_1_says():
     """Tutorial 1's conditioning figure, and the sentences that read it."""
     data = figures.one_step()[1]
-    assert data["n_members"] == 64
-    prints_as(data["one_step_mean"], [2.0227, 1.666])
-    prints_as(data["one_step_sd"], [0.0835, 0.7719])
+    assert data["n_particles"] == 64
+    prints_as(data["one_step_mean"], [1.9875, 1.5678])
+    prints_as(data["one_step_sd"], [0.0567, 0.6194])
     prints_as(data["posterior_mean"], [1.9769, 1.4719])
     prints_as(data["posterior_sd"], [0.0366, 0.0317])
 
     # The section reads the failure off this figure qualitatively: the
-    # ensemble finds the right region and misrepresents the shape. These
-    # bracket what "misrepresents" amounts to, so a change that quietly fixed
-    # it -- or made it worse -- would not pass unnoticed.
+    # ensemble finds the right region and misrepresents the shape. These pin
+    # what "misrepresents" amounts to, so a change that quietly fixed it -- or
+    # made it worse -- would not pass unnoticed. (Bands until PR 7, whose new
+    # prior draw moved both ratios below them; pinned to the new draw rather
+    # than widened.)
     ratio = data["one_step_sd"] / data["posterior_sd"]
-    assert 2.1 < ratio[0] < 2.5, ratio
-    assert 23.5 < ratio[1] < 25.0, ratio
-    # The rate is barely narrowed from the prior's own spread of one.
-    prior_sd = np.sqrt(np.asarray(toy.exponential_decay().prior.cov.diag()))
-    assert 0.7 < data["one_step_sd"][1] / prior_sd[1] < 0.85
+    prints_as(ratio, [1.55, 19.51], 2)
+    # The rate is narrowed only to 0.62 of the prior's own spread of one.
+    prior_sd = np.sqrt(np.asarray(toy.exponential_decay().prior.cov("u").diag()))
+    prints_as(data["one_step_sd"][1] / prior_sd[1], 0.62, 2)
     # In prediction space the fan is still far wider than the error bars.
-    assert data["one_step_predictive_sd"][figures.JOINT_INDEX] / 0.02 > 25.0
+    prints_as(data["one_step_predictive_sd"][figures.JOINT_INDEX] / 0.02, 22.3, 1)
     # The panel is sized to the ensemble, so almost every curve stays in the
     # prediction panel; the parameter panel is where the failure shows.
-    assert data["one_step_curves_leaving_panel"] == 1
+    assert data["one_step_curves_leaving_panel"] == 2
 
 
 def test_4_the_tempering_bridge_figure_plots_what_tutorial_1_says():
@@ -535,8 +593,8 @@ def test_4_the_tempering_bridge_figure_plots_what_tutorial_1_says():
     # The two ends are the prior and the posterior, which is what makes it a
     # bridge; beta = 0 is checkable against the prior in closed form.
     problem = toy.exponential_decay()
-    prints_as(data["mean"][0], np.asarray(problem.prior.mean), 4)
-    prints_as(data["sd"][0], np.sqrt(np.asarray(problem.prior.cov.diag())), 4)
+    prints_as(data["mean"][0], np.asarray(problem.prior.mean("u")), 4)
+    prints_as(data["sd"][0], np.sqrt(np.asarray(problem.prior.cov("u").diag())), 4)
     prints_as(data["mean"][-1], [1.9769, 1.4719])
     prints_as(data["sd"][-1], [0.0366, 0.0317])
 
@@ -550,51 +608,49 @@ def test_4_the_tempering_bridge_figure_plots_what_tutorial_1_says():
 def test_4_the_tracked_bridge_figure_plots_what_tutorial_1_says():
     """Tutorial 1's figure of the run against the exact tempered family.
 
-    The page makes three claims about it: the members follow the exact
-    distribution closely at most levels, the second level is the exception
-    because its target is a curved ridge, and the ensemble stays slightly
-    over-dispersed throughout. All three are ratios of plotted quantities.
+    The page makes two claims about it: the particles follow the exact
+    distribution closely at most levels, and the second level is the
+    exception because its target is a curved ridge. Both are ratios of
+    plotted quantities. The parts of them that no longer hold since PR 7 are
+    ``test_8_the_tracked_bridge_...``.
     """
     data = figures.bridge_tracked()[1]
-    assert data["n_members"] == 64
+    assert data["n_particles"] == 64
     prints_as(
         data["levels"],
-        [0.0, 0.001, 0.0029, 0.0094, 0.0265, 0.0735, 0.2031, 0.6559, 1.0],
+        [0.0, 0.001, 0.0035, 0.0083, 0.0271, 0.0998, 0.4138, 1.0],
     )
 
     ratio = data["cloud_sd"] / data["exact_sd"]
     # "the ensemble tracks the distributions fairly well".
     others = np.delete(ratio, 1, axis=0)
     assert others.max() < 1.35, ratio
-    assert others.min() > 0.9, ratio
     # "the curvature present at the second distribution presents a challenge"
-    # -- and it is the worst-tracked level, which is what makes it the one the
-    # page singles out.
-    assert ratio[1, 1] > 1.4, ratio
+    # -- it is the most over-dispersed level in the rate.
     assert ratio[1, 1] == ratio[:, 1].max(), ratio
     # "the final posterior approximation is far superior to the one-step
-    # result": within about 15% at beta = 1, against a factor of 24.
+    # result": within about 15% at beta = 1, against a factor of 20.
     assert np.abs(ratio[-1] - 1.0).max() < 0.15, ratio
-    # The panels hold the clouds: a handful of members outside is a scatter
+    # The panels hold the clouds: a handful of particles outside is a scatter
     # plot, a third of them outside is a badly sized panel.
-    assert data["members_outside_panel"].max() <= 6, data[
-        "members_outside_panel"
+    assert data["particles_outside_panel"].max() <= 6, data[
+        "particles_outside_panel"
     ]
 
 
 def test_4_the_answer_figure_plots_what_tutorial_1_says():
     """Tutorial 1's closing figure, and the contrast it draws with one step."""
     data = figures.answer()[1]
-    assert data["n_members"] == 64
+    assert data["n_particles"] == 64
     assert data["status"] == "schedule_exhausted"
-    assert data["n_evaluations"] == 8
-    prints_as(data["mean"], [1.978, 1.4771])
-    prints_as(data["sd"], [0.0414, 0.0318])
+    assert data["n_evaluations"] == 7
+    prints_as(data["mean"], [1.9745, 1.4737])
+    prints_as(data["sd"], [0.0346, 0.0288])
     prints_as(data["posterior_sd"], [0.0366, 0.0317])
     # The right-hand panel's fan is inside the observation error bars, which
     # is what distinguishes it from the one-step figure's. No page quotes this
     # number any more, so the pin guards the figure rather than the prose.
-    prints_as(data["predictive_sd"][figures.JOINT_INDEX], 0.0078)
+    prints_as(data["predictive_sd"][figures.JOINT_INDEX], 0.009)
     assert data["predictive_sd"][figures.JOINT_INDEX] < 0.02
     ratio = data["sd"] / data["posterior_sd"]
     assert ratio.max() < 1.2, ratio
@@ -605,49 +661,53 @@ def test_4_the_answer_figure_plots_what_tutorial_1_says():
 def test_4_the_trajectories_figure_plots_what_tutorial_2_says():
     """Tutorial 2's three panels, and every ratio the page reads off them."""
     data = figures.trajectories()[1]
-    assert data["n_members"] == 64
+    assert data["n_particles"] == 64
     assert data["noise_floor"] == 6.0
 
     adaptive_ess = data["adaptive_ess"]
-    prints_as(adaptive_ess, [24.5662, 32.0, 32.0, 32.0, 32.0, 57.4061])
-    # "sits on 32 ... the last step is the exception, at 57.4, because by then
-    # only 0.4486 of budget remained".
+    prints_as(adaptive_ess, [24.5511, 32.0, 32.0, 32.0, 32.0, 44.567])
+    # "sits on 32 ... the last step is the exception, at 44.6, because by then
+    # only 0.6848 of budget remained".
     assert np.allclose(adaptive_ess[1:-1], 32.0)
-    prints_as(1.0 - data["adaptive_beta"][-1], 0.4486)
-    prints_as(data["adaptive_misfit_mean"][-1], 6.7961)
+    prints_as(adaptive_ess[-1], 44.6, 1)
+    prints_as(1.0 - data["adaptive_beta"][-1], 0.6848)
+    # "Its misfit falls from 5.9e5 to 8.12".
+    prints_as(data["adaptive_misfit_mean"][0] / 1e5, 5.9, 1)
+    prints_as(data["adaptive_misfit_mean"][-1], 8.1181)
 
     coarse_ess = data["three_equal_steps_ess"]
-    prints_as(coarse_ess[0], 1.0002)
+    prints_as(coarse_ess[0], 1.0)
     assert coarse_ess[0] < 1.001
-    # "its last recorded misfit is 25.5, four times the reference of 6".
-    prints_as(data["three_equal_steps_misfit_mean"][-1], 25.5143)
+    # "its last recorded misfit is 17.6, three times the reference of 6".
+    prints_as(data["three_equal_steps_misfit_mean"][-1], 17.6488)
+    assert round(float(data["three_equal_steps_misfit_mean"][-1]) / 6.0) == 3
 
-    # "its spread falls smoothly, by a factor between 1.3 and 2.7 per step"
-    # against "a factor of 5.2 in one step".
+    # "its spread falls smoothly, by a factor between 1.5 and 2.3 per step"
+    # against "a factor of 4.8 in one step".
     adaptive_ratios = data["adaptive_spread"][:-1] / data["adaptive_spread"][1:]
     coarse_ratios = (
         data["three_equal_steps_spread"][:-1]
         / data["three_equal_steps_spread"][1:]
     )
-    assert 1.3 < adaptive_ratios.min() and adaptive_ratios.max() < 2.8
-    prints_as(coarse_ratios.max(), 5.19, 2)
+    prints_as([adaptive_ratios.min(), adaptive_ratios.max()], [1.5, 2.3], 1)
+    prints_as(coarse_ratios.max(), 4.84, 2)
 
-    # "35% larger in the amplitude and 47% larger in the rate".
+    # "19% larger in the amplitude and 45% larger in the rate".
     inflation = data["three_equal_steps_sd"] / data["adaptive_sd"]
-    prints_as(inflation, [1.35, 1.47], 2)
+    prints_as(inflation, [1.19, 1.45], 2)
 
 
 def test_4_the_two_forms_figure_plots_what_tutorial_3_says():
     """Tutorial 3's figure, and the caption's stopping level."""
     data = figures.two_forms()[1]
-    assert data["n_members"] == 64
+    assert data["n_particles"] == 64
     assert data["stopped_status"] == "stopping_rule"
-    assert data["stopped_beta"] == 3.0
-    assert data["stopped_evaluations"] == 4
+    assert data["stopped_beta"] == 2.0
+    assert data["stopped_evaluations"] == 3
     assert data["unstopped_beta"] == 30.0
-    prints_as(data["sampled_sd"], [0.0396, 0.0363])
-    prints_as(data["stopped_sd"], [0.0319, 0.031])
-    prints_as(data["unstopped_sd"], [0.007, 0.0061])
+    prints_as(data["sampled_sd"], [0.0374, 0.0338])
+    prints_as(data["stopped_sd"], [0.042, 0.0934])
+    prints_as(data["unstopped_sd"], [0.0069, 0.006])
     prints_as(data["reference_mean"], [1.9769, 1.4719])
     prints_as(data["reference_sd"], [0.0366, 0.0317])
     # The right panel's message: the spread keeps falling past the stop.
@@ -659,34 +719,50 @@ def test_4_the_two_forms_figure_plots_what_tutorial_3_says():
 # ===========================================================================
 
 
-@pytest.mark.parametrize("n_members", [64, 2048])
+@pytest.mark.parametrize(
+    "n_particles",
+    [
+        pytest.param(
+            64,
+            marks=pytest.mark.xfail(
+                strict=True,
+                reason=(
+                    "since PR 7's prior draw the ratio at 64 particles is "
+                    "[1.55, 19.51], below the band; at 2048 it is [2.05, 22.45], "
+                    "inside it, so the page's claim holds but the band does not"
+                ),
+            ),
+        ),
+        2048,
+    ],
+)
 def test_5_the_one_step_error_is_the_gaussian_fit_not_the_ensemble_size(
-    n_members,
+    n_particles,
 ):
     """Tutorial 1: "the discrepancy does not go away with a larger ensemble".
 
     The page attributes the one-step failure to the Gaussian approximation
     rather than to sampling error, which is a claim about what happens as the
-    ensemble grows. Thirty-two times as many members leaves the overspread in
-    the decay rate essentially unchanged, so the attribution holds.
+    ensemble grows. Thirty-two times as many particles leaves the overspread
+    in the decay rate essentially unchanged, so the attribution holds.
 
     Stated as a band rather than a pinned value: the point is that the ratio
     stays large, not that it takes a particular value at a particular size.
     """
     problem = toy.exponential_decay()
-    state = EKIState.from_prior(jax.random.key(0), problem.prior, n_members)
+    state = _state(n_particles)
     result = run(
         state,
         problem.forward,
         problem.y,
         problem.noise_cov,
+        update_rule=MATHERON,
         schedule=FixedSchedule.constant(1.0, n_steps=1),
-        update=PathwiseUpdate(),
     )
     _, posterior_sd = figures._tempered_moments(1.0)
-    ratio = np.asarray(result.ensemble.std(axis=0, ddof=1)) / posterior_sd
-    assert 20.0 < ratio[1] < 26.0, (n_members, ratio)
-    assert 1.9 < ratio[0] < 2.5, (n_members, ratio)
+    ratio = _sd(result.ensemble) / posterior_sd
+    assert 20.0 < ratio[1] < 26.0, (n_particles, ratio)
+    assert 1.9 < ratio[0] < 2.5, (n_particles, ratio)
 
 
 def test_5_an_evaluation_and_its_record_carry_the_same_level():
@@ -703,13 +779,14 @@ def test_5_an_evaluation_and_its_record_carry_the_same_level():
     are the same value carried two ways, not two computations of it.
     """
     problem = toy.exponential_decay()
-    state = EKIState.from_prior(jax.random.key(0), problem.prior, n_members=32)
+    state = _state(32)
     levels = []
     for _, record, evaluation in iterate(
         state,
         problem.forward,
         problem.y,
         problem.noise_cov,
+        update_rule=SQUARE_ROOT,
         schedule=AdaptiveESSSchedule(),
     ):
         assert jnp.array_equal(evaluation.beta, record.beta)
@@ -747,8 +824,8 @@ def test_6_the_grid_reference_recovers_the_prior_at_beta_zero(n):
     """
     problem = toy.exponential_decay()
     mean, sd = figures._tempered_moments(0.0, n=n)
-    prints_as(mean, np.asarray(problem.prior.mean), decimals=4)
-    prints_as(sd, np.sqrt(np.asarray(problem.prior.cov.diag())), decimals=4)
+    prints_as(mean, np.asarray(problem.prior.mean("u")), decimals=4)
+    prints_as(sd, np.sqrt(np.asarray(problem.prior.cov("u").diag())), decimals=4)
 
 
 def test_6_regression_one_unrefined_grid_is_not_enough():
@@ -807,7 +884,7 @@ def test_7_regression_a_toy_problem_is_not_passed_to_run():
     here.
     """
     problem = toy.exponential_decay()
-    state = EKIState.from_prior(jax.random.key(0), problem.prior, n_members=8)
+    state = _state(8)
     assert not callable(problem)
     with pytest.raises(TypeError):
         run(
@@ -815,5 +892,96 @@ def test_7_regression_a_toy_problem_is_not_passed_to_run():
             problem,
             problem.y,
             problem.noise_cov,
+            update_rule=SQUARE_ROOT,
             schedule=FixedSchedule.constant(1.0, n_steps=1),
         )
+
+
+# ===========================================================================
+# 5. claims that stopped holding
+# ===========================================================================
+#
+# PR 7 moved the tutorials onto the new layers, and the prior draw changed
+# with it, so every number on the pages moved. The numbers are re-pinned
+# above; the claims below are qualitative readings of them that the new draw
+# no longer supports. Each is kept as a strict xfail that names its sentence,
+# for the prose rewrite (PR 11) to resolve: rewrite the sentence and delete
+# the test, or change the example until the claim holds again, at which point
+# the strict xfail fails and must be removed.
+
+
+def _tracked_bridge_ratio():
+    data = figures.bridge_tracked()[1]
+    return data["cloud_sd"] / data["exact_sd"]
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "tutorial 1, 'The ensemble tracks the distributions fairly well': at "
+        "beta = 0.0998 the rate's spread is 0.73 of the exact one"
+    ),
+)
+def test_8_the_tracked_bridge_tracks_every_other_level_within_ten_percent():
+    """Tutorial 1: the ensemble is at most 10% too narrow at any level but one."""
+    others = np.delete(_tracked_bridge_ratio(), 1, axis=0)
+    assert others.min() > 0.9, others
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "tutorial 1, 'the curvature present at the second distribution "
+        "presents a challenge': its rate ratio is 1.29, against 0.73 at "
+        "beta = 0.0998, so it is no longer the worst-tracked level"
+    ),
+)
+def test_8_the_tracked_bridge_second_level_is_the_exception():
+    """Tutorial 1: the second level is over-dispersed by more than 40%."""
+    ratio = _tracked_bridge_ratio()
+    assert ratio[1, 1] > 1.4, ratio
+
+
+def _tutorial_3_optimization_rows():
+    problem = toy.exponential_decay()
+    reference_sd = figures._tempered_moments(1.0)[1]
+    rows = {}
+    for tau in (2.0, 1.0):
+        result = run(
+            _state(),
+            problem.forward,
+            problem.y,
+            problem.noise_cov,
+            update_rule=SQUARE_ROOT,
+            schedule=FixedSchedule.constant(1.0, n_steps=200),
+            stop=DiscrepancyStop(tau=tau),
+        )
+        rows[tau] = (float(result.beta), _sd(result.ensemble) / reference_sd)
+    return rows
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "tutorial 3, '`tau=2.0` ... on this problem, stops one step earlier' "
+        "and 'Stopping one step earlier, at `tau=2`': both rules now stop at "
+        "beta = 2, so the two table rows are identical"
+    ),
+)
+def test_8_tau_2_stops_one_step_before_tau_1():
+    """Tutorial 3: the discrepancy principle at ``tau=2`` stops one step earlier."""
+    rows = _tutorial_3_optimization_rows()
+    assert rows[2.0][0] == rows[1.0][0] - 1.0, rows
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "tutorial 3, 'Its spread happens to land within 13% of the "
+        "target's': the `tau=1` row's spread is now [1.15, 2.94] of it"
+    ),
+)
+def test_8_tau_1_spread_lands_within_13_percent_of_the_target():
+    """Tutorial 3: the ``tau=1`` row's spread is within 13% of the target's."""
+    _, ratio = _tutorial_3_optimization_rows()[1.0]
+    assert np.abs(ratio - 1.0).max() < 0.13, ratio

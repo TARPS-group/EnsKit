@@ -1,14 +1,14 @@
 """Conformance tests: every extensible type, through its contract's suite.
 
-Two layers ship a conformance harness, because two layers are open to
-extension. One instance per operator class — plus variants whose
-capabilities, structure depth, block count, size, or sign differ — runs
-through :func:`enskit.linalg.testing.check_operator`, each paired with a
-second instance of the same structure and different values to make up the
-family it is applied as under ``vmap``; and every shipped EKI policy runs
-through the check for its axis in :mod:`enskit.eki.testing`, which is the
-harness a user's own schedule, update rule or inflation is meant to be run
-through.
+One instance per operator class — plus variants whose capabilities,
+structure depth, block count, size, or sign differ — runs through
+:func:`enskit.linalg.testing.check_operator`, each paired with a second
+instance of the same structure and different values to make up the family it
+is applied as under ``vmap``; and every shipped policy of
+:mod:`enskit.algorithms` runs through the check for its kind in
+:mod:`enskit.testing`, which is the harness a user's own schedule, stopping
+rule, inflation or relaxation is meant to be run through. Update rules are
+checked in ``tests/test_testing.py`` and ``tests/test_kalman.py``.
 """
 from __future__ import annotations
 
@@ -18,21 +18,17 @@ import numpy as np
 import pytest
 
 import enskit  # noqa: F401  -- enables x64 before any array exists
-from enskit.eki import (
+from enskit.algorithms import (
+    AdditiveInflation,
+    MultiplicativeInflation,
+    RelaxToPriorPerturbations,
+    RelaxToPriorSpread,
+)
+from enskit.algorithms.eki import (
     AdaptiveESSSchedule,
     AdaptiveMisfitSchedule,
-    AdditiveInflation,
     DiscrepancyStop,
     FixedSchedule,
-    MultiplicativeInflation,
-    PathwiseUpdate,
-    TransformUpdate,
-)
-from enskit.eki.testing import (
-    check_inflation,
-    check_schedule,
-    check_stopping_rule,
-    check_update,
 )
 from enskit.linalg import (
     BlockDiag,
@@ -55,6 +51,12 @@ from enskit.linalg import (
     product,
 )
 from enskit.linalg.testing import check_operator
+from enskit.testing import (
+    check_inflation,
+    check_relaxation,
+    check_schedule,
+    check_stopping_rule,
+)
 
 
 def _instances(rng: np.random.Generator) -> list[LinOp]:
@@ -260,7 +262,7 @@ def test_densepsd_factor_solves():
 
 
 # ---------------------------------------------------------------------------
-# every shipped EKI policy, through the harness the layer ships for user ones
+# every shipped policy, through the harness the package ships for user ones
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize(
@@ -280,23 +282,33 @@ def test_schedule_conformance(schedule):
     check_schedule(schedule)
 
 
-@pytest.mark.parametrize("update", [TransformUpdate(), PathwiseUpdate()], ids=repr)
-def test_update_conformance(update):
-    check_update(update)
-
-
 @pytest.mark.parametrize(
     "inflation",
     [
         MultiplicativeInflation(1.02),
-        MultiplicativeInflation(2.0),
-        AdditiveInflation(DensePSD(jnp.eye(3) * 0.05)),
-        AdditiveInflation(PSDDiagonal(jnp.full((3,), 0.02))),
+        MultiplicativeInflation(2.0, names="v"),
+        AdditiveInflation(u=DensePSD(jnp.eye(3) * 0.05)),
+        AdditiveInflation(
+            u=PSDDiagonal(jnp.full((3,), 0.02)), v=PSDDiagonal(jnp.ones(2))
+        ),
     ],
     ids=repr,
 )
 def test_inflation_conformance(inflation):
     check_inflation(inflation)
+
+
+@pytest.mark.parametrize(
+    "relaxation",
+    [
+        RelaxToPriorSpread(0.5),
+        RelaxToPriorSpread(1.0, names="u"),
+        RelaxToPriorPerturbations(0.25),
+    ],
+    ids=repr,
+)
+def test_relaxation_conformance(relaxation):
+    check_relaxation(relaxation)
 
 
 @pytest.mark.parametrize(

@@ -1,13 +1,15 @@
 # EnsKit
 
-Ensemble Kalman Inversion for derivative-free Bayesian calibration.
+Building blocks for ensemble Kalman methods, and Ensemble Kalman Inversion
+built from them.
 
 :::{admonition} Pre-alpha
 :class: warning
 
-The linear operator, Gaussian conditioning and EKI layers are implemented and
-tested — you can run an inversion today. The localization layer, needed when
-the parameter dimension far exceeds the ensemble size, is not yet built.
+The operator, distribution, map and update layers, and Ensemble Kalman
+Inversion on top of them, are implemented and tested: you can run an
+inversion today. The ensemble Kalman filter and localization are planned and
+not yet built.
 :::
 
 ## What problem does this solve?
@@ -19,10 +21,10 @@ $$y = \mathcal{G}(\theta) + \varepsilon, \qquad \varepsilon \sim \mathcal{N}(0, 
 
 You want to estimate $\theta$ and quantify how uncertain that estimate is. The
 difficulty is that $\mathcal{G}$ is expensive, and often you cannot
-differentiate it — it may be a legacy simulator, a coupled code, or a binary
+differentiate it: it may be a legacy simulator, a coupled code, or a binary
 invoked as a subprocess.
 
-Ensemble Kalman Inversion (EKI) handles exactly this case. It advances an
+Ensemble Kalman Inversion (EKI) handles exactly this case. It moves an
 ensemble of parameter vectors toward the posterior using only forward
 evaluations, requiring no gradients, no adjoint, and no access to the model's
 internals.
@@ -34,24 +36,38 @@ internals.
 
 :::{grid-item-card} Structured operators
 `enskit.linalg` represents covariance matrices by how they act on vectors, so
-that structure — block, diagonal, triangular, low-rank and Kronecker — is
+that structure (block, diagonal, triangular, low-rank and Kronecker) is
 exploited rather than materialized.
 :::
 
-:::{grid-item-card} Gaussian conditioning
-`enskit.gauss` provides the Gaussian machinery of the ensemble update —
-sampling, whitened-SVD conditioning, and the square-root transform, in both
-the stochastic and deterministic forms.
+:::{grid-item-card} Distributions
+`enskit.distribution` provides ensembles of particles and Gaussians over named
+blocks: sampling, marginals, conditioning, and the Gaussian fitted to an
+ensemble.
 :::
 
-:::{grid-item-card} Localization
-`enskit.localize` supports problems where the parameter dimension far exceeds
-the ensemble size. *(planned)*
+:::{grid-item-card} Maps
+`enskit.maps` pushes a distribution through a simulator, any callable from a
+batch of inputs to a batch of outputs, or exactly through a linear map or
+additive noise.
 :::
 
-:::{grid-item-card} The EKI algorithms
-`enskit.eki` provides tempering schedules, ensemble updates, inflation, and the
-driver loop, in both the approximate-sampling and the optimization form.
+:::{grid-item-card} Ensemble Kalman updates
+`enskit.kalman` moves particles toward a conditional distribution, with the
+square-root and the perturbed-observation (Matheron) update rules, and
+inflation and relaxation around them.
+:::
+
+:::{grid-item-card} Algorithms
+`enskit.algorithms.eki` runs Ensemble Kalman Inversion: tempering schedules,
+stopping rules, failure handling and the driver loop, in both the
+approximate-sampling and the optimization form.
+:::
+
+:::{grid-item-card} Checks and toy problems
+`enskit.testing` checks a simulator, update rule or policy of your own
+against its contract, and `enskit.toy` holds small problems for trying the
+library.
 :::
 ::::
 
@@ -61,11 +77,11 @@ EnsKit does not implement production forward models, priors, or Gaussian
 process kernels. It ships three toy problems, in `enskit.toy`, for its own
 tests and this documentation.
 The forward model is any callable from parameters to predicted observations,
-and a prior is any operator meeting the covariance interface. Building those
-belongs to the caller, which keeps EnsKit independent of the domain being
-calibrated. {doc}`user-guide/writing-a-forward-model` states everything a
-forward model must satisfy, and works through wrapping an external
-executable.
+and a prior covariance is any operator meeting the covariance interface.
+Building those belongs to the caller, which keeps EnsKit independent of the
+domain being calibrated. {doc}`user-guide/writing-a-forward-model` states
+everything a forward model must satisfy, and works through wrapping an
+external executable.
 
 ## Quick example
 
@@ -74,23 +90,26 @@ Calibrating a two-parameter decay model against three noisy observations:
 ```python
 import enskit                      # enables float64; import before creating arrays
 import jax, jax.numpy as jnp
+from enskit import kalman
+from enskit.algorithms import eki
+from enskit.distribution import Gaussian
 from enskit.linalg import PSDDiagonal
-from enskit.gauss import Gaussian
-from enskit.eki import EKIState, AdaptiveESSSchedule, run
 
-# The forward model: any callable from a (J, P) ensemble to (J, N) predictions.
+# The forward model: any callable from (J, 2) parameters to (J, 3) predictions.
 times = jnp.array([0.5, 1.0, 2.0])
 def forward(u):
     return u[:, :1] * jnp.exp(-u[:, 1:2] * times)
 
 y = jnp.array([1.75, 1.38, 0.82])                             # observations
-noise = PSDDiagonal(jnp.full(3, 0.01))                        # error covariance
-prior = Gaussian(mean=jnp.zeros(2), cov=PSDDiagonal(jnp.array([4.0, 1.0])))
+noise = PSDDiagonal(jnp.full(3, 0.01))                        # their error covariance
+prior = Gaussian.independent(u=(jnp.zeros(2), PSDDiagonal(jnp.array([4.0, 1.0]))))
 
-state = EKIState.from_prior(jax.random.key(0), prior, n_members=64)
-result = run(state, forward, y, noise, schedule=AdaptiveESSSchedule())
+state = eki.EKIState.from_prior(jax.random.key(0), prior, n_particles=64)
+result = eki.run(state, forward, y, noise,
+                 update_rule=kalman.Matheron(),
+                 schedule=eki.AdaptiveESSSchedule())
 
-result.mean            # posterior mean estimate
+result.mean("u")       # posterior mean estimate
 result.stacked.ess     # effective sample size at each step of the ladder
 ```
 
@@ -157,7 +176,6 @@ user-guide/operators
 user-guide/distributions
 user-guide/maps
 user-guide/updates
-user-guide/conditioning
 user-guide/running-an-inversion
 user-guide/writing-a-forward-model
 user-guide/toy-models
@@ -181,7 +199,6 @@ linop-contract
 distribution-contract
 maps-contract
 kalman-contract
-gaussian-contract
 eki-contract
 joint-factor
 design

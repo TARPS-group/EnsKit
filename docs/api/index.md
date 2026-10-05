@@ -232,7 +232,7 @@ Ensemble Kalman updates, inflation and relaxation. See
 ## enskit.testing
 
 Conformance checks for code written against EnsKit's interfaces: a
-simulator, an update rule, a conditional map.
+simulator, an update rule, a conditional map, and the policies of a run.
 
 ```{eval-rst}
 .. automodule:: enskit.testing
@@ -241,148 +241,109 @@ simulator, an update rule, a conditional map.
 .. autofunction:: enskit.testing.check_simulator
 .. autofunction:: enskit.testing.check_update_rule
 .. autofunction:: enskit.testing.check_conditional_map
+.. autofunction:: enskit.testing.check_schedule
+.. autofunction:: enskit.testing.check_inflation
+.. autofunction:: enskit.testing.check_relaxation
+.. autofunction:: enskit.testing.check_stopping_rule
 ```
 
-## enskit.gauss
+## enskit.algorithms
 
-Joint Gaussian distributions and conditioning. See
-{doc}`../user-guide/conditioning` for when to use each piece, and
-{doc}`../gaussian-contract` for the full behavioral contract.
+The algorithms, and the inflation and relaxation policies every driver
+shares. See {doc}`../user-guide/running-an-inversion` for when to use each
+piece, and {doc}`../eki-contract` for the full behavioral contract.
 
 ```{eval-rst}
-.. automodule:: enskit.gauss
+.. automodule:: enskit.algorithms
    :no-members:
 ```
 
-### Distributions
+### Inflation and relaxation policies
 
 ```{eval-rst}
-.. autoclass:: enskit.gauss.Gaussian
-   :members: from_samples, dim, batch_shape, sample, log_density
+.. autoclass:: enskit.algorithms.Inflation
+   :members: __call__
 
-.. autoclass:: enskit.gauss.GaussianJoint
-   :members: from_linear_map, from_samples, from_factors, u_dim, v_dim,
-             latent_dim, batch_shape, u_marginal, v_marginal, condition,
-             pathwise
+.. autoclass:: enskit.algorithms.Relaxation
+   :members: __call__
 
-.. autoclass:: enskit.gauss.EmpiricalJoint
-   :members: n_samples, u_dim, v_dim, batch_shape, u_mean, v_mean,
-             u_anomalies, v_anomalies, to_gaussian_joint, transform_update,
-             pathwise_update
+.. autoclass:: enskit.algorithms.MultiplicativeInflation
+   :members: __call__, batch_shape
+.. autoclass:: enskit.algorithms.AdditiveInflation
+   :members: __call__, batch_shape
+.. autoclass:: enskit.algorithms.RelaxToPriorSpread
+   :members: __call__, batch_shape
+.. autoclass:: enskit.algorithms.RelaxToPriorPerturbations
+   :members: __call__, batch_shape
 ```
 
-### Conditioning primitives
+## enskit.algorithms.eki
 
 ```{eval-rst}
-.. autofunction:: enskit.gauss.gain_weights
-.. autofunction:: enskit.gauss.sqrt_transform
-```
-
-## enskit.eki
-
-Ensemble Kalman Inversion: the ladder, the policies that shape it, and the
-run. See {doc}`../user-guide/running-an-inversion` for when to use each piece,
-and {doc}`../eki-contract` for the full behavioral contract.
-
-```{eval-rst}
-.. automodule:: enskit.eki
+.. automodule:: enskit.algorithms.eki
    :no-members:
 ```
 
 ### Value classes
 
 ```{eval-rst}
-.. autoclass:: enskit.eki.EKIState
-   :members: from_prior, restart, n_members, u_dim, mean, batch_shape
+.. autoclass:: enskit.algorithms.eki.EKIState
+   :members: from_prior, restart, n_particles, dims, mean, batch_shape
 
-.. autoclass:: enskit.eki.Evaluation
-   :members: misfits, center_misfit, n_members, u_dim, v_dim, batch_shape
+.. autoclass:: enskit.algorithms.eki.Evaluation
+   :members: misfits, center_misfit, rms_parameter_spread, n_particles,
+             data_dim, batch_shape
 
-.. autoclass:: enskit.eki.HistoryRecord
-   :members: batch_shape
+.. autoclass:: enskit.algorithms.eki.HistoryRecord
+   :members: from_evaluation, batch_shape
 
-.. autoclass:: enskit.eki.EKIResult
+.. autoclass:: enskit.algorithms.eki.EKIResult
    :members: ensemble, beta, mean, n_evaluations, n_completed_steps,
              min_n_valid, stacked, stop_fired, budget_complete
-```
-
-### The three axes, as protocols
-
-```{eval-rst}
-.. autoclass:: enskit.eki.EnsembleUpdate
-   :members: __call__
-
-.. autoclass:: enskit.eki.Schedule
-   :members: next_increment
-
-.. autoclass:: enskit.eki.StoppingRule
-   :members: __call__
-
-.. autoclass:: enskit.eki.Inflation
-   :members: __call__
-```
-
-### Update rules
-
-```{eval-rst}
-.. autoclass:: enskit.eki.TransformUpdate
-   :members: __call__
-.. autoclass:: enskit.eki.PathwiseUpdate
-   :members: __call__
 ```
 
 ### Schedules and stopping rules
 
 ```{eval-rst}
-.. autoclass:: enskit.eki.FixedSchedule
-   :members: uniform, constant, n_steps, beta_target, next_increment
-.. autoclass:: enskit.eki.AdaptiveESSSchedule
-   :members: n_steps, next_increment
-.. autoclass:: enskit.eki.AdaptiveMisfitSchedule
-   :members: n_steps, next_increment
-.. autoclass:: enskit.eki.DiscrepancyStop
+.. autoclass:: enskit.algorithms.eki.Schedule
+   :members: next_increment
+
+.. autoclass:: enskit.algorithms.eki.StoppingRule
    :members: __call__
-```
 
-### Inflation
-
-```{eval-rst}
-.. autoclass:: enskit.eki.MultiplicativeInflation
-   :members: __call__, batch_shape
-.. autoclass:: enskit.eki.AdditiveInflation
+.. autoclass:: enskit.algorithms.eki.FixedSchedule
+   :members: uniform, constant, n_steps, beta_target, next_increment
+.. autoclass:: enskit.algorithms.eki.AdaptiveESSSchedule
+   :members: n_steps, next_increment
+.. autoclass:: enskit.algorithms.eki.AdaptiveMisfitSchedule
+   :members: n_steps, next_increment
+.. autoclass:: enskit.algorithms.eki.DiscrepancyStop
    :members: __call__
 ```
 
 ### The driver, and one step
 
 ```{eval-rst}
-.. autofunction:: enskit.eki.run
-.. autofunction:: enskit.eki.iterate
-.. autofunction:: enskit.eki.evaluate
-.. autofunction:: enskit.eki.assimilate
-.. autofunction:: enskit.eki.advance
+.. autofunction:: enskit.algorithms.eki.run
+.. autofunction:: enskit.algorithms.eki.iterate
+.. autofunction:: enskit.algorithms.eki.evaluate
+.. autofunction:: enskit.algorithms.eki.assimilate
+.. autofunction:: enskit.algorithms.eki.advance
 ```
 
-### Helpers, status constants, and the exception
+### Helpers, constants, and the exception
 
 ```{eval-rst}
-.. autofunction:: enskit.eki.misfits
-.. autofunction:: enskit.eki.effective_sample_size
-.. autofunction:: enskit.eki.repair_failed_members
+.. autofunction:: enskit.algorithms.eki.misfits
+.. autofunction:: enskit.algorithms.eki.effective_sample_size
+.. autofunction:: enskit.algorithms.eki.repair_failed_particles
 
-.. autodata:: enskit.eki.SCHEDULE_EXHAUSTED
-.. autodata:: enskit.eki.STOPPING_RULE
-.. autodata:: enskit.eki.INTERRUPTED
+.. autodata:: enskit.algorithms.eki.PREDICTION
+.. autodata:: enskit.algorithms.eki.SCHEDULE_EXHAUSTED
+.. autodata:: enskit.algorithms.eki.STOPPING_RULE
+.. autodata:: enskit.algorithms.eki.INTERRUPTED
 
-.. autoexception:: enskit.eki.EKIError
-```
-
-### Conformance testing
-
-```{eval-rst}
-.. automodule:: enskit.eki.testing
-   :members: check_schedule, check_update, check_inflation,
-             check_stopping_rule, check_forward_model, synthetic_evaluation
+.. autoexception:: enskit.algorithms.eki.EKIError
 ```
 
 ## enskit.toy
@@ -400,13 +361,13 @@ not exemplify about the forward-model interface.
 
 ```{eval-rst}
 .. autoclass:: enskit.toy.LinearGaussian
-   :members: u_dim, v_dim, forward, posterior
+   :members: parameter_dim, data_dim, forward, posterior
 
 .. autoclass:: enskit.toy.ExponentialDecay
-   :members: u_dim, v_dim, forward
+   :members: parameter_dim, data_dim, forward
 
 .. autoclass:: enskit.toy.RestrictedDecay
-   :members: u_dim, v_dim, forward
+   :members: parameter_dim, data_dim, forward
 ```
 
 ### Factories

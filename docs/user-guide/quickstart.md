@@ -1,8 +1,8 @@
 # Quickstart
 
 This page introduces the operator layer, which everything else in EnsKit is
-built on. It takes about ten minutes. For the conditioning layer above it, see
-{doc}`conditioning`.
+built on. It takes about ten minutes. For the distributions built on it, see
+{doc}`distributions`.
 
 ## Why operators rather than arrays
 
@@ -58,7 +58,7 @@ trailing. This is the same rule NumPy's `matmul` follows, and it is what
 So an ensemble of `J` parameter vectors, stored `(J, n)`, is simply a batch:
 
 ```python
-ensemble = jnp.ones((100, 3))     # 100 members
+ensemble = jnp.ones((100, 3))     # 100 particles
 d.matvec(ensemble).shape          # (100, 3)
 ```
 
@@ -147,7 +147,7 @@ densify(op).solve(b)         # explicit dense fallback, with a size guard
 ## Next steps
 
 - {doc}`operators` — the full catalog and what each one costs.
-- {doc}`conditioning` — the Gaussian layer built on these operators.
+- {doc}`distributions` — the distributions built on these operators.
 - {doc}`writing-an-operator` — adding a new structure.
 - {doc}`../linop-contract` — the precise behavioral contract.
 - {doc}`../design` — why the interface looks the way it does.

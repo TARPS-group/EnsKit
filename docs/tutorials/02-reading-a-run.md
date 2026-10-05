@@ -12,13 +12,15 @@ default update rule rather than the pathwise one that page selects:
 ```python
 import enskit
 import jax
-from enskit import toy
-from enskit.eki import AdaptiveESSSchedule, EKIState, run
+from enskit import kalman, toy
+from enskit.algorithms import eki
 
 problem = toy.exponential_decay()
-state = EKIState.from_prior(jax.random.key(0), problem.prior, n_members=64)
-result = run(state, problem.forward, problem.y, problem.noise_cov,
-             schedule=AdaptiveESSSchedule())
+state = eki.EKIState.from_prior(jax.random.key(0), problem.prior,
+                                n_particles=64)
+result = eki.run(state, problem.forward, problem.y, problem.noise_cov,
+                 update_rule=kalman.SymmetricSquareRoot(),
+                 schedule=eki.AdaptiveESSSchedule())
 ```
 
 ## How the run ended
@@ -49,10 +51,10 @@ what this run reports.
 a run ends on a stopping rule: reaching that decision cost an evaluation, and
 the update it would have driven was discarded. Your cost in model calls is
 always `n_evaluations`, and in member evaluations
-`n_evaluations * n_members` — 384 here.
+`n_evaluations * n_particles` — 384 here.
 
 `min_n_valid` is the worst step's count of members whose predictions were
-finite. Below `n_members` means the forward model failed on some members, which
+finite. Below `n_particles` means the forward model failed on some members, which
 is {doc}`08-when-the-model-fails`.
 
 ## The history
@@ -62,8 +64,8 @@ one object with each field stacked across steps — which is what you plot.
 
 ```python
 history = result.stacked
-history.beta       # [0.      0.001   0.0028  0.0115  0.0677  0.5514]
-history.increment  # [0.001   0.0018  0.0087  0.0562  0.4837  0.4486]
+history.beta       # [0.      0.001   0.0029  0.0112  0.0571  0.3152]
+history.increment  # [0.001   0.0019  0.0083  0.0459  0.2581  0.6848]
 ```
 
 The eleven fields answer four different questions.
@@ -77,7 +79,7 @@ The eleven fields answer four different questions.
 
 Two things about `beta` are worth fixing in mind now, because they are easy to
 misread later. Each record's `beta` is the level the step *started* from, and
-its `beta_next` the level it moved to — so the last record's `beta` is 0.5514,
+its `beta_next` the level it moved to — so the last record's `beta` is 0.3152,
 not 1.0, and the ensemble at $\beta = 1$ is `result.ensemble` rather than
 anything in the history. And `increment` is what that step added, so the
 increments sum to the level reached.
@@ -97,7 +99,7 @@ $N/2$. Here $N = 12$, so the reference is 6.
 
 **The effective sample size**, `ess`. Going up the ladder reweights the
 members, and this is how many of the 64 members that reweighting effectively
-leaves. It is at most `n_members` and at least 1. A value of 1 means one
+leaves. It is at most `n_particles` and at least 1. A value of 1 means one
 member carries essentially all of the weight, and the other 63 are not
 contributing.
 
@@ -109,7 +111,7 @@ but *how fast* is the diagnostic.
 import matplotlib.pyplot as plt
 
 plt.plot(history.step, history.misfit_mean)
-plt.yscale("log")           # the first step's misfit is 1.9e5
+plt.yscale("log")           # the first step's misfit is 5.9e5
 ```
 
 ```{figure} ../_generated/figures/02-trajectories.png
@@ -123,23 +125,23 @@ report `'schedule_exhausted'`.
 
 The adaptive run is the healthy one, and each panel says so differently.
 
-Its misfit falls from $1.9 \times 10^5$ to 6.80, which is just above the
+Its misfit falls from $5.9 \times 10^5$ to 8.12, which is just above the
 reference of 6 — the members fit the data about as well as the noise allows,
 and no better. Its effective sample size sits on 32, which is half of 64 and
 is the floor this schedule holds: each increment is chosen to keep it there.
-The last step is the exception, at 57.4, because by then only 0.4486 of budget
+The last step is the exception, at 44.6, because by then only 0.6848 of budget
 remained and the step could not be as long as the floor would have permitted.
-Its spread falls smoothly, by a factor between 1.3 and 2.7 per step.
+Its spread falls smoothly, by a factor between 1.5 and 2.3 per step.
 
 The three-step run reaches the same level, and each panel gives a reason not
 to trust it. Its effective sample size at the first step is **1.0**: at an
 increment of $1/3$, a single member out of 64 carries essentially the entire
 weight of the reweighting, and the step conditions on that member's opinion.
-Its spread then falls by a factor of 5.2 in one step, which is the same event
-seen from another angle. Its last recorded misfit is 25.5, four times the
+Its spread then falls by a factor of 4.8 in one step, which is the same event
+seen from another angle. Its last recorded misfit is 17.6, three times the
 reference of 6, so the members it was still working with did not fit the data
 well. The two runs end up with different answers — the three-step run's spread
-is 35% larger in the amplitude and 47% larger in the rate — and nothing in
+is 19% larger in the amplitude and 45% larger in the rate — and nothing in
 `status` distinguishes them.
 
 Which of those answers is nearer the truth is not a question the diagnostics
@@ -152,7 +154,7 @@ calculation the method intends.
 The adaptive run's own first step also sits below the floor, at 24.6 rather
 than 32, and this is not a violation. At that step the schedule wanted an
 increment smaller than 0.001 — its minimum — and had to take 0.001 anyway. At
-0.0001 the effective sample size would have been 53.3. A first step at or
+0.0001 the effective sample size would have been 47.0. A first step at or
 below the floor is normal, because the prior ensemble is as far from the
 target as it ever gets.
 :::
@@ -164,7 +166,7 @@ For a run meant to reach the target distribution, five things:
 1. **`budget_complete` is `True` and `stop_fired` is `False`.** Otherwise the
    ensemble is somewhere partway up the ladder, and is neither a target
    distribution nor a fit.
-2. **`min_n_valid` equals `n_members`.** If not, see
+2. **`min_n_valid` equals `n_particles`.** If not, see
    {doc}`08-when-the-model-fails`.
 3. **`misfit_mean` settles near $N/2$.** Far above means the model never fit
    the data. Far below means the residuals are smaller than the observation
@@ -192,12 +194,12 @@ members; that failure has no symptom in the history at all, and
 `misfit_mean` hides a lot. At the last step of this run:
 
 ```python
-history.misfit_min[-1]    # 4.5927
-history.misfit_mean[-1]   # 6.7961
-history.misfit_max[-1]    # 43.2523
+history.misfit_min[-1]    # 4.5889
+history.misfit_mean[-1]   # 8.1181
+history.misfit_max[-1]    # 69.4678
 ```
 
-The worst member fits six times worse than the average one. That is not a
+The worst member fits eight times worse than the average one. That is not a
 problem in itself — 64 members drawn from a wide prior will not all end up in
 the same place — but it is the kind of thing to look at before averaging
 anything.
@@ -209,7 +211,7 @@ again.
 
 ```python
 evaluation = result.last_evaluation
-evaluation.misfits[:4]    # [ 5.0189  29.4126   4.9678   4.7952]
+evaluation.misfits[:4]    # [ 5.5138  28.2639   4.721    5.1447]
 ```
 
 Note that `last_evaluation` is not an evaluation of `result.ensemble`. On a run
@@ -224,8 +226,8 @@ different number from the average of the members' misfits, and the difference
 is large:
 
 ```python
-evaluation.center_misfit      # 4.6065
-evaluation.misfits.mean()     # 6.7961
+evaluation.center_misfit      # 4.6114
+evaluation.misfits.mean()     # 8.1181
 ```
 
 Both are correct. A misfit is a squared quantity, so averaging the members'
@@ -237,7 +239,7 @@ $$\frac{J-1}{2J}\operatorname{tr}\!\bigl(W \widehat C_{vv} W^{\top}\bigr),$$
 where $J$ is the number of members, $\widehat C_{vv}$ the ensemble's
 prediction covariance and $W$ divides by the observation error — so the gap is
 the ensemble's own prediction spread, measured in units of observation noise.
-It is 2.1896 here, and accounts for the difference to the last digit. It
+It is 3.5066 here, and accounts for the difference to the last digit. It
 shrinks as the ensemble collapses, so the two numbers converge in the
 optimization form and stay apart in the sampling form.
 
@@ -251,16 +253,14 @@ will go looking for a bug.
 The ensemble is the answer, but a two-moment summary of it is one line:
 
 ```python
-from enskit.gauss import Gaussian
-
-fitted = Gaussian.from_samples(result.ensemble)
-fitted.mean                    # [1.9802  1.4741]
-fitted.cov.diag() ** 0.5       # [0.0396  0.0363]
+fitted = result.ensemble.project()
+fitted.mean("u")                    # [1.9794  1.4737]
+fitted.cov("u").diag() ** 0.5       # [0.0374  0.0338]
 ```
 
 That is a fit to the final ensemble, not a further conditioning step. It gives
 you the covariance — including the correlation between the amplitude and the
-rate, which is 0.83 here and is the part of the answer that a pair of standard
+rate, which is 0.80 here and is the part of the answer that a pair of standard
 deviations does not carry — and it can be drawn from, which gives new points
 rather than the 64 you already have.
 
@@ -270,12 +270,11 @@ The misfit and the effective sample size are both public functions, so a loop
 you drive yourself can compute them:
 
 ```python
-from enskit.eki import effective_sample_size, misfits
-
-phi = misfits(problem.y, problem.forward(result.ensemble), problem.noise_cov)
-phi.mean()                         # 5.7186
-effective_sample_size(phi, 0.1)    # 61.7289 -- were the next increment 0.1
-effective_sample_size(phi, 1.0)    # 57.1571
+phi = eki.misfits(problem.y, problem.forward(result.ensemble["u"]),
+                  problem.noise_cov)
+phi.mean()                             # 5.6556
+eki.effective_sample_size(phi, 0.1)    # 62.458 -- were the next increment 0.1
+eki.effective_sample_size(phi, 1.0)    # 52.945
 ```
 
 `effective_sample_size` is what an adaptive schedule evaluates, and it needs

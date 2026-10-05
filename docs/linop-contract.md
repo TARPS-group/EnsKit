@@ -663,9 +663,9 @@ and nothing in the package relies on it.
 `PSDLowRank(F)` represents $F F^\top$ for a stored factor $F$. It is the
 layer's one shipped class subject to the singular-by-construction rule
 stated under `factor` above — its thin-factor instances are what that rule
-governs — and the covariance representation `enskit.gauss` returns from
-conditioning, where the posterior's rank is bounded by the number of
-samples.
+governs — and the covariance representation `enskit.distribution` returns
+for an ensemble's sample covariance, whose rank is bounded by the number of
+particles.
 
 - **One data field**, `F`, an `Array` of shape `(n, k)` with $n, k \ge 1$.
   **No relation is imposed between $n$ and $k$**: the factor may be thin,
@@ -705,8 +705,8 @@ exactly 2, and both core sizes at least 1. Tier 4, in debug mode,
 additionally asserts that `F` is finite — the same check `DensePSD` applies
 to its own factor, and for the same reason: a non-finite factor makes every
 operation `nan` with no exception, and `PSDLowRank` is the class
-`enskit.gauss` returns from conditioning, where a non-finite factor means the
-conditioning itself failed. Neither violation is caught by
+`enskit.distribution` returns for a sample covariance, where a non-finite
+factor means a failed particle reached the projection. Neither violation is caught by
 the conformance suite, which is why they are named here — a rank-3 `F`
 produces a *directly constructed* operator reporting a non-empty
 `batch_shape`, which {ref}`contract-families` forbids, and $k = 0$
@@ -1119,8 +1119,8 @@ reshape unless the sides are equal.
 `IdentityPlusGram(S)` is the operator $A = I_k + SS^\top$ for a `(k, N)`
 array $S$, exactly 2-D with both sizes positive and no relation required
 between them. Its `solve_factor` and inverse square root are the building
-blocks the layers above compute with; the consumers are `enskit.gauss`
-today and the distribution layer from PR 4.
+blocks the layers above compute with; its consumer is the distribution
+layer, whose every conditioning path goes through it.
 
 **One SVD, at construction.** The constructor computes the thin SVD
 $S = U\Sigma V^\top$, $r = \min(k, N)$, and stores `S`, `U`, `sigma` and

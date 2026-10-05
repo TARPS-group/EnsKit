@@ -8,12 +8,99 @@ Gaussian and a sample container, 2026-10-03 when the EnsKit redesign was
 adopted, the same day after PR 1's renames, again after PR 2's linalg
 additions, and 2026-10-04 after PR 3's distribution contract, PR 10's
 Kronecker operators, PR 4's `enskit.distribution`, the fix for #60, PR 5's
-`enskit.maps` and PR 6's `enskit.kalman`. Read
+`enskit.maps`, PR 6's `enskit.kalman` and PR 7's `enskit.algorithms.eki`. Read
 `CLAUDE.md` first for conventions, including the layer rules, which the
 redesign replaced; then the two sections below; then the rest of this file,
 which describes the code as it stands before the redesign lands. That
 description is historical: where it names `pyeki.<module>`, the module is now
 `enskit.<module>`.
+
+## 2026-10-04: PR 7, `enskit.algorithms.eki`; `gauss` and `eki` deleted
+
+The EKI driver is ported onto the new layers as `enskit.algorithms.eki`
+(private modules `_values`, `_schedules`, `_driver`, `_helpers`), and
+`enskit.algorithms` holds the inflation and relaxation policies every driver
+shares (`_policies`, `_common`). `docs/eki-contract.md` was revised, not
+rewritten from the stubs: its *Departures from the design* and *Changes from
+the previous contract* sections list everything that moved, and its *Ported
+regression tests* table maps the old `tests/test_eki.py` onto the new one.
+`enskit.gauss`, `enskit.eki`, `tests/test_gauss.py`,
+`docs/gaussian-contract.md` and `docs/user-guide/conditioning.md` are gone;
+`enskit.toy` was ported (priors are `distribution.Gaussian`s over block
+`"u"`; `u_dim`/`v_dim` became `parameter_dim`/`data_dim`); the import-linter
+contract names `enskit.algorithms` without parentheses and no longer lists
+the old modules. `enskit.testing` gained `check_schedule`, `check_inflation`,
+`check_relaxation` and `check_stopping_rule`.
+
+**Decided here** (each is in the contract):
+
+- **The key splits four ways**, `(next, inflate, evaluate, update)`: a
+  simulator declaring `needs_key` gets `key_evaluate` through `pushforward`.
+- **`update_rule` is required**; `on_failure` defaults to `"raise"`, so a
+  repair is opted into. The update rule no longer sees `step`, `beta` or the
+  increment (it is a `kalman.UpdateRule`); a ladder-dependent behavior is a
+  relaxation, which receives `step` and `beta`.
+- **Relaxation** (`RelaxToPriorSpread`, `RelaxToPriorPerturbations`) is a new
+  axis, applied after each update with `prior` the evaluated particles; the
+  old contract excluded it.
+- **`assimilate` returns the state only** (the stub's signature), so
+  `HistoryRecord.from_evaluation(evaluation, increment=None)` is public: it is
+  how the driver builds every record, and how a hand loop gets the same ones.
+  `iterate` still yields `(state, record, evaluation)`.
+- **The promotion warning stays once per run**: the driver records each
+  evaluation's warnings, re-issues them at their own location with a
+  per-run registry, and drops every promotion warning after the first. It
+  recognizes the maps layer's warning by its text (`_PROMOTION_TEXT` in
+  `_driver.py`); test 29 pins the coupling.
+- **The update runs eagerly**, about 3 ms per step at $J = 64$; the debug
+  checks of the layers below therefore run. Test 14 counts compilations with
+  `jax.monitoring` across whole runs.
+
+**For later PRs.**
+
+- **PR 8 (EnKF).** Reuse `enskit.algorithms.Inflation`/`Relaxation` with
+  context `time=` (the protocols say a driver passes what it has), and
+  `algorithms._common.pytree_class` and `check_policy_output`. The contract's
+  *Inflation and relaxation* section is the normative home of the shared
+  policies; the EnKF contract should refer to it rather than restate it.
+- **PR 9 (localization).** A localized rule plugs into `update_rule=` with no
+  driver change. Obligation 25's matrix should gain it.
+- **PR 11 (documentation).** The tutorials' code is on the new API; their
+  prose is not. Every printed value and every number in prose that states an
+  output was recomputed (the prior draw changed, since `from_prior` and
+  `Gaussian.sample` each split their key, and tutorial 1 runs
+  `kalman.Matheron()` where it ran `PathwiseUpdate`). Five claims no longer
+  hold, each pinned as a strict expected failure in section 5 of
+  `tests/test_tutorials.py` naming its sentence: tutorial 1's "tracks the
+  distributions fairly well" and "the second distribution presents a
+  challenge" (the rate spread at the fifth level is now 0.73 of the exact
+  one, the second level's 1.29), the one-step error band at 64 particles
+  (now `[1.55, 19.51]`; at 2048 it is still in band), and tutorial 3's
+  "`tau=2` stops one step earlier" and "within 13% of the target" (both
+  rules now stop at beta = 2). Prose still naming old classes:
+  tutorial 1 lines ~297 and ~331 (`PathwiseUpdate`, `TransformUpdate`),
+  tutorial 2 line 10 ("the library's default update rule"), tutorial 3 line
+  ~225, and the stubs 4, 5, 7, 8 (`on_failure='repair'` as the default) and 9
+  (`enskit.eki.testing`, `check_update`, `synthetic_evaluation`).
+  Tutorial 7's numbers changed most: the high-dimensional run's spread is
+  0.302 against an exact 0.990 (3.3 times too small, over about 30 steps),
+  not 0.014 and seventy times; the old figure was a key coincidence, the old
+  particles reproducing the rows of `G` (see the toy note below).
+  `running-an-inversion.md` and `writing-a-forward-model.md` were rewritten
+  for the new API, and tests run every block of the first and of the landing
+  page; `writing-a-forward-model.md` could fold into `maps.md`.
+  `docs/joint-factor.md` is kept, with a status note mapping the old class
+  names to the new ones.
+- **Toy keys.** `toy.linear_gaussian(seed=s)` draws `G` from
+  `split(key(s), 3)[0]`, which equals `split(key(s), 2)[0]`. The old
+  `from_prior(key(s))` drew its particles from that same key, so at seed 0 the
+  particles were multiples of the rows of `G`. The new `Gaussian.sample`
+  splits once more and avoids it by accident; deriving the toy's keys with
+  `fold_in` would make it robust but changes every toy number.
+- **Float32 runs** raise at the first update with either rule (#68: scaling
+  an operator promotes it to float64). A strict expected failure,
+  `tests/test_eki.py::test_29_a_float32_run_stays_float32`, flips when #68 is
+  fixed; remove the contract's sentence then.
 
 ## 2026-10-04: PR 6, `enskit.kalman`
 
@@ -703,9 +790,9 @@ pyEKI. Nothing domain-specific should come back across.
 
 Follow the plan in `docs/redesign/index.md`, one pull request at a time, in
 a fresh session for each, as described in "Pull requests and handoffs" in
-`CLAUDE.md`. PRs 1 (#35), 2 (#36), 3 (#37), 4 (#38), 5 (#39), 6 (#40) and
-10 (#44) are done. PR 7 (#41, EKI) and PR 9 (#43, localization) both have
-their dependencies met and can run side by side.
+`CLAUDE.md`. PRs 1 (#35), 2 (#36), 3 (#37), 4 (#38), 5 (#39), 6 (#40),
+7 (#41) and 10 (#44) are done. PR 8 (#42, EnKF) and PR 9 (#43,
+localization) both have their dependencies met and can run side by side.
 #54's fix would change the regressions pinned in
 obligation 17, by design. The notes below, written before the redesign,
 still apply to the pull requests they name; their `pyeki` modules are now

@@ -351,3 +351,124 @@ def test_check_conditional_map_checks_the_keyed_path_when_asked():
     check_conditional_map(cmap, joint, "g")  # the keyed path is opt-in
     with pytest.raises(AssertionError, match="obligation 7"):
         check_conditional_map(cmap, joint, "g", keyed_noise_free=True)
+
+
+# ---------------------------------------------------------------------------
+# the policy checks of the algorithm layer
+# ---------------------------------------------------------------------------
+
+
+class _Schedule:
+    """A conforming schedule, which each mutant breaks in one way."""
+
+    n_steps = None
+    beta_target = 1.0
+
+    def next_increment(self, evaluation):
+        return jnp.minimum(0.1, self.beta_target - evaluation.beta)
+
+
+class _CountsItsCalls(_Schedule):
+    def __init__(self):
+        self.calls = 0
+
+    def next_increment(self, evaluation):
+        self.calls += 1
+        return 0.1 * self.calls
+
+
+class _Overshoots(_Schedule):
+    def next_increment(self, evaluation):
+        return 0.5
+
+
+class _NonPositive(_Schedule):
+    def next_increment(self, evaluation):
+        return 0.0
+
+
+class _FloorsANan(_Schedule):
+    """Reads the misfits and turns a nan into a finite step: the silent failure."""
+
+    def next_increment(self, evaluation):
+        spread = jnp.var(evaluation.misfits)
+        return jnp.where(spread > 1.0, 0.2, 0.01)
+
+
+class _BadAttributes(_Schedule):
+    n_steps = 0
+
+
+def test_check_schedule_passes_a_conforming_schedule():
+    from enskit.testing import check_schedule
+
+    check_schedule(_Schedule())
+
+
+@pytest.mark.parametrize(
+    ("schedule", "message"),
+    [
+        pytest.param(_CountsItsCalls(), "not pure", id="counts-its-calls"),
+        pytest.param(_Overshoots(), "past its beta_target", id="overshoots"),
+        pytest.param(_NonPositive(), "strictly positive", id="zero-increment"),
+        pytest.param(_FloorsANan(), "nan misfit", id="floors-a-nan"),
+        pytest.param(_BadAttributes(), "n_steps", id="bad-n-steps"),
+    ],
+)
+def test_check_schedule_fails_each_mutant(schedule, message):
+    from enskit.testing import check_schedule
+
+    with pytest.raises(AssertionError, match=message):
+        check_schedule(schedule)
+
+
+def test_check_inflation_and_relaxation_fail_each_mutant():
+    from enskit.testing import check_inflation, check_relaxation
+
+    def demotes(key, *, ensemble, **_):
+        return ensemble.assign(u=ensemble["u"].astype(jnp.float32))
+
+    def drops(key, *, ensemble, **_):
+        return ensemble.drop("v")
+
+    def unkeyed(key, *, ensemble, **_):
+        noise = jax.random.normal(jax.random.key(len(_RANDOM)), ensemble["u"].shape)
+        _RANDOM.append(None)
+        return ensemble.assign(u=ensemble["u"] + noise)
+
+    def strict(key, *, ensemble, step, beta):
+        return ensemble
+
+    for inflation, message in (
+        (demotes, "dtype"),
+        (drops, "blocks"),
+        (unkeyed, "not deterministic"),
+        (strict, "unexpected keyword"),
+    ):
+        with pytest.raises((AssertionError, TypeError), match=message):
+            check_inflation(inflation)
+
+    def reweights(*, prior, posterior, **_):
+        return Ensemble(
+            {n: posterior[n] for n in posterior.names},
+            log_weights=jnp.zeros(posterior.n_particles),
+        )
+
+    with pytest.raises(AssertionError, match="weighted"):
+        check_relaxation(reweights)
+    with pytest.raises(AssertionError, match="blocks"):
+        check_relaxation(lambda *, prior, posterior, **_: prior)
+
+
+_RANDOM: list = []
+
+
+def test_check_stopping_rule_fails_an_array_and_an_impure_rule():
+    from enskit.testing import check_stopping_rule
+
+    with pytest.raises(AssertionError, match="Python bool"):
+        check_stopping_rule(lambda evaluation: evaluation.center_misfit < 1.0)
+
+    flips = iter([True, False])
+    with pytest.raises(AssertionError, match="not pure"):
+        check_stopping_rule(lambda evaluation: next(flips))

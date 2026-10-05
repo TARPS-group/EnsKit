@@ -18,8 +18,8 @@ layer, and this page refers to {doc}`distribution-contract` and
 
 PR 5 of the redesign plan wrote this page and implemented it in
 `enskit.maps` and `enskit.testing`. The simulator contract replaces, for the
-new layers, the forward-model section of {doc}`eki-contract`, which keeps
-governing `enskit.eki` until that module is deleted in PR 7. Where this page
+new layers, the forward-model section of the old EKI contract; PR 7 deleted
+the old `enskit.eki` and made {doc}`eki-contract` point here. Where this page
 departs from the design's stubs (`docs/redesign/stubs/maps.py`), it says so
 in {ref}`maps-departures`, and this page wins.
 :::
@@ -532,8 +532,7 @@ whose value is `True`; `pushforward` then calls it as `f(key, *inputs)` and
 raises `ValueError` when no key is given. Any other value, or no attribute,
 means no key. `BlackBox` sets the attribute from its argument; a JAX
 function can set it directly (`f.needs_key = True`). The declaration is read
-off the callable because a callable has nowhere else to put it, as
-`enskit.eki.testing` reads `leaves_span` off an update rule.
+off the callable because a callable has nowhere else to put it.
 
 The draws are pinned. Same key, same arguments and same representation give
 identical arrays across EnsKit releases, for a fixed JAX version:
@@ -808,8 +807,8 @@ algebra, never routed through the layer. The suite must verify at least:
 ### Ported regression tests
 
 The simulator contract and its checker moved here from `enskit.eki`; the
-checker's tests moved with them, under the same claims. Until PR 7 deletes
-`enskit.eki`, the originals stay in `tests/test_toy.py`.
+checker's tests moved with them, under the same claims. PR 7 deleted the
+originals from `tests/test_toy.py` with `enskit.eki`.
 
 | old test (`tests/test_toy.py`) | new test (`tests/test_maps.py`) |
 | ------------------------------ | ------------------------------- |

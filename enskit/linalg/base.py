@@ -1156,8 +1156,8 @@ def _pytree_dataclass(cls: type, *, allow_none: bool = False) -> type:
     """Frozen dataclass plus JAX pytree registration, for any class.
 
     The implementation behind :func:`linop`, under a name that does not imply
-    the decorated class is a linear operator: ``enskit.gauss`` and
-    ``enskit.distribution`` declare their classes with this. Not exported —
+    the decorated class is a linear operator: ``enskit.distribution``
+    declares its classes with this. Not exported —
     :func:`linop` is the public name, and the behavior is documented there.
 
     ``allow_none`` additionally admits optional data fields, ``X | None`` and

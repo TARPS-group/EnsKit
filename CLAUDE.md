@@ -17,10 +17,9 @@ clarity and correctness over cleverness, and keep the public surface small.
 and the plan, a sequence of pull requests numbered 0 to 12; the full design
 document is `docs/redesign/design.html`, and `docs/redesign/stubs/` holds the
 docstrings each layer starts from. PR 1 renamed the package from `pyeki`;
-the GitHub repository is `TARPS-group/pyEKI` until it is renamed. Until PR 7,
-the old `gauss` and `eki` modules exist beside the new layers and keep their
-own contracts (`docs/gaussian-contract.md`, `docs/eki-contract.md`); do not
-extend them, and do not make the new layers depend on them.
+the GitHub repository is `TARPS-group/pyEKI` until it is renamed. PR 7
+deleted the old `gauss` and `eki` modules; every layer of the list below now
+exists, and each has its normative contract in `docs/`.
 
 The layers, each building on the ones above it in this list:
 
@@ -293,9 +292,10 @@ raising.
 
 `pytest`, in `tests/`. Five kinds:
 
-1. **Conformance**: every operator instance through `check_operator`; from
-   PR 6, every update rule through `check_update_rule` and every conditional
-   map through `check_conditional_map`.
+1. **Conformance**: every operator instance through `check_operator`, every
+   update rule through `check_update_rule`, every conditional map through
+   `check_conditional_map`, and every shipped schedule, stopping rule,
+   inflation and relaxation through its check in `enskit.testing`.
 2. **Targeted regression**: one test per bug class that produces wrong numbers
    without raising. These are the valuable ones; do not delete them as
    redundant. When a layer is reimplemented, its regression tests are ported,
