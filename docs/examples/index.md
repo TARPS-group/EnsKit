@@ -1,6 +1,6 @@
 # Examples
 
-Fifteen worked examples, each a problem stated precisely and solved end to
+Sixteen worked examples, each a problem stated precisely and solved end to
 end. Each says when its method is the right tool, writes out the mathematics
 beside the code, cites the papers the method comes from, and ends with
 checks of what it claims. The {doc}`../tutorials/index` teach one idea at a
@@ -45,6 +45,7 @@ grouped by the level of the API they work at, as the user guide is.
 | 8 | {doc}`ex08_hyperparameters` | fitting hyperparameters by the gradient of the log evidence |
 | 10 | {doc}`ex10_importance` | EKI as the proposal of an importance sampler |
 | 15 | {doc}`ex15_differentiability` | derivatives through an update, an EKI run, and an ensemble likelihood whose simulator is outside JAX |
+| 16 | {doc}`ex16_statistical_linearization` | the affine fit of a simulator over an ensemble: the average Jacobian, its residuals, and the update it implies |
 
 ```{toctree}
 :hidden:
@@ -65,6 +66,7 @@ ex12_localization
 ex13_named_blocks
 ex14_custom_rule
 ex15_differentiability
+ex16_statistical_linearization
 ```
 
 ## How the examples are built

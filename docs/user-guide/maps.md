@@ -186,6 +186,71 @@ covariances are linear in the particles. Linear structure pays off once the
 Gaussian is not a sample covariance: a prior, a static covariance, or the
 result of earlier exact operations.
 
+## Linearizing a simulator: `statistical_linearization`
+
+```python
+# ens holds u and g = simulate(u), from the pushforward at the top of the page
+fit = maps.statistical_linearization(ens, inputs="u", output="g")
+predicted = fit.map(ens["u"])   # (64, 3): A u_j + b, a maps.Linear applied
+fit.residuals                   # (64, 3): g_j - A u_j - b
+fit.residual_cov                # Omega, their covariance: a (3, 3) operator
+```
+
+Below, $x$ stands for the inputs (`u` here) and $y = f(x)$ for the output
+(`g`). The function reads both from the distribution; to linearize a
+simulator, push the particles through it first, as at the top of the page.
+
+An ensemble Kalman update never differentiates $f$; what it uses instead is
+the affine map that best predicts $f(x)$ from $x$ over the particles, the
+*statistical linear regression* of $f$ (Lefebvre et al., 2002):
+
+$$
+A = C_{yx}C_{xx}^{-1}, \qquad b = m_y - Am_x, \qquad
+\Omega = \operatorname{cov}\big(f(x) - Ax - b\big).
+$$
+
+`statistical_linearization` returns it, as a `Linear` map you can call on
+particles or push a Gaussian through exactly, plus the residuals. It reads
+the output block from the distribution and never calls $f$, so an ensemble
+whose outputs a run already computed costs nothing more to linearize.
+
+**When $x$ is Gaussian, $A$ is the average Jacobian.** By Stein's lemma
+(Stein, 1981),
+$C_{yx} = \mathbb E[Df(x)]\,C_{xx}$ for $x \sim \mathcal N(m, C)$, so
+$A = \mathbb E[Df(x)]$: a derivative averaged over the spread of the
+particles rather than taken at a point. For any other distribution of $x$,
+such as an ensemble after a nonlinear update, $A$ is the least-squares slope,
+which is not an average Jacobian in general.
+
+**The update uses this linear model.** A deterministic square-root update
+of the ensemble on an observed $y$ with noise $R$
+(`kalman.SymmetricSquareRoot`) gives the same mean and covariance as the
+exact linear-Gaussian update with model $A$, intercept $b$ and noise
+$R + \Omega$: the residual is treated as extra noise. The stochastic
+`kalman.Matheron` update agrees with it in expectation over its noise
+draws. To add $\Omega$ to a noise covariance
+yourself, use `LowRankUpdate(R, fit.residual_cov.factor())`; $\Omega$ alone
+is singular, so it cannot be conditioned on.
+
+**What the residuals can tell you depends on $J$.** With $d_x$ input
+coordinates:
+
+- if $d_x \ge J - 1$, the fit passes through every particle. The residuals
+  are zero to round-off whatever $f$ is, and every $A$ that fits agrees on
+  the span of the input anomalies. `min_norm=True` is required here, and
+  returns the $A$ that is zero off that span: the linearization an EKI run
+  with fewer particles than parameters implicitly uses;
+- if $d_x < J - 1$, the residuals measure how far $f$ is from affine over
+  the particles. $\Omega$ uses the divisor $J - 1$; for a linear model with
+  independent errors it underestimates their covariance by the factor
+  $(J - 1 - d_x)/(J - 1)$.
+
+To shrink the fit toward zero, regress a Gaussian with a term on the inputs,
+`maps.statistical_linearization(ens.project().add_noise(x=Lam), ...)`, which
+is ridge regression; a Gaussian has no particles, so `residuals` is then
+`None`. {doc}`distributions` describes the regression itself, and example
+{doc}`../examples/ex16_statistical_linearization` works one problem through.
+
 ## Your own structured map
 
 A map with structure of its own, such as a linearization or a sigma-point
@@ -195,3 +260,12 @@ rule, implements the two methods of the `StructuredMap` protocol,
 them. The contract's {ref}`maps-structured` lists what an implementation
 must do; `pushforward` checks that the result keeps every other block in its
 position.
+
+## References
+
+- Lefebvre, T., Bruyninckx, H. & De Schutter, J. (2002). Comment on "A new
+  method for the nonlinear transformation of means and covariances in
+  filters and estimators". *IEEE Transactions on Automatic Control*, 47(8),
+  1406–1409.
+- Stein, C. M. (1981). Estimation of the mean of a multivariate normal
+  distribution. *The Annals of Statistics*, 9(6), 1135–1151.

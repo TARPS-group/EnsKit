@@ -113,6 +113,50 @@ batch of values. It is the evidence of values under a joint, and the objective
 for tuning hyperparameters: its first derivatives are finite even at a
 collapsed ensemble.
 
+## Regression: the conditional as an affine function
+
+```python
+reg = approx.regression("g", given="x")
+reg.coefficients["x"], reg.intercept, reg.residual_cov   # A, c, Omega
+```
+
+`condition` answers "what is $g$ given *this* value of $x$". `regression`
+answers it for every value at once: the conditional of a Gaussian is
+
+$$
+g \mid x \sim \mathcal N(Ax + c,\ \Omega), \qquad
+A = C_{gx}C_{xx}^{-1}, \qquad c = m_g - Am_x, \qquad
+\Omega = C_{gg} - AC_{xg},
+$$
+
+and `regression` returns $A$ (one operator per given block), $c$ and
+$\Omega$. On an ensemble's projection this is the least-squares regression of
+the particles' $g$ on their $x$. Reach for it when you want the relationship
+itself rather than a conditional at one value: how sensitive one block is
+to another across the particles. The maps layer packages it as a map, {func}`~enskit.maps.statistical_linearization`
+({doc}`maps`).
+
+The given blocks' structure picks the computation, as it does for
+`condition`:
+
+- **With independent terms** on the given blocks it is ridge regression:
+  `ens.project().add_noise(x=Lam).regression("g", given="x")` gives
+  $A = \hat C_{gx}(\hat C_{xx} + \Lambda)^{-1}$.
+- **Without them**, and with at most $J - 1$ given coordinates, it is the
+  unique least-squares fit.
+- **With more given coordinates than $J - 1$**, every $A$ that maps the
+  given blocks' anomalies to the target's fits exactly, and `regression`
+  raises unless you pass `min_norm=True`, which picks the one of least
+  Frobenius norm. That choice depends on your coordinates: rescale a block
+  and a different $A$ has least norm. A ridge term $\varepsilon M$ with
+  small $\varepsilon$ picks the least $\operatorname{tr}(AMA^\top)$ instead.
+
+The given rows' rank is assumed, not measured, outside
+`enskit.linalg.debug_checks()`: duplicated particles (after resampling), a
+coordinate that is constant across particles, or an ensemble already
+conditioned exactly on other blocks give wrong coefficients silently. Check
+in debug mode, or add a ridge term, when that can happen.
+
 ## Moving particles: the two conditional maps
 
 `condition` returns a distribution. To get *particles* of the conditional,

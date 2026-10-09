@@ -1408,6 +1408,14 @@ def test_the_user_guide_page_runs_and_says_what_it_does():
     np.testing.assert_array_equal(np.asarray(ns["kept"].weights)[failed], 0.0)
     _close(ns["traced"]["g"], ns["ens"]["g"])
     assert isinstance(ns["exact"], EnsembleGaussian)
+
+    # The linearization is least squares of g on u, and residuals are its misfit.
+    U, G = np.asarray(ns["ens"]["u"]), np.asarray(ns["ens"]["g"])
+    Ua = np.column_stack([np.ones(len(U)), U])
+    beta = np.linalg.lstsq(Ua, G, rcond=None)[0]
+    _close(ns["fit"].map.op.to_dense(), beta[1:].T, factor=1e4)
+    _close(ns["predicted"], Ua @ beta, factor=1e4)
+    _close(ns["fit"].residuals, G - Ua @ beta, factor=1e4)
     assert type(ns["sampled"]) is EnsembleGaussian
 
     # The joint conditioned on y is the linear-Gaussian posterior.

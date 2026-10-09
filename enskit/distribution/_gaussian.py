@@ -27,6 +27,7 @@ from ..linalg import (
 from . import _common as c
 from ._common import distribution_class
 from ._ensemble import Ensemble, _renamed
+from ._regression import Regression, regression
 
 __all__ = ["Gaussian", "EnsembleGaussian"]
 
@@ -722,6 +723,139 @@ class Gaussian:
             _given_means=tuple(self._means[self.names.index(n)] for n in given),
             _target_rows=tuple(self._factors[self.names.index(n)] for n in targets),
         )
+
+    def regression(self, target: str, *, given, min_norm: bool = False) -> Regression:
+        r"""The regression of block ``target`` on the ``given`` blocks.
+
+        The conditional distribution of :math:`y` = ``target`` given the
+        blocks :math:`x` = ``given`` is Gaussian with a mean affine in the
+        given values and a covariance that does not depend on them:
+
+        .. math::
+
+            y \mid x \sim \mathcal N(Ax + c,\ \Omega), \qquad
+            A = C_{yx} C_{xx}^{-1}, \qquad c = m_y - A m_x, \qquad
+            \Omega = C_{yy} - A C_{xy},
+
+        where :math:`C` is this Gaussian's covariance and :math:`x` stacks
+        the given blocks in block order. :math:`A` minimizes
+        :math:`\mathbb E\lVert y - Ax - c\rVert^2`, and :math:`\Omega` is the
+        covariance of the residual :math:`y - Ax - c`. For the projection of
+        an ensemble (:meth:`Ensemble.project`) this is the least-squares
+        regression of the particles' ``target`` block on their ``given``
+        blocks.
+
+        Write :math:`F_c` for the given blocks' stacked factor rows,
+        :math:`N` for their total dimension, :math:`k` for the latent
+        width, and :math:`F_y` for the target's factor row. Three cases,
+        chosen by the given blocks' structure:
+
+        **Every given block has an independent term** :math:`D_c`. With
+        :math:`S = (WF_c)^\top` and its
+        :class:`~enskit.linalg.IdentityPlusGram` :math:`I + SS^\top`, as
+        in :meth:`condition`,
+
+        .. math::
+
+            A = F_y (I_k + SS^\top)^{-1} F_c^\top D_c^{-1}
+              = C_{yx}(F_cF_c^\top + D_c)^{-1}, \qquad
+            \Omega = F_y (I_k + SS^\top)^{-1} F_y^\top + D_y .
+
+        Adding a term :math:`\Lambda` to the given blocks of an ensemble's
+        projection, ``ens.project().add_noise(x=Lam)``, makes this the ridge
+        regression :math:`A = \hat C_{yx}(\hat C_{xx} + \Lambda)^{-1}`.
+
+        **No given block has a term, and** :math:`N \le r`, where
+        :math:`r = J - 1` for an :class:`EnsembleGaussian` and :math:`r = k`
+        otherwise. With the thin QR decomposition :math:`F_c^\top = QR`, the
+        unique least-squares solution is
+
+        .. math::
+
+            A = F_y Q R^{-\top}, \qquad
+            \Omega = F_y (I_k - QQ^\top) F_y^\top + D_y .
+
+        **No given block has a term, and** :math:`N > r`. The coefficients
+        are not unique: every :math:`A` with :math:`AF_c = F_y` fits
+        exactly. With ``min_norm=True`` the result is the one of least
+        Frobenius norm, :math:`A = F_y F_c^{+}`. Computed with :math:`H`, an
+        orthonormal basis of :math:`\mathbf 1^\perp` for an
+        :class:`EnsembleGaussian` (whose factor rows annihilate
+        :math:`\mathbf 1`) and :math:`H = I_k` otherwise, and the thin QR
+        decomposition :math:`F_c H = QR`:
+
+        .. math::
+
+            A = F_y H R^{-1} Q^\top, \qquad
+            \Omega = (F_y - AF_c)(F_y - AF_c)^\top + D_y = D_y
+            \ \text{(to round-off)}.
+
+        Parameters
+        ----------
+        target : str
+            The block regressed.
+        given : str or sequence of str
+            Keyword-only. The blocks it is regressed on, at least one, not
+            including ``target``.
+        min_norm : bool
+            Keyword-only. Whether to return the minimum-norm solution when
+            the coefficients are not unique. Ignored when they are.
+
+        Returns
+        -------
+        Regression
+            ``coefficients`` maps each given block, in block order, to its
+            ``(d_y, d_b)`` operator :math:`A_b`; ``intercept`` is :math:`c`;
+            ``residual_cov`` is :math:`\Omega`, as :meth:`cov` returns a
+            block's covariance.
+
+        Raises
+        ------
+        KeyError
+            If a name is not a block.
+        ValueError
+            If ``target`` is also given, no block is given, a name is
+            repeated, some but not all given blocks have independent terms,
+            or the coefficients are not unique and ``min_norm`` is
+            ``False``. In debug mode, also if the given factor rows (or,
+            for the minimum-norm solution, their columns) are rank deficient
+            to working precision, or a result is not finite.
+        TypeError
+            If ``target`` is not a ``str``, or ``min_norm`` not a ``bool``.
+        UnsupportedOpError
+            If a given block with a factor row has a term that cannot
+            ``whiten`` and ``solve``.
+
+        Notes
+        -----
+        The coefficients are held as operators of width at most :math:`k`,
+        never as dense ``(d_y, d_b)`` arrays, except in the unique
+        least-squares case, where :math:`N \le k`. The residual factor row
+        is materialized as a ``(d_y, k)`` array in the cases without
+        independent terms, as in :meth:`condition`.
+
+        The minimum-norm solution depends on the coordinates of the given
+        blocks: rescaling a block changes which interpolating :math:`A` has
+        least norm. A ridge term :math:`\varepsilon M`, as
+        :math:`\varepsilon \to 0`, selects the solution minimizing
+        :math:`\operatorname{tr}(AMA^\top)` instead.
+
+        With independent terms, the coefficients are computed as
+        :math:`(I + SS^\top)^{-1}` applied to :math:`F_c^\top D_c^{-1}`, which
+        loses relative accuracy like :math:`\varepsilon(1 + \sigma_{\max}^2)`
+        for the largest singular value :math:`\sigma_{\max}` of :math:`S`:
+        a ridge term that is tiny relative to the given blocks' spread is
+        better dropped, with ``min_norm=True`` when :math:`N > r`.
+
+        Rank is checked only in debug mode, as for :meth:`condition`. Outside
+        it, given factor rows of lower rank than the case assumes give
+        non-finite or wrong coefficients without raising: duplicated
+        particles (after resampling, for example), a given coordinate that
+        is constant across particles, an :class:`EnsembleGaussian`
+        conditioned exactly on other blocks, or a weighted projection, whose
+        rank is at most :math:`J - 1` and less with zero weights.
+        """
+        return regression(self, target, given, min_norm)
 
     def log_density(self, values=None, /, **block_values) -> Array:
         r"""Log density of the marginal over exactly the blocks in ``values``.

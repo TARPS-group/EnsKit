@@ -165,14 +165,16 @@ repeated raises `ValueError`.
 | `ConditionalMap` | protocol: a pointwise map from samples of a joint and a value $y^*$ to samples of the conditional | user code; `MatheronMap` is the shipped instance |
 | `MatheronMap` | the exact conditional of a `Gaussian`, $x \mapsto x + K(y^* - y)$ | `Gaussian.conditional_map` |
 | `SquareRootMap` | the square-root reading of an `EnsembleGaussian`'s conditional, for its own particles | `EnsembleGaussian.square_root_map` |
+| `Regression` | the conditional of one block given others, as coefficients, an intercept and a residual covariance | `Gaussian.regression` |
 | `reweight`, `effective_sample_size`, `resample` | operations on weights | — |
 | `exact_moment_ensemble` | particles whose sample moments equal a Gaussian's exactly | — |
 
 Four rules govern the set:
 
 1. **Distributions return distributions; maps return particles.** Every
-   `Gaussian` method returns a `Gaussian`, an `Ensemble`, an operator or an
-   array; nothing returns a decomposition object. The two maps hold
+   `Gaussian` method returns a `Gaussian`, an `Ensemble`, an operator, an
+   array, or a `Regression`, which holds only operators and an array;
+   nothing returns a decomposition object. The two maps hold
    everything that does not depend on the given value, built once, and are
    called with the value.
 2. **The Gaussian approximation is written at the call site.** Conditioning
@@ -921,6 +923,79 @@ independent term: there is no exact-value conditional map (`ValueError`). At
 least one block must remain as a target. The given blocks' `whiten` is
 checked at build.
 
+(dist-regression)=
+### `regression(target, *, given, min_norm=False)`
+
+The regression of block $y$ = `target` on the blocks $x$ = `given` (a `str`
+or a sequence of `str`, reordered to block order): the conditional of $y$
+given $x$ as an affine function of the given values,
+
+$$
+y \mid x \sim \mathcal N(Ax + c,\ \Omega), \qquad
+A = C_{yx}C_{xx}^{-1}, \qquad c = m_y - Am_x, \qquad
+\Omega = C_{yy} - AC_{xy},
+$$
+
+returned as a `Regression`: `coefficients`, a mapping from each given block,
+in block order, to its $(d_y, d_b)$ operator $A_b$; `intercept`, the
+$(d_y,)$ array $c$; and `residual_cov`, $\Omega$, as `cov` would return the
+covariance of a block with the conditional's factor row and $y$'s own term.
+Its static attributes are `target` and `given`. It is a frozen pytree, so a
+`jax.vmap` over the call returns a family. $A$ minimizes
+$\mathbb E\lVert y - Ax - c\rVert^2$; for an ensemble's projection it is the
+least-squares regression of the particles, weighted by their weights when
+there are any.
+
+Write $F_c$ for the given blocks' stacked factor rows, $N$ for their total
+dimension and $F_y$ for the target's row. As for `condition`, mixed given
+blocks are a `ValueError`, and otherwise the case is chosen by structure:
+
+| case | computation | $\Omega$ |
+| --- | --- | --- |
+| every given block has a term | $S$ and its `IdentityPlusGram` as in {ref}`dist-core`; $A = F_y (I + SS^\top)^{-1}F_c^\top D_c^{-1}$, from `D_c.solve_mat(F_c)` and the gram's `solve_mat` | $F_y T T^\top F_y^\top + D_y$ |
+| no term, $N \le r$ | thin QR $F_c^\top = QR$; $A = F_y QR^{-\top}$ | $F_y(I - QQ^\top)F_y^\top + D_y$ |
+| no term, $N > r$, `min_norm=True` | thin QR $F_cH = QR$; $A = F_yHR^{-1}Q^\top = F_yF_c^{+}$ | $(F_y - AF_c)(F_y - AF_c)^\top + D_y$, which is $D_y$ to round-off |
+
+Here $r = J - 1$ for an `EnsembleGaussian`, whose factor rows annihilate
+$\mathbf 1$, and $H$ is then a fixed orthonormal basis of
+$\mathbf 1^\perp$; otherwise $r = k$ and $H = I_k$. A target with no factor
+row has zero coefficients (`Zero` operators) and $\Omega = D_y$.
+
+- **The noisy case is ridge regression.** On an ensemble's projection,
+  `add_noise(x=Lam)` before `regression` gives
+  $A = \hat C_{yx}(\hat C_{xx} + \Lambda)^{-1}$. It needs `whiten` and
+  `solve` of the term of every given block with a factor row
+  (`UnsupportedOpError` before any work); a block without one contributes
+  zero coefficients and uses neither. It
+  loses relative accuracy like $\varepsilon(1 + \sigma_{\max}^2)$, since
+  $(I + SS^\top)^{-1}$ is applied to $F_c^\top D_c^{-1} = SW$ rather than
+  read off the decomposition, which would need $W^\top$, an operation
+  operators do not provide.
+- **The exact case without `min_norm` and with $N > r$ raises**
+  `ValueError`, naming both remedies. The minimum-norm solution is a choice:
+  it depends on the given blocks' coordinates, and with several blocks it
+  weighs their units against each other.
+- **Representation.** No $(d_y, d_b)$ array is formed except in the unique
+  exact case, where $N \le k$. Otherwise $A_b$ is `product(F_y, Dense(C_b))`
+  (noisy, $C$ the $(k, N)$ array) or `product(Dense(L), Dense(Q_b).T)`
+  (minimum norm, $L$ the $(d_y, r)$ array), of width at most $k$. The
+  residual factor row is a $(d_y, k)$ `Dense` in both exact cases, as in
+  `condition`.
+- **Rank is a value precondition**, as for exact `condition`. The case is
+  chosen from the type and the sizes, assuming the given factor rows have
+  rank $\min(N, r)$. In debug mode the exact cases raise `ValueError` when
+  the triangular factor $R$ fails
+  $\min_i|R_{ii}| > \max(\text{its QR's sizes})\,\varepsilon\max_i|R_{ii}|$.
+  Outside it, lower rank gives non-finite or wrong coefficients without
+  raising. It arises from duplicated particles (after `resample`), a given
+  coordinate constant across particles, an `EnsembleGaussian` conditioned
+  exactly on other blocks (rank $J - 1 - N'$ for $N'$ conditioned
+  coordinates), and a weighted projection, a plain `Gaussian` with $r = k =
+  J$ whose rank is at most $J - 1$, and less with zero weights. Issue #86
+  records the instances and the options.
+- **Counts.** One QR and no SVD in the exact cases; one SVD and no QR in the
+  noisy case.
+
 (dist-log-density)=
 ### `log_density(values=None, /, **block_values)`
 
@@ -1445,8 +1520,8 @@ function is smooth. What holds beyond that is narrower than the design's
 
 | operation | first derivatives | second derivatives |
 | --------- | ----------------- | ------------------ |
-| noisy `condition`, both maps, noisy `log_density`, `cov(a)` with both parts (`LowRankUpdate`'s `solve`, `whiten`, `logdet`) | finite and correct at every input, including exactly repeated and exactly zero singular values of $S$ (a collapsed ensemble, constant given coordinates, zero-padded columns); forward and reverse mode, under `jit` and `vmap` | exact at well-separated singular values; near a tie of gap $\delta$ they lose accuracy like $\varepsilon/\delta$, and `jax.hessian` may be `nan` at an exact tie. Only the log-determinant parts are exact everywhere |
-| exact-value `condition` and `log_density`, `compress` (QR) | finite where the factorized matrix has full rank, which is also where the function is defined or unique | not promised |
+| noisy `condition`, both maps, noisy `log_density`, noisy `regression`, `cov(a)` with both parts (`LowRankUpdate`'s `solve`, `whiten`, `logdet`) | finite and correct at every input, including exactly repeated and exactly zero singular values of $S$ (a collapsed ensemble, constant given coordinates, zero-padded columns); forward and reverse mode, under `jit` and `vmap` | exact at well-separated singular values; near a tie of gap $\delta$ they lose accuracy like $\varepsilon/\delta$, and `jax.hessian` may be `nan` at an exact tie. Only the log-determinant parts are exact everywhere |
+| exact-value `condition` and `log_density`, `compress` (QR), `regression` without independent terms | finite where the factorized matrix has full rank, which is also where the function is defined or unique | not promised |
 | `resample`, keys | zero by declaration (discrete) | — |
 | `exact_moment_ensemble` | linear in the Gaussian's parameters: its QR reads only the key's draw | exact |
 
@@ -1537,7 +1612,7 @@ marker form.
 ## Public surface
 
 `enskit.distribution` exports exactly: `Ensemble`, `Gaussian`,
-`EnsembleGaussian`, `ConditionalMap`, `MatheronMap`, `SquareRootMap`,
+`EnsembleGaussian`, `Regression`, `ConditionalMap`, `MatheronMap`, `SquareRootMap`,
 `reweight`, `effective_sample_size`, `resample` and `exact_moment_ensemble`.
 Anything else is private. The module's private modules are imported only from
 inside `enskit.distribution`. There is no `enskit.distribution.testing`;
@@ -1701,6 +1776,22 @@ output. The suite must verify at least:
     value's shape or type.
 20. **Reproducibility.** Same key, same output elementwise; different keys
     differ; every pinned draw is snapshotted.
+23. **Regression** (`tests/test_linearization.py`). Each case against a
+    hand-written reference: the unique case against least squares with an
+    unpenalized intercept, and against `condition` at several values; the
+    minimum-norm case against the centered pseudo-inverse, and against
+    $GP_{\mathrm{span}}$ when the target is affine in the given block; the
+    noisy case against
+    $\hat C_{yx}(\hat C_{xx} + \Lambda)^{-1}$ for a diagonal and a dense
+    $\Lambda$; a weighted ensemble against weighted least squares; a
+    linear-Gaussian joint returning $(H, R)$ one way and
+    $C H^\top(HCH^\top + R)^{-1}$ with the conditional covariance the other. The two exact
+    computations agree at $N = J - 1$; every returned operator passes
+    `check_operator`; derivatives in each case are finite and equal a dense
+    reference's; the counts above hold; the validation and debug rank
+    checks raise. Two regressions: square, non-symmetric coefficients are
+    recovered untransposed, and the minimum-norm intercept is not penalized
+    (`pinv([1, X])` differs).
 
 ### Ported regression tests
 

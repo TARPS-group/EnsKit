@@ -29,8 +29,8 @@ import build  # noqa: E402  -- docs/examples/build.py, on the path just above
 SOURCES = build.sources()
 
 
-def test_there_are_fifteen_examples():
-    assert [p.stem[:4] for p in SOURCES] == [f"ex{i:02d}" for i in range(1, 16)]
+def test_there_are_sixteen_examples():
+    assert [p.stem[:4] for p in SOURCES] == [f"ex{i:02d}" for i in range(1, 17)]
 
 
 @pytest.mark.parametrize("source", SOURCES, ids=lambda p: p.stem)

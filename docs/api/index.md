@@ -133,10 +133,14 @@ Distributions over named blocks, conditioning and conditional maps. See
 .. autoclass:: enskit.distribution.Gaussian
    :members: independent, dims, latent_dim, batch_shape, mean, factor,
              block_cov, cov, marginal, drop, rename, pipe, add_noise, absorb,
-             compress, condition, conditional_map, log_density, sample
+             compress, condition, conditional_map, regression, log_density,
+             sample
 
 .. autoclass:: enskit.distribution.EnsembleGaussian
    :members: realize_particles, square_root_map
+
+.. autoclass:: enskit.distribution.Regression
+   :members: coefficients, batch_shape
 ```
 
 ### Conditional maps
@@ -184,6 +188,10 @@ Pushing distributions through maps, and the simulator contract. See
 
 .. autoclass:: enskit.maps.BlackBox
    :members: __call__
+
+.. autofunction:: enskit.maps.statistical_linearization
+
+.. autoclass:: enskit.maps.Linearization
 ```
 
 ## enskit.kalman

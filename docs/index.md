@@ -147,7 +147,7 @@ as needed.
 :::
 
 :::{grid-item-card} Examples
-Fifteen worked examples, each a problem stated precisely and solved end to
+Sixteen worked examples, each a problem stated precisely and solved end to
 end, from one call of a driver to a custom update rule.
 +++
 {doc}`examples/index`
