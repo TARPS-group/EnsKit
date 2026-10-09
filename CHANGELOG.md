@@ -5,6 +5,20 @@ Every release of EnsKit, newest first. Until 1.0, a minor release (0.2, 0.3,
 **Changed** or **Removed**; a patch release fixes defects and does not change
 them.
 
+## 0.2.0 (unreleased)
+
+### Added
+
+- **Statistical linearization.** `Gaussian.regression(target, given=...)`
+  returns the conditional of one block given others as an affine function,
+  a `Regression` of coefficient operators, an intercept and a residual
+  covariance: least squares without independent terms on the given blocks,
+  ridge regression with them, and the minimum-norm solution, with
+  `min_norm=True`, when there are more given coordinates than an ensemble's
+  rank. `maps.statistical_linearization(dist, inputs=..., output=...)`
+  packages it as a `Linear` map with the particles' residuals, a
+  `Linearization`. Example 16 works it through.
+
 ## 0.1.0
 
 The first release. EnsKit is the toolkit of ensemble Kalman building blocks

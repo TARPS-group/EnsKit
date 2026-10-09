@@ -5,18 +5,21 @@ replacement for one of them. Any callable is a map; the classes here add
 structure, which :func:`pushforward` uses to act exactly on a
 :class:`~enskit.distribution.Gaussian`, or traceability.
 
-======================== ======================================================
-object                   is
-======================== ======================================================
-:func:`pushforward`      the distribution of ``f(inputs)``, added as a block
-:class:`StructuredMap`   protocol: a map that also pushes a Gaussian exactly
-:class:`Linear`          :math:`x \mapsto Ax + c` for operators :math:`A`:
-                         exact on Gaussians
-:class:`AdditiveNoise`   :math:`x \mapsto x + e`, :math:`e \sim \mathcal N(0, R)`:
-                         exact on Gaussians
-:class:`BlackBox`        a host-side simulator made traceable, with a zero
-                         derivative
-======================== ======================================================
+================================== =======================================================
+object                             is
+================================== =======================================================
+:func:`pushforward`                the distribution of ``f(inputs)``, added as a block
+:class:`StructuredMap`             protocol: a map that also pushes a Gaussian exactly
+:class:`Linear`                    :math:`x \mapsto Ax + c` for operators :math:`A`:
+                                   exact on Gaussians
+:class:`AdditiveNoise`             :math:`x \mapsto x + e`,
+                                   :math:`e \sim \mathcal N(0, R)`: exact on Gaussians
+:class:`BlackBox`                  a host-side simulator made traceable, with a zero
+                                   derivative
+:func:`statistical_linearization`  the affine map :math:`x \mapsto Ax + b` that best
+                                   predicts one block from others, and its residuals
+:class:`Linearization`             the result of :func:`statistical_linearization`
+================================== =======================================================
 
 **The simulator contract.** A *simulator* is any callable used as a map on an
 :class:`~enskit.distribution.Ensemble`. It is called **once per
@@ -49,6 +52,7 @@ and :class:`BlackBox` are frozen pytrees, as the distributions are: a map
 holding operators crosses a ``jit`` boundary as data.
 """
 from ._blackbox import BlackBox
+from ._linearization import Linearization, statistical_linearization
 from ._pushforward import StructuredMap, pushforward
 from ._structured import AdditiveNoise, Linear
 
@@ -58,6 +62,8 @@ __all__ = [
     "Linear",
     "AdditiveNoise",
     "BlackBox",
+    "statistical_linearization",
+    "Linearization",
 ]
 
 # The modules above are private, so the public names report the package they

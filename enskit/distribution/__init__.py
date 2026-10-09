@@ -13,6 +13,8 @@ object                          represents
                                 block
 :class:`EnsembleGaussian`       a Gaussian whose latent coordinates are an
                                 ensemble's particles
+:class:`Regression`             the regression of one block on others in a
+                                Gaussian, from :meth:`Gaussian.regression`
 :class:`ConditionalMap`         protocol: a pointwise map carrying samples of a
                                 joint to samples of a conditional
 :class:`MatheronMap`            the exact conditional of a :class:`Gaussian`,
@@ -85,12 +87,14 @@ is the likely cause, and a *result check* on what it returns.
 from ._ensemble import Ensemble
 from ._gaussian import EnsembleGaussian, Gaussian
 from ._maps import ConditionalMap, MatheronMap, SquareRootMap
+from ._regression import Regression
 from ._weights import effective_sample_size, exact_moment_ensemble, resample, reweight
 
 __all__ = [
     "Ensemble",
     "Gaussian",
     "EnsembleGaussian",
+    "Regression",
     "ConditionalMap",
     "MatheronMap",
     "SquareRootMap",

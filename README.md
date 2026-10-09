@@ -130,7 +130,7 @@ noise.whiten(jnp.ones(5))   # applied block by block
 
 Start with the tutorials, which build up from a first inversion; the user guide
 answers "when and why" for each choice, by level of abstraction; the examples
-work fifteen problems end to end; the contracts specify behavior normatively.
+work sixteen problems end to end; the contracts specify behavior normatively.
 
 ## License
 

@@ -10,13 +10,72 @@ additions, and 2026-10-04 after PR 3's distribution contract, PR 10's
 Kronecker operators, PR 4's `enskit.distribution`, the fix for #60, PR 5's
 `enskit.maps`, PR 6's `enskit.kalman`, PR 9's localization and PR 7's
 `enskit.algorithms.eki`, and 2026-10-05 after PR 8's `enskit.algorithms.enkf`,
-PR 11's documentation and PR 12's release.
+PR 11's documentation and PR 12's release, and 2026-10-09 after
+statistical linearization (#85).
 Read
 `CLAUDE.md` first for conventions, including the layer rules, which the
 redesign replaced; then the two sections below; then the rest of this file,
 which describes the code as it stands before the redesign lands. That
 description is historical: where it names `pyeki.<module>`, the module is now
 `enskit.<module>`.
+
+## 2026-10-09: statistical linearization (#85)
+
+**What landed.** `Gaussian.regression(target, *, given, min_norm=False)`
+in `enskit.distribution` (new private module `_regression.py`, new public
+`Regression`), and `maps.statistical_linearization(dist, *, inputs, output,
+min_norm=False)` with its `NamedTuple` result `Linearization`, in
+`enskit.maps` (`_linearization.py`). Contracts: a new `regression` section
+in the distribution contract (and rule 1 of *The objects* now admits a
+`Regression`), a new `statistical_linearization` section in the maps
+contract. User guide: a section in each of `distributions.md` and `maps.md`.
+Example 16. Tests: `tests/test_linearization.py`.
+
+**Decided with the maintainer** (issue #85, Q1 to Q4): the function takes
+input–output pairs already in the distribution, never a callable (push
+first); minimum norm is opt-in, and the non-unique case raises naming both
+remedies; both layers ship; $\Omega$ uses the divisor $J - 1$.
+
+**Things the implementation found.**
+
+- **$\Omega$ as an independent term breaks `cov`.** `AdditiveNoise(Omega)`
+  pushes fine, but `Omega` is a `PSDLowRank` with no `whiten`, so the
+  result's `cov(y)` cannot build its `LowRankUpdate` and raises. The docs say
+  to `absorb` it into the factor, or use `LowRankUpdate(R, Omega.factor())`.
+- **The ridge coefficients cannot use the stable form.** $A^{-1}SW$ is
+  stable read off the SVD, but forming it as an operator needs $W^\top$,
+  which operators do not provide. The code computes
+  $(I+SS^\top)^{-1}F_c^\top D_c^{-1}$ with `solve`, which loses relative
+  accuracy like $\varepsilon(1+\sigma_{\max}^2)$; documented in the
+  docstring and contract. So a noisy given term needs `whiten` *and*
+  `solve`.
+- **Weighted minimum norm is unsupported.** A weighted projection's null
+  vector is $\sqrt w$, not $\mathbf 1$; `statistical_linearization`
+  refuses a weighted ensemble with more input coordinates than $J - 1$.
+  `Gaussian.regression` on such a plain Gaussian relies on the debug rank
+  check.
+- **Rank is assumed, not measured (#86).** The case is chosen from the
+  type and the sizes; outside debug mode, given rows of lower rank
+  (duplicates after `resample`, a constant coordinate, an ensemble
+  conditioned exactly on other blocks, zero weights) give wrong or `nan`
+  coefficients without raising. Documented; the options are in #86.
+- **The adversarial review's trivial findings were fixed here**: the
+  $\mathbf 1^\perp$ basis was a host-side NumPy QR of a $J \times J$ matrix
+  (6 s at $J = 2000$), now a Householder reflector applied in $O(NJ)$; the
+  "update equals the linear-Gaussian update" claim is now limited to the
+  deterministic square-root rule; a given block without a factor row no
+  longer needs `whiten` and `solve`; a vacuous test assertion; coverage of
+  mixed and structured cases; vocabulary in the distribution docs.
+- **This PR also bumps the version** to `0.2.0.dev0` and opens the 0.2.0
+  changelog entry, as PR #84 does; whichever merges second resolves the
+  `CHANGELOG.md` conflict by keeping both entries' lines.
+
+**Natural follow-ups** (not filed; see the PR body for the reasoning): an
+SLR `StructuredMap` that pushes a Gaussian through a nonlinear map with a
+deterministic point set (sigma points), and with it a posterior
+linearization filter; per-step linearizations exposed from an EKI run's
+history; minimum norm for weighted ensembles; and a held-out estimate of
+$\Omega$ for the regime $d_x \ge J - 1$, where in-sample residuals vanish.
 
 ## 2026-10-05: PR 12, release 0.1.0
 
@@ -1218,6 +1277,8 @@ layer; this is the index.
 | A multi-line `:alt:` value breaks a MyST `{figure}` | the continuation lines are absorbed into the caption, and the build fails with "Figure caption must be a paragraph" pointing at the directive rather than at the option |
 | A chaotic toy's numbers are not portable | Lorenz-96's spin-up turns a $10^{-15}$ change into an $O(10)$ change in the state, so a digit pinned on macOS fails on CI's Linux; test claims in bands measured across seeds |
 | `jax.random.fold_in(k, i)` equals `jax.random.split(k, n)[i]` for every `n > i` (partitionable threefry, the default) | a key "derived" by folding in a small integer is one a caller's split of the same key also produces, so a toy's draw silently repeats a run's; fold in a large constant, then split |
+| The minimum-norm regression of centered outputs on centered inputs is not `pinv([1, X])` | the second penalizes the intercept too; both interpolate the particles, so nothing about the fit tells them apart (differs by $5\times10^{-2}$ at $J = 10$, $d_x = 30$) |
+| A singular independent term (a residual covariance $\Omega$) pushes through `AdditiveNoise` without complaint | the result's `cov` of that block raises later, from `LowRankUpdate`; absorb the term first |
 
 ## Working agreements
 

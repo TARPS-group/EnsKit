@@ -87,6 +87,7 @@ are 0-d arrays.
 | `Linear(op, shift=None)` | $x \mapsto Ax + c$, or $\sum_b A_bx_b + c$ | both; also a simulator |
 | `AdditiveNoise(cov)` | $x \mapsto x + e$, $e \sim \mathcal N(0, R)$ independent of everything | both; not a simulator |
 | `BlackBox(f, output_dim, *, dtype=None, needs_key=False)` | a host-side simulator, traceable, with a zero derivative | `Ensemble`; a simulator |
+| `statistical_linearization(dist, *, inputs, output, min_norm=False)` | the affine map $x \mapsto Ax + b$ that best predicts `output` from `inputs`, with its residuals, as a `Linearization` | `Ensemble`, `Gaussian` |
 | `enskit.testing.check_simulator` | checks a simulator against the contract | — |
 
 Three rules govern the set:
@@ -520,6 +521,71 @@ the parameter acts elsewhere (a noise scale, a prior's hyperparameter) and
 the simulator's outputs are data; it is not the derivative of the
 simulator.
 
+(maps-linearization)=
+## `statistical_linearization(dist, *, inputs, output, min_norm=False)`
+
+The statistical linear regression of block $y$ = `output` on the blocks
+$x$ = `inputs` under `dist`:
+
+$$
+A = C_{yx}C_{xx}^{-1}, \qquad b = m_y - Am_x, \qquad
+\Omega = \operatorname{cov}(y - Ax - b) = C_{yy} - AC_{xy},
+$$
+
+the affine map minimizing $\mathbb E\lVert y - Ax - b\rVert^2$. When
+$y = f(x)$ it is a linearization of $f$ with respect to the distribution of
+$x$ (Lefebvre et al., 2002); for $x \sim \mathcal N(m, C)$ and
+differentiable $f$, Stein's lemma gives $A = \mathbb E[Df(x)]$ (Stein,
+1981). It does not call a simulator: `dist` already holds $y$, so a
+simulator is linearized by pushing first,
+
+```python
+ens = maps.pushforward(ens, f, inputs="x", output="y")
+fit = maps.statistical_linearization(ens, inputs="x", output="y")
+```
+
+and an ensemble whose outputs a run already computed is linearized without
+calling the simulator again.
+
+**The computation** is `g.regression(output, given=inputs,
+min_norm=min_norm)` ({ref}`dist-regression`), with `g = dist.project()` for
+an `Ensemble` and `g = dist` for a `Gaussian`. Its three cases, its
+validation and its accuracy apply unchanged. A ridge regression is a
+`Gaussian` argument, `ens.project().add_noise(x=Lam)`; there is no
+regularization argument.
+
+**The result** is a `Linearization`, a `NamedTuple` and so a pytree:
+
+| field | is |
+| --- | --- |
+| `map` | `Linear` of the coefficients and the intercept: one operator for one input; for several, a mapping in the order `inputs` was written, which is the order `map` takes its arguments and `pushforward` must name them |
+| `residual_cov` | $\Omega$, the regression's `residual_cov` |
+| `residuals` | for an `Ensemble`, the `(J, d_y)` array `dist[output] - map(*(dist[n] for n in inputs))`; `None` for a `Gaussian` |
+
+**Rules.**
+
+- `inputs` is required (a `str` or a sequence of `str`, at least one,
+  distinct); `output` is a `str` naming a block that is not an input;
+  `min_norm` is a `bool`. A vmapped family raises, as in `pushforward`.
+- **A weighted ensemble whose inputs' total dimension exceeds $J - 1$
+  raises `ValueError`** before projecting, naming `resample` and ridge. Its
+  projection's null vector is $\sqrt w$, not $\mathbf 1$, so the
+  minimum-norm computation of the distribution layer does not apply to it.
+- **The residuals depend on the regime**, which the docstring states: when
+  the inputs' dimension is at least $J - 1$, the fit interpolates and the
+  residuals and $\Omega$ vanish to round-off; below it, $\Omega$ has divisor
+  $J - 1$ and underestimates the error covariance of a linear model by the
+  factor $(J - 1 - d_x)/(J - 1)$.
+- **Consistency.** Without regularization, pushing the inputs' projection
+  through `map` and then `AdditiveNoise(residual_cov)` reproduces the
+  projected joint. $\Omega$ is singular in general and has no `whiten`: as
+  an independent term it must be absorbed into the factor before `cov` or
+  conditioning reads it, or added to a noise covariance as
+  `LowRankUpdate(R, residual_cov.factor())`.
+- **Ridge and residuals.** For a `Gaussian` argument there are no particles,
+  hence no `residuals`; $\Omega$ is then the regression's, the covariance of
+  the output given the noisy inputs.
+
 (maps-prng)=
 ## Randomness
 
@@ -699,7 +765,8 @@ been produced.
 ## Public surface
 
 `enskit.maps` exports exactly `pushforward`, `StructuredMap`, `Linear`,
-`AdditiveNoise` and `BlackBox`. `enskit.testing` exports `check_simulator`;
+`AdditiveNoise`, `BlackBox`, `statistical_linearization` and
+`Linearization`. `enskit.testing` exports `check_simulator`;
 later pull requests add `check_update_rule` and `check_conditional_map`
 there. The layers never import `enskit.testing`. The modules of both
 packages are private, and imported only from inside their own package.
@@ -803,6 +870,16 @@ algebra, never routed through the layer. The suite must verify at least:
     honors `stochastic` and `needs_key` while still running every other
     check; and checks a `BlackBox` as it checks a function, raising
     `AssertionError` for a failure inside the callback.
+18. **`statistical_linearization`** (`tests/test_linearization.py`): the
+    recipe calls the simulator once and recovers a linear one; residuals
+    and $\Omega$ against least squares by hand; several inputs keep the
+    order written, and the map pushes with them; the consistency identity
+    in both exact cases; a `SymmetricSquareRoot` update of the ensemble
+    equals the linear-Gaussian update with model $A$ and noise
+    $R + \Omega$; on an
+    antithetic ensemble a quadratic's fit is exactly its average Jacobian;
+    a `Gaussian` gives ridge and no residuals; a wide weighted ensemble and
+    each validation rule raise; `jit` agrees and `vmap` gives a family.
 
 ### Ported regression tests
 
@@ -873,7 +950,10 @@ protocol or registry for a simulator beyond the contract above.
 other Gaussian approximations of a nonlinear pushforward are future
 `StructuredMap` implementations, each stating what it approximates. Until
 one exists, the approximation is written at the call site: sample, push,
-project.
+project, and, for an affine approximation, `statistical_linearization` of
+the result. That function fits a `Linear` map; it is not itself a
+`StructuredMap`, since `push_gaussian` takes no key with which to draw the
+points a nonlinear map would be evaluated at.
 
 **Simulators that see weights.** A simulator receives particles, not
 weights, so it cannot couple its rows through them either.
@@ -892,7 +972,16 @@ given.
 
 ## References
 
-The layer implements no method from the literature. The order-of-operations
+`statistical_linearization` implements statistical linear regression:
+
+- Lefebvre, T., Bruyninckx, H. & De Schutter, J. (2002). Comment on "A new
+  method for the nonlinear transformation of means and covariances in
+  filters and estimators". *IEEE Transactions on Automatic Control*, 47(8),
+  1406–1409.
+- Stein, C. M. (1981). Estimation of the mean of a multivariate normal
+  distribution. *The Annals of Statistics*, 9(6), 1135–1151.
+
+Otherwise the layer implements no method from the literature. The order-of-operations
 point of {ref}`maps-additive-noise` is the one the ensemble Kalman
 literature makes about perturbed observations, and the distribution layer
 cites it ({doc}`distribution-contract`, *References*): Burgers, van Leeuwen
